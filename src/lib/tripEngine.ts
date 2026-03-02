@@ -92,17 +92,24 @@ function getTripWindow(anchorDate: string): string[] {
   ).filter(isDateAllowed) // Exclude Sundays
 }
 
+// Urgency boost map: playerName → multiplier (from heartbeat data)
+// Players with high visit urgency get a scoring boost so they appear in better trips
+export type UrgencyMap = Map<string, number> // playerName → boost multiplier (1.0 = no boost)
+
 // Score a trip candidate
 export function scoreTripCandidate(
   playerNames: string[],
   playerMap: Map<string, RosterPlayer>,
+  urgencyMap?: UrgencyMap,
 ): number {
   let score = 0
   for (const name of playerNames) {
     const player = playerMap.get(name)
     if (!player) continue
     const weight = TIER_WEIGHTS[player.tier] ?? 0
-    score += weight * player.visitsRemaining
+    const base = weight * player.visitsRemaining
+    const urgencyBoost = urgencyMap?.get(name) ?? 1.0
+    score += Math.round(base * urgencyBoost)
   }
   return score
 }
@@ -112,6 +119,7 @@ function computeScoreBreakdown(
   playerNames: string[],
   playerMap: Map<string, RosterPlayer>,
   thursdayBonus: boolean,
+  urgencyMap?: UrgencyMap,
 ): ScoreBreakdown {
   let tier1Count = 0, tier1Points = 0
   let tier2Count = 0, tier2Points = 0
@@ -121,7 +129,9 @@ function computeScoreBreakdown(
     const player = playerMap.get(name)
     if (!player) continue
     const weight = TIER_WEIGHTS[player.tier] ?? 0
-    const pts = weight * player.visitsRemaining
+    const base = weight * player.visitsRemaining
+    const urgencyBoost = urgencyMap?.get(name) ?? 1.0
+    const pts = Math.round(base * urgencyBoost)
     if (player.tier === 1) { tier1Count++; tier1Points += pts }
     else if (player.tier === 2) { tier2Count++; tier2Points += pts }
     else if (player.tier === 3) { tier3Count++; tier3Points += pts }
@@ -372,6 +382,7 @@ export async function generateTrips(
   onProgress?: (step: string, detail?: string) => void,
   maxDriveMinutes: number = MAX_DRIVE_MINUTES,
   priorityPlayers: string[] = [],
+  urgencyMap?: UrgencyMap,
 ): Promise<TripPlan> {
   onProgress?.('Preparing', 'Filtering eligible players...')
 
@@ -501,7 +512,7 @@ export async function generateTrips(
         // Solo anchor trip
         const visitedPlayersList = anchor.playerNames.filter((n) => eligiblePlayers.has(n))
         const soloThursday = new Date(anchorDay + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY
-        const soloBreakdown = computeScoreBreakdown(visitedPlayersList, playerMap, soloThursday)
+        const soloBreakdown = computeScoreBreakdown(visitedPlayersList, playerMap, soloThursday, urgencyMap)
         candidates.push({
           anchorGame: anchor,
           nearbyGames: [],
@@ -552,7 +563,7 @@ export async function generateTrips(
       // Thursday bonus: prefer Thursday anchors with 20% value boost
       const dayOfWeek = new Date(anchorDay + 'T12:00:00Z').getUTCDay()
       const isThursday = dayOfWeek === ANCHOR_DAY
-      const breakdown = computeScoreBreakdown([...allPlayerNames], playerMap, isThursday)
+      const breakdown = computeScoreBreakdown([...allPlayerNames], playerMap, isThursday, urgencyMap)
 
       candidates.push({
         anchorGame: anchor,
@@ -683,7 +694,7 @@ export async function generateTrips(
         ...trip.nearbyGames.flatMap((g) => g.playerNames),
       ].filter((n) => eligiblePlayers.has(n) && !visitedPlayers.has(n))
 
-      trip.visitValue = scoreTripCandidate([...new Set(remainingPlayerNames)], playerMap)
+      trip.visitValue = scoreTripCandidate([...new Set(remainingPlayerNames)], playerMap, urgencyMap)
       trip.totalPlayersVisited = new Set(remainingPlayerNames).size
     }
 

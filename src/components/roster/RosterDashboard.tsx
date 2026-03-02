@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRosterStore } from '../../store/rosterStore'
+import { useHeartbeatStore } from '../../store/heartbeatStore'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
 
-type SortField = 'playerName' | 'tier' | 'visitsRemaining' | 'org'
+type SortField = 'playerName' | 'tier' | 'visitsRemaining' | 'org' | 'loveScore'
 type SortDir = 'asc' | 'desc'
 
 export default function RosterDashboard() {
@@ -13,24 +14,37 @@ export default function RosterDashboard() {
   const lastFetchedAt = useRosterStore((s) => s.lastFetchedAt)
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
 
+  const heartbeatPlayers = useHeartbeatStore((s) => s.players)
+  const heartbeatPriorities = useHeartbeatStore((s) => s.priorities)
+  const heartbeatLoading = useHeartbeatStore((s) => s.loading)
+  const heartbeatError = useHeartbeatStore((s) => s.error)
+  const heartbeatLastFetched = useHeartbeatStore((s) => s.lastFetchedAt)
+  const fetchHeartbeat = useHeartbeatStore((s) => s.fetchHeartbeat)
+  const getPlayerData = useHeartbeatStore((s) => s.getPlayerData)
+  const getPlayerUrgency = useHeartbeatStore((s) => s.getPlayerUrgency)
+
   const [levelFilter, setLevelFilter] = useState<PlayerLevel | 'All'>('All')
   const [sortField, setSortField] = useState<SortField>('tier')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [search, setSearch] = useState('')
+
+  const hasHeartbeat = heartbeatPlayers.length > 0
 
   const initialized = useRef(false)
   useEffect(() => {
     if (initialized.current) return
     initialized.current = true
     fetchRoster()
-  }, [fetchRoster])
+    // Auto-fetch heartbeat if not loaded or stale (>1 hour)
+    const stale = !heartbeatLastFetched || (Date.now() - new Date(heartbeatLastFetched).getTime() > 3600000)
+    if (stale) fetchHeartbeat()
+  }, [fetchRoster, fetchHeartbeat, heartbeatLastFetched])
 
   const stats = useMemo(() => {
     const total = players.length
     const totalTarget = players.reduce((sum, p) => sum + p.visitTarget2026, 0)
     const totalCompleted = players.reduce((sum, p) => sum + p.visitsCompleted, 0)
     const coveragePercent = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0
-    const needingVisits = players.filter((p) => p.visitsRemaining > 0).length
 
     // Per-tier breakdown
     const tiers = [1, 2, 3, 4].map((tier) => {
@@ -40,8 +54,24 @@ export default function RosterDashboard() {
       return { tier, count: tierPlayers.length, target, completed, percent: target > 0 ? Math.round((completed / target) * 100) : 0 }
     }).filter((t) => t.count > 0)
 
-    return { total, totalTarget, totalCompleted, coveragePercent, needingVisits, tiers }
+    return { total, totalTarget, totalCompleted, coveragePercent, tiers }
   }, [players])
+
+  // Heartbeat aggregate stats
+  const heartbeatStats = useMemo(() => {
+    if (!hasHeartbeat) return null
+
+    const matched = players.filter((p) => getPlayerData(p.playerName))
+    const avgLove = matched.length > 0
+      ? Math.round(matched.reduce((sum, p) => sum + (getPlayerData(p.playerName)?.loveScore ?? 0), 0) / matched.length)
+      : 0
+
+    const overdue = heartbeatPriorities.filter((p) => p.inPersonOverdue).length
+    const redCount = heartbeatPlayers.filter((p) => p.status === 'red').length
+    const yellowCount = heartbeatPriorities.filter((p) => p.status === 'yellow').length
+
+    return { avgLove, overdue, redCount, yellowCount, matchedCount: matched.length }
+  }, [players, hasHeartbeat, heartbeatPlayers, heartbeatPriorities, getPlayerData, getPlayerUrgency])
 
   const filtered = players
     .filter((p) => levelFilter === 'All' || p.level === levelFilter)
@@ -54,6 +84,11 @@ export default function RosterDashboard() {
       const mul = sortDir === 'asc' ? 1 : -1
       if (sortField === 'playerName') return mul * a.playerName.localeCompare(b.playerName)
       if (sortField === 'org') return mul * a.org.localeCompare(b.org)
+      if (sortField === 'loveScore') {
+        const aScore = getPlayerData(a.playerName)?.loveScore ?? -1
+        const bScore = getPlayerData(b.playerName)?.loveScore ?? -1
+        return mul * (aScore - bScore)
+      }
       return mul * ((a[sortField] as number) - (b[sortField] as number))
     })
 
@@ -67,12 +102,12 @@ export default function RosterDashboard() {
       setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
     } else {
       setSortField(field)
-      setSortDir('asc')
+      setSortDir(field === 'loveScore' ? 'desc' : 'asc')
     }
   }
 
   const sortIndicator = (field: SortField) =>
-    sortField === field ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''
+    sortField === field ? (sortDir === 'asc' ? ' \u2191' : ' \u2193') : ''
 
   if (loading && players.length === 0) {
     return (
@@ -111,6 +146,15 @@ export default function RosterDashboard() {
           accent={stats.coveragePercent >= 50 ? 'green' : stats.coveragePercent >= 25 ? 'orange' : 'red'}
         />
       </div>
+
+      {/* Client Health panel from Heartbeat */}
+      <ClientHealthPanel
+        stats={heartbeatStats}
+        loading={heartbeatLoading}
+        error={heartbeatError}
+        lastFetched={heartbeatLastFetched}
+        onRefresh={fetchHeartbeat}
+      />
 
       {/* Falling-behind alerts for T1/T2 */}
       <BehindPaceAlerts players={players} />
@@ -236,12 +280,17 @@ export default function RosterDashboard() {
                       Visits Left{sortIndicator('visitsRemaining')}
                     </th>
                     <th className="px-4 py-2.5">Target</th>
+                    {hasHeartbeat && (
+                      <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('loveScore')}>
+                        Love{sortIndicator('loveScore')}
+                      </th>
+                    )}
                     <th className="px-4 py-2.5">Agent</th>
                   </tr>
                 </thead>
                 <tbody>
                   {group.map((player) => (
-                    <PlayerCard key={player.normalizedName} player={player} />
+                    <PlayerCard key={player.normalizedName} player={player} showHeartbeat={hasHeartbeat} />
                   ))}
                 </tbody>
               </table>
@@ -257,6 +306,119 @@ export default function RosterDashboard() {
         <div className="py-10 text-center">
           <p className="text-sm text-text-dim">No players loaded yet.</p>
           <p className="mt-1 text-xs text-text-dim/60">The roster pulls automatically from the Google Sheet. Click Refresh above if it hasn't loaded.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ClientHealthPanel({
+  stats,
+  loading,
+  error,
+  lastFetched,
+  onRefresh,
+}: {
+  stats: { avgLove: number; overdue: number; redCount: number; yellowCount: number; matchedCount: number } | null
+  loading: boolean
+  error: string | null
+  lastFetched: string | null
+  onRefresh: () => void
+}) {
+  if (!stats && !loading && !error && !lastFetched) {
+    // Never fetched — show connect prompt
+    return (
+      <div className="rounded-xl border border-border bg-surface p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-text">Client Health</h3>
+            <p className="mt-0.5 text-xs text-text-dim">
+              Connect to SV Heartbeat for love scores, contact freshness, and visit urgency data.
+            </p>
+          </div>
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
+          >
+            {loading ? 'Syncing...' : 'Sync Heartbeat'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-surface p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-text">Client Health</h3>
+        <div className="flex items-center gap-2">
+          {lastFetched && (
+            <span className="text-[10px] text-text-dim/60">
+              via SV Heartbeat · {new Date(lastFetched).toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[10px] font-medium text-text-dim hover:text-text disabled:opacity-50"
+          >
+            {loading ? (
+              <span className="h-2.5 w-2.5 animate-spin rounded-full border border-text-dim border-t-transparent" />
+            ) : (
+              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            )}
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <p className="mb-2 text-xs text-accent-red">{error}</p>
+      )}
+
+      {stats && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div>
+            <p className="text-[10px] font-medium text-text-dim">Avg Love Score</p>
+            <p className={`text-lg font-bold ${
+              stats.avgLove >= 60 ? 'text-accent-green' :
+              stats.avgLove >= 30 ? 'text-accent-orange' :
+              'text-accent-red'
+            }`}>
+              {stats.avgLove}
+              <span className="text-xs font-normal text-text-dim">/100</span>
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-medium text-text-dim">In-Person Overdue</p>
+            <p className={`text-lg font-bold ${stats.overdue > 0 ? 'text-accent-red' : 'text-accent-green'}`}>
+              {stats.overdue}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-medium text-text-dim">Needs Attention</p>
+            <p className={`text-lg font-bold ${
+              stats.redCount > 0 ? 'text-accent-red' :
+              stats.yellowCount > 0 ? 'text-accent-orange' :
+              'text-accent-green'
+            }`}>
+              {stats.redCount + stats.yellowCount}
+              {(stats.redCount > 0 || stats.yellowCount > 0) && (
+                <span className="ml-1 text-xs font-normal text-text-dim">
+                  ({stats.redCount > 0 ? `${stats.redCount} red` : ''}{stats.redCount > 0 && stats.yellowCount > 0 ? ', ' : ''}{stats.yellowCount > 0 ? `${stats.yellowCount} yellow` : ''})
+                </span>
+              )}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-medium text-text-dim">Matched Players</p>
+            <p className="text-lg font-bold text-text">
+              {stats.matchedCount}
+            </p>
+          </div>
         </div>
       )}
     </div>

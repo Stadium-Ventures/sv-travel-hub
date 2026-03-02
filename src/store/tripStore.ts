@@ -3,9 +3,11 @@ import { persist } from 'zustand/middleware'
 import type { Coordinates } from '../types/roster'
 import type { TripPlan } from '../types/schedule'
 import { generateTrips, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES } from '../lib/tripEngine'
+import type { UrgencyMap } from '../lib/tripEngine'
 import { useRosterStore } from './rosterStore'
 import { useScheduleStore } from './scheduleStore'
 import { useVenueStore } from './venueStore'
+import { useHeartbeatStore } from './heartbeatStore'
 
 // Default: 3-day trip starting 1 week from now
 function toISO(d: Date): string {
@@ -120,6 +122,20 @@ export const useTripStore = create<TripState>()(
 
     const allGames = [...scheduledGames, ...stEvents, ...realNcaaGames, ...ncaaSyntheticEvents, ...hsEvents]
 
+    // Build urgency map from heartbeat data
+    const urgencyMap: UrgencyMap = new Map()
+    const heartbeatState = useHeartbeatStore.getState()
+    for (const p of players) {
+      const urgency = heartbeatState.getPlayerUrgency(p.playerName)
+      if (urgency && urgency.visitUrgencyScore > 0) {
+        // Scale: urgencyScore of 50+ gets 1.5x boost, 25-49 gets 1.25x, below 25 gets 1.0x
+        const boost = urgency.visitUrgencyScore >= 50 ? 1.5
+          : urgency.visitUrgencyScore >= 25 ? 1.25
+          : 1.0
+        if (boost > 1.0) urgencyMap.set(p.playerName, boost)
+      }
+    }
+
     set({ computing: true, tripPlan: null, progressStep: 'Starting...', progressDetail: '' })
 
     try {
@@ -131,6 +147,7 @@ export const useTripStore = create<TripState>()(
         (step, detail) => set({ progressStep: step, progressDetail: detail ?? '' }),
         maxDriveMinutes,
         priorityPlayers,
+        urgencyMap.size > 0 ? urgencyMap : undefined,
       )
       set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '' })
     } catch (e) {

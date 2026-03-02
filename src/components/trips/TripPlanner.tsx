@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
+import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { isSpringTraining } from '../../data/springTraining'
 import { isNcaaSeason, isHsSeason, analyzeBestWeeks, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../../lib/tripEngine'
 import { useVenueStore } from '../../store/venueStore'
@@ -267,6 +268,8 @@ export default function TripPlanner() {
   const players = useRosterStore((s) => s.players)
   const rosterLoading = useRosterStore((s) => s.loading)
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
+  const heartbeatPriorities = useHeartbeatStore((s) => s.priorities)
+  const heartbeatUrgencyActive = heartbeatPriorities.some((p) => p.visitUrgencyScore >= 25)
 
   // Auto-load roster if empty on mount (Trip Planner is the default tab)
   const rosterInitialized = useRef(false)
@@ -568,6 +571,11 @@ export default function TripPlanner() {
             </button>
           )}
         </div>
+        {heartbeatUrgencyActive && (
+          <p className="text-[10px] text-accent-blue" title="Players with high visit urgency from SV Heartbeat get a scoring boost so they appear in higher-ranked trips.">
+            Heartbeat urgency data active — overdue clients get boosted in trip scoring
+          </p>
+        )}
 
         {/* Day-of-week strip */}
         <DayStrip startDate={startDate} endDate={endDate} />
