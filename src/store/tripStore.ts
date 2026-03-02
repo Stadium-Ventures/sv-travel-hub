@@ -170,7 +170,8 @@ export const useTripStore = create<TripState>()(
     {
       name: 'sv-travel-trips',
       partialize: (state) => ({
-        tripPlan: state.tripPlan,
+        // tripPlan is NOT persisted — it's computed data that should be
+        // regenerated each session to avoid stale results and schema mismatches
         startDate: state.startDate,
         endDate: state.endDate,
         maxDriveMinutes: state.maxDriveMinutes,
@@ -179,20 +180,12 @@ export const useTripStore = create<TripState>()(
       }),
       merge: (persisted, current) => {
         const p = persisted as any
-        const tripPlan = p?.tripPlan ?? null
         return {
           ...current,
           ...(p ?? {}),
           priorityPlayers: p?.priorityPlayers ?? [],
           tripStatuses: p?.tripStatuses ?? {},
-          // Ensure persisted tripPlan has all required array fields
-          tripPlan: tripPlan ? {
-            ...tripPlan,
-            trips: tripPlan.trips ?? [],
-            flyInVisits: tripPlan.flyInVisits ?? [],
-            unvisitablePlayers: tripPlan.unvisitablePlayers ?? [],
-            skippedPlayers: tripPlan.skippedPlayers ?? [],
-          } : null,
+          tripPlan: null, // Always start fresh
         }
       },
     },
