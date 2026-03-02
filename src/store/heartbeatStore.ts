@@ -126,12 +126,15 @@ export const useHeartbeatStore = create<HeartbeatState>()(
         players: state.players,
         lastFetchedAt: state.lastFetchedAt,
       }),
-      merge: (persisted, current) => ({
-        ...current,
-        ...(persisted as object),
-        players: (persisted as any)?.players ?? [],
-        priorities: (persisted as any)?.priorities ?? [],
-      }),
+      merge: (persisted, current) => {
+        const p = persisted as any
+        return {
+          ...current,
+          ...(p ?? {}),
+          players: p?.players ?? [],
+          priorities: p?.priorities ?? [],
+        }
+      },
       onRehydrateStorage: () => (state) => {
         if (state) {
           const { playerLookup, urgencyLookup } = buildLookups(state.players ?? [], state.priorities ?? [])

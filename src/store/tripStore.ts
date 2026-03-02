@@ -177,12 +177,24 @@ export const useTripStore = create<TripState>()(
         priorityPlayers: state.priorityPlayers,
         tripStatuses: state.tripStatuses,
       }),
-      merge: (persisted, current) => ({
-        ...current,
-        ...(persisted as object),
-        priorityPlayers: (persisted as any)?.priorityPlayers ?? [],
-        tripStatuses: (persisted as any)?.tripStatuses ?? {},
-      }),
+      merge: (persisted, current) => {
+        const p = persisted as any
+        const tripPlan = p?.tripPlan ?? null
+        return {
+          ...current,
+          ...(p ?? {}),
+          priorityPlayers: p?.priorityPlayers ?? [],
+          tripStatuses: p?.tripStatuses ?? {},
+          // Ensure persisted tripPlan has all required array fields
+          tripPlan: tripPlan ? {
+            ...tripPlan,
+            trips: tripPlan.trips ?? [],
+            flyInVisits: tripPlan.flyInVisits ?? [],
+            unvisitablePlayers: tripPlan.unvisitablePlayers ?? [],
+            skippedPlayers: tripPlan.skippedPlayers ?? [],
+          } : null,
+        }
+      },
     },
   ),
 )

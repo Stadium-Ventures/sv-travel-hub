@@ -564,18 +564,20 @@ export const useScheduleStore = create<ScheduleState>()(
         proGames: state.proGames,
         ncaaGames: state.ncaaGames,
       }),
-      merge: (persisted, current) => ({
-        ...current,
-        ...(persisted as object),
-        // Ensure arrays/objects have safe defaults when rehydrating old localStorage
-        affiliates: (persisted as any)?.affiliates ?? [],
-        playerTeamAssignments: (persisted as any)?.playerTeamAssignments ?? {},
-        customMlbAliases: (persisted as any)?.customMlbAliases ?? {},
-        customNcaaAliases: (persisted as any)?.customNcaaAliases ?? {},
-        proGames: (persisted as any)?.proGames ?? [],
-        ncaaGames: (persisted as any)?.ncaaGames ?? [],
-        rosterMoves: (persisted as any)?.rosterMoves ?? [],
-      }),
+      merge: (persisted, current) => {
+        const p = persisted as any
+        return {
+          ...current,
+          ...(p ?? {}),
+          affiliates: p?.affiliates ?? [],
+          playerTeamAssignments: p?.playerTeamAssignments ?? {},
+          customMlbAliases: p?.customMlbAliases ?? {},
+          customNcaaAliases: p?.customNcaaAliases ?? {},
+          proGames: p?.proGames ?? [],
+          ncaaGames: p?.ncaaGames ?? [],
+          rosterMoves: p?.rosterMoves ?? [],
+        }
+      },
     },
   ),
 )

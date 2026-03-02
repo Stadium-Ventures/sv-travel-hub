@@ -81,12 +81,15 @@ export const useRosterStore = create<RosterState>()(
         lastFetchedAt: state.lastFetchedAt,
         visitOverrides: state.visitOverrides,
       }),
-      merge: (persisted, current) => ({
-        ...current,
-        ...(persisted as object),
-        players: (persisted as any)?.players ?? [],
-        visitOverrides: (persisted as any)?.visitOverrides ?? {},
-      }),
+      merge: (persisted, current) => {
+        const p = persisted as any
+        return {
+          ...current,
+          ...(p ?? {}),
+          players: p?.players ?? [],
+          visitOverrides: p?.visitOverrides ?? {},
+        }
+      },
     },
   ),
 )
