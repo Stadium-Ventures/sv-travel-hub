@@ -131,18 +131,25 @@ export async function fetchD1Schedule(
   }
 }
 
+export interface D1FetchResult {
+  schedules: Map<string, D1Schedule>
+  failedSchools: string[]
+}
+
 // Fetch schedules for all NCAA players' schools
 export async function fetchAllD1Schedules(
   schoolNames: string[],
   onProgress?: (completed: number, total: number) => void,
-): Promise<Map<string, D1Schedule>> {
+): Promise<D1FetchResult> {
   const unique = [...new Set(schoolNames)]
-  const results = new Map<string, D1Schedule>()
+  const schedules = new Map<string, D1Schedule>()
+  const failedSchools: string[] = []
 
   for (let i = 0; i < unique.length; i++) {
     onProgress?.(i, unique.length)
     const schedule = await fetchD1Schedule(unique[i]!)
-    if (schedule) results.set(unique[i]!, schedule)
+    if (schedule) schedules.set(unique[i]!, schedule)
+    else failedSchools.push(unique[i]!)
 
     // Rate limit: 500ms between requests to be polite
     if (i < unique.length - 1) {
@@ -151,7 +158,7 @@ export async function fetchAllD1Schedules(
   }
 
   onProgress?.(unique.length, unique.length)
-  return results
+  return { schedules, failedSchools }
 }
 
 // Resolve venue coordinates for an away game opponent

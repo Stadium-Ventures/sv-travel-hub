@@ -42,11 +42,14 @@ interface ScheduleState {
   ncaaLoading: boolean
   ncaaError: string | null
   ncaaProgress: { completed: number; total: number } | null
+  ncaaFailedSchools: string[]         // schools whose schedule fetch failed
+  ncaaDroppedAwayGames: number        // away games skipped due to unknown opponent venue
 
   // Roster moves detection
   rosterMoves: MLBTransaction[]
   rosterMovesLoading: boolean
   rosterMovesCheckedAt: string | null
+  rosterMovesError: string | null
 
   // Fetch timestamps
   proFetchedAt: number | null
@@ -54,7 +57,7 @@ interface ScheduleState {
 
   // Auto-assign
   autoAssignLoading: boolean
-  autoAssignResult: { assigned: number; notFound: string[] } | null
+  autoAssignResult: { assigned: number; notFound: string[]; error?: string } | null
 
   // Actions
   fetchAffiliates: () => Promise<void>
@@ -117,6 +120,8 @@ export const useScheduleStore = create<ScheduleState>()(
       ncaaLoading: false,
       ncaaError: null,
       ncaaProgress: null,
+      ncaaFailedSchools: [],
+      ncaaDroppedAwayGames: 0,
 
       autoAssignLoading: false,
       autoAssignResult: null,
@@ -124,6 +129,7 @@ export const useScheduleStore = create<ScheduleState>()(
       rosterMoves: [],
       rosterMovesLoading: false,
       rosterMovesCheckedAt: null,
+      rosterMovesError: null,
 
       proFetchedAt: null,
       ncaaFetchedAt: null,
@@ -241,9 +247,10 @@ export const useScheduleStore = create<ScheduleState>()(
             autoAssignResult: { assigned: assignedCount, notFound: notFoundNames },
           })
         } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Unknown error'
           set({
             autoAssignLoading: false,
-            autoAssignResult: { assigned: 0, notFound: proPlayers.map((p) => p.playerName) },
+            autoAssignResult: { assigned: 0, notFound: proPlayers.map((p) => p.playerName), error: msg },
           })
           console.error('Auto-assign failed:', e)
         }
@@ -434,8 +441,10 @@ export const useScheduleStore = create<ScheduleState>()(
             rosterMovesCheckedAt: new Date().toISOString(),
           })
         } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Unknown error'
           set({
             rosterMovesLoading: false,
+            rosterMovesError: `Failed to check roster moves: ${msg}`,
           })
           console.error('Failed to check roster moves:', e)
         }
@@ -457,10 +466,10 @@ export const useScheduleStore = create<ScheduleState>()(
           return
         }
 
-        set({ ncaaLoading: true, ncaaError: null, ncaaProgress: { completed: 0, total: schoolToPlayers.size } })
+        set({ ncaaLoading: true, ncaaError: null, ncaaProgress: { completed: 0, total: schoolToPlayers.size }, ncaaFailedSchools: [], ncaaDroppedAwayGames: 0 })
 
         try {
-          const schedules = await fetchAllD1Schedules(
+          const { schedules, failedSchools } = await fetchAllD1Schedules(
             [...schoolToPlayers.keys()],
             (completed, total) => set({ ncaaProgress: { completed, total } }),
           )
@@ -468,6 +477,7 @@ export const useScheduleStore = create<ScheduleState>()(
           // Convert D1 games to GameEvents
           const allGames: GameEvent[] = []
           const schedulesObj: Record<string, D1Schedule> = {}
+          let droppedAwayGames = 0
 
           for (const [school, schedule] of schedules) {
             schedulesObj[school] = schedule
@@ -486,7 +496,7 @@ export const useScheduleStore = create<ScheduleState>()(
                 if (oppVenue) {
                   venue = oppVenue
                 } else {
-                  // Unknown opponent venue — skip (could geocode later)
+                  droppedAwayGames++
                   continue
                 }
               } else {
@@ -521,6 +531,8 @@ export const useScheduleStore = create<ScheduleState>()(
             ncaaLoading: false,
             ncaaProgress: null,
             ncaaFetchedAt: Date.now(),
+            ncaaFailedSchools: failedSchools,
+            ncaaDroppedAwayGames: droppedAwayGames,
           })
         } catch (e) {
           set({

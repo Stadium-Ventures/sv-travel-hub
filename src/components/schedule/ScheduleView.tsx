@@ -57,6 +57,9 @@ export default function ScheduleView() {
   const autoAssignPlayers = useScheduleStore((s) => s.autoAssignPlayers)
   const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
   const autoAssignResult = useScheduleStore((s) => s.autoAssignResult)
+  const ncaaFailedSchools = useScheduleStore((s) => s.ncaaFailedSchools)
+  const ncaaDroppedAwayGames = useScheduleStore((s) => s.ncaaDroppedAwayGames)
+  const rosterMovesError = useScheduleStore((s) => s.rosterMovesError)
 
   const [startDate, setStartDate] = useState('2026-03-01')
   const [endDate, setEndDate] = useState('2026-09-30')
@@ -106,8 +109,108 @@ export default function ScheduleView() {
   // Get unique canonical NCAA school names for the dropdown
   const ncaaSchoolNames = useMemo(() => [...Object.keys(NCAA_ALIASES)].sort(), [])
 
+  // Data Health: find players with zero games
+  const playersWithNoGames = useMemo(() => {
+    const missing: Array<{ name: string; level: string; reason: string }> = []
+
+    for (const p of proPlayers) {
+      if (!playerTeamAssignments[p.playerName]) {
+        missing.push({ name: p.playerName, level: 'Pro', reason: 'Not connected to a team yet' })
+      } else if (proGames.length > 0 && !proGames.some((g) => g.playerNames.includes(p.playerName))) {
+        missing.push({ name: p.playerName, level: 'Pro', reason: 'Connected but no games found in loaded schedules' })
+      }
+    }
+
+    for (const p of ncaaPlayers) {
+      const canonical = resolveNcaaName(p.org, customNcaaAliases)
+      if (!canonical) {
+        missing.push({ name: p.playerName, level: 'College', reason: `Organization "${p.org}" not recognized` })
+      } else if (ncaaGames.length > 0 && !ncaaGames.some((g) => g.playerNames.includes(p.playerName))) {
+        missing.push({ name: p.playerName, level: 'College', reason: 'School recognized but no games loaded' })
+      }
+    }
+
+    return missing
+  }, [proPlayers, ncaaPlayers, proGames, ncaaGames, playerTeamAssignments, customNcaaAliases])
+
+  // Collect all issues for the health panel
+  const hasIssues = playersWithNoGames.length > 0 || hasUnresolved || ncaaFailedSchools.length > 0 || ncaaDroppedAwayGames > 0 || schedulesError || ncaaError || rosterMovesError || (autoAssignResult?.error)
+
   return (
     <div className="space-y-6">
+      {/* Data Health Summary */}
+      {players.length > 0 && (
+        <div className={`rounded-xl border p-4 ${hasIssues ? 'border-accent-orange/30 bg-accent-orange/5' : 'border-accent-green/30 bg-accent-green/5'}`}>
+          <div className="mb-2 flex items-center gap-2">
+            <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold text-white ${hasIssues ? 'bg-accent-orange' : 'bg-accent-green'}`}>
+              {hasIssues ? '!' : '\u2713'}
+            </span>
+            <h2 className={`text-sm font-semibold ${hasIssues ? 'text-accent-orange' : 'text-accent-green'}`}>
+              {hasIssues ? 'Data Health — Issues Found' : 'Data Health — All Good'}
+            </h2>
+          </div>
+
+          {/* Quick stats line */}
+          <div className="mb-2 flex flex-wrap gap-3 text-xs text-text-dim">
+            <span>{proPlayers.length} Pro players ({assignedCount} connected)</span>
+            <span>{ncaaPlayers.length} College players</span>
+            <span>{hsPlayers.length} HS players</span>
+            {proGames.length > 0 && <span className="text-accent-green">{proGames.length} Pro games loaded</span>}
+            {ncaaGames.length > 0 && <span className="text-accent-green">{ncaaGames.length} College games loaded</span>}
+          </div>
+
+          {/* Issues list */}
+          {hasIssues && (
+            <div className="space-y-1.5">
+              {playersWithNoGames.length > 0 && (
+                <div className="rounded-lg bg-gray-950/30 px-3 py-2">
+                  <p className="text-xs font-medium text-accent-orange">{playersWithNoGames.length} player{playersWithNoGames.length !== 1 ? 's' : ''} with no games:</p>
+                  <div className="mt-1 space-y-0.5">
+                    {playersWithNoGames.map((p) => (
+                      <p key={p.name} className="text-[11px] text-text-dim">
+                        <span className="text-text">{p.name}</span> ({p.level}) — {p.reason}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {ncaaFailedSchools.length > 0 && (
+                <p className="text-[11px] text-accent-red">
+                  Failed to load schedules for: {ncaaFailedSchools.join(', ')}. These schools' games won't appear in trip planning.
+                </p>
+              )}
+
+              {ncaaDroppedAwayGames > 0 && (
+                <p className="text-[11px] text-accent-orange">
+                  {ncaaDroppedAwayGames} college away game{ncaaDroppedAwayGames !== 1 ? 's' : ''} skipped because we don't have the opponent's stadium location. Only home games and away games at known schools are included.
+                </p>
+              )}
+
+              {schedulesError && (
+                <p className="text-[11px] text-accent-red">Pro schedule error: {schedulesError}</p>
+              )}
+
+              {ncaaError && (
+                <p className="text-[11px] text-accent-red">College schedule error: {ncaaError}</p>
+              )}
+
+              {autoAssignResult?.error && (
+                <p className="text-[11px] text-accent-red">Auto-assign failed: {autoAssignResult.error}. Try again or assign players manually.</p>
+              )}
+
+              {rosterMovesError && (
+                <p className="text-[11px] text-accent-red">{rosterMovesError}</p>
+              )}
+            </div>
+          )}
+
+          {!hasIssues && (
+            <p className="text-[11px] text-accent-green">All players are connected, schedules are loaded, and no errors detected.</p>
+          )}
+        </div>
+      )}
+
       {/* Unresolved players — alias editor */}
       {hasUnresolved && (
         <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-4">
@@ -202,14 +305,20 @@ export default function ScheduleView() {
         </div>
 
         {autoAssignResult && (
-          <div className={`mb-3 rounded-lg px-3 py-2 text-sm ${autoAssignResult.assigned > 0 ? 'border border-accent-green/30 bg-accent-green/5 text-accent-green' : 'border border-accent-orange/30 bg-accent-orange/5 text-accent-orange'}`}>
-            {autoAssignResult.assigned > 0 && `Auto-assigned ${autoAssignResult.assigned} player${autoAssignResult.assigned !== 1 ? 's' : ''} from MLB rosters. `}
-            {autoAssignResult.notFound.length > 0 && (
-              <span className="text-text-dim">
-                Not found on any roster: {autoAssignResult.notFound.join(', ')}
-              </span>
+          <div className={`mb-3 rounded-lg px-3 py-2 text-sm ${autoAssignResult.error ? 'border border-accent-red/30 bg-accent-red/5 text-accent-red' : autoAssignResult.assigned > 0 ? 'border border-accent-green/30 bg-accent-green/5 text-accent-green' : 'border border-accent-orange/30 bg-accent-orange/5 text-accent-orange'}`}>
+            {autoAssignResult.error ? (
+              <span>Auto-assign failed: {autoAssignResult.error}. Try again or assign players manually.</span>
+            ) : (
+              <>
+                {autoAssignResult.assigned > 0 && `Auto-assigned ${autoAssignResult.assigned} player${autoAssignResult.assigned !== 1 ? 's' : ''} from MLB rosters. `}
+                {autoAssignResult.notFound.length > 0 && (
+                  <span className="text-text-dim">
+                    Not found on any roster: {autoAssignResult.notFound.join(', ')}
+                  </span>
+                )}
+                {autoAssignResult.assigned === 0 && autoAssignResult.notFound.length === 0 && 'All Pro players already assigned.'}
+              </>
             )}
-            {autoAssignResult.assigned === 0 && autoAssignResult.notFound.length === 0 && 'All Pro players already assigned.'}
           </div>
         )}
 
@@ -423,8 +532,15 @@ export default function ScheduleView() {
             </div>
           )}
 
-          {rosterMovesCheckedAt && rosterMoves.length === 0 && (
+          {rosterMovesCheckedAt && rosterMoves.length === 0 && !rosterMovesError && (
             <p className="text-sm text-accent-green">No roster moves detected in the last 30 days.</p>
+          )}
+
+          {rosterMovesError && (
+            <div className="rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-2 text-sm text-accent-red">
+              {rosterMovesError}
+              <button onClick={checkRosterMoves} className="ml-2 underline">Retry</button>
+            </div>
           )}
         </div>
       )}
@@ -486,7 +602,23 @@ export default function ScheduleView() {
           {ncaaGames.length > 0 && (
             <p className="mb-3 text-sm text-accent-green">
               Loaded {ncaaGames.length} games ({ncaaGames.filter((g) => g.isHome).length} home, {ncaaGames.filter((g) => !g.isHome).length} away)
+              {ncaaDroppedAwayGames > 0 && (
+                <span className="ml-1 text-accent-orange">
+                  — {ncaaDroppedAwayGames} away game{ncaaDroppedAwayGames !== 1 ? 's' : ''} skipped (unknown opponent stadium)
+                </span>
+              )}
             </p>
+          )}
+
+          {ncaaFailedSchools.length > 0 && (
+            <div className="mb-3 rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-2">
+              <p className="text-xs text-accent-red">
+                Failed to load schedules for: {ncaaFailedSchools.join(', ')}
+              </p>
+              <p className="text-[11px] text-text-dim">
+                These schools' games won't appear in trip planning. Try loading them individually above or check D1Baseball for availability.
+              </p>
+            </div>
           )}
 
           <div className="grid gap-1 sm:grid-cols-2">
