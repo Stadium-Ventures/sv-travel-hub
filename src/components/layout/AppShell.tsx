@@ -24,8 +24,8 @@ const TABS: { id: TabId; label: string; heading: string; description: string }[]
   {
     id: 'map',
     label: 'Map',
-    heading: 'Venue Map',
-    description: 'See all player venues on a map with drive-time context from Orlando. Click "Map" on any trip card to highlight that trip\'s route.',
+    heading: 'Player Map',
+    description: 'See where your players currently are. During spring training, Pro players show at their ST sites. Once game schedules are loaded, their regular season stadiums appear too. College and HS players show at their schools.',
   },
 ]
 
