@@ -84,6 +84,7 @@ export interface TripPlan {
   analyzedEventCount: number // how many game events were analyzed
   totalPlayersWithVisits: number
   totalVisitsCovered: number
+  totalVisitsPlanned: number // total player-trip appearances (T1 player in 3 trips = 3)
   coveragePercent: number
   priorityResults?: PriorityResult[]
   nearMisses?: NearMiss[]

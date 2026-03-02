@@ -3,7 +3,27 @@ import { NCAA_VENUES } from '../data/ncaaVenues'
 import { resolveNcaaName } from '../data/aliases'
 import type { Coordinates } from '../types/roster'
 
-const CORS_PROXY = 'https://api.allorigins.win/get?url='
+// CORS proxies with fallback — if the primary goes down, try alternatives
+interface CorsProxy {
+  url: string
+  // How to extract HTML from the response
+  extract: (res: Response) => Promise<string>
+}
+
+const CORS_PROXIES: CorsProxy[] = [
+  {
+    url: 'https://api.allorigins.win/get?url=',
+    extract: async (res) => {
+      const data = await res.json()
+      return data.contents as string
+    },
+  },
+  {
+    url: 'https://corsproxy.io/?url=',
+    extract: async (res) => res.text(),
+  },
+]
+
 const CACHE_KEY = 'sv-travel-d1baseball-cache'
 const CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours
 
@@ -85,7 +105,35 @@ function parseScheduleHtml(html: string): D1Game[] {
     }
   }
 
+  // Validate: if we got non-trivial HTML but zero games, the parser may be broken
+  if (games.length === 0) {
+    const hasTable = doc.querySelector('table tbody tr') !== null
+    if (hasTable) {
+      console.warn('D1Baseball parser returned 0 games but found table rows — HTML structure may have changed')
+    }
+  }
+
   return games
+}
+
+// Fetch URL through CORS proxies with fallback
+async function fetchWithCorsProxy(targetUrl: string): Promise<string> {
+  const errors: string[] = []
+
+  for (const proxy of CORS_PROXIES) {
+    try {
+      const res = await fetch(`${proxy.url}${encodeURIComponent(targetUrl)}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const html = await proxy.extract(res)
+      if (!html) throw new Error('Empty response')
+      return html
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      errors.push(`${proxy.url.split('/')[2]}: ${msg}`)
+    }
+  }
+
+  throw new Error(`All CORS proxies failed: ${errors.join('; ')}`)
 }
 
 // Fetch schedule for a single school
@@ -105,13 +153,7 @@ export async function fetchD1Schedule(
   const url = `https://d1baseball.com/team/${slug}/schedule/`
 
   try {
-    const res = await fetch(`${CORS_PROXY}${encodeURIComponent(url)}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-
-    const data = await res.json()
-    const html = data.contents as string
-    if (!html) throw new Error('Empty response')
-
+    const html = await fetchWithCorsProxy(url)
     const games = parseScheduleHtml(html)
     const schedule: D1Schedule = {
       school: canonicalName,

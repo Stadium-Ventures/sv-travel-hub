@@ -13,6 +13,7 @@ interface RosterState {
   loading: boolean
   error: string | null
   lastFetchedAt: string | null
+  parseWarnings: string[]
   visitOverrides: Record<string, VisitOverride> // playerName → override
 
   fetchRoster: () => Promise<void>
@@ -40,14 +41,22 @@ export const useRosterStore = create<RosterState>()(
       loading: false,
       error: null,
       lastFetchedAt: null,
+      parseWarnings: [],
       visitOverrides: {},
 
       fetchRoster: async () => {
-        set({ loading: true, error: null })
+        set({ loading: true, error: null, parseWarnings: [] })
         try {
-          const raw = await fetchRoster()
-          const players = applyOverrides(raw, get().visitOverrides)
-          set({ players, loading: false, lastFetchedAt: new Date().toISOString() })
+          const result = await fetchRoster()
+          // Prune stale visitOverrides for players no longer on the roster
+          const currentNames = new Set(result.players.map((p) => p.playerName))
+          const existingOverrides = get().visitOverrides
+          const prunedOverrides: Record<string, VisitOverride> = {}
+          for (const [name, override] of Object.entries(existingOverrides)) {
+            if (currentNames.has(name)) prunedOverrides[name] = override
+          }
+          const players = applyOverrides(result.players, prunedOverrides)
+          set({ players, loading: false, lastFetchedAt: new Date().toISOString(), parseWarnings: result.warnings, visitOverrides: prunedOverrides })
         } catch (e) {
           set({ loading: false, error: e instanceof Error ? e.message : 'Unknown error' })
         }
@@ -71,6 +80,12 @@ export const useRosterStore = create<RosterState>()(
         players: state.players,
         lastFetchedAt: state.lastFetchedAt,
         visitOverrides: state.visitOverrides,
+      }),
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as object),
+        players: (persisted as any)?.players ?? [],
+        visitOverrides: (persisted as any)?.visitOverrides ?? {},
       }),
     },
   ),

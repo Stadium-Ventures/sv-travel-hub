@@ -4,24 +4,10 @@ import { useRosterStore } from '../../store/rosterStore'
 import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '../../data/aliases'
 import { NCAA_VENUES } from '../../data/ncaaVenues'
 import { isSpringTraining, getSpringTrainingSite, isGrapefruitLeague } from '../../data/springTraining'
-import { isNcaaSeason, isHsSeason, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../../lib/tripEngine'
+import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
+import { formatTimeAgo } from '../../lib/formatters'
 import type { MLBAffiliate } from '../../lib/mlbApi'
-import { useVenueStore } from '../../store/venueStore'
-import type { GameEvent } from '../../types/schedule'
-import type { Coordinates } from '../../types/roster'
 import { D1_BASEBALL_SLUGS } from '../../data/d1baseballSlugs'
-import ScheduleCalendar from './ScheduleCalendar'
-
-function formatTimeAgo(ts: number): string {
-  const diff = Date.now() - ts
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
 
 export default function ScheduleView() {
   const players = useRosterStore((s) => s.players)
@@ -51,10 +37,8 @@ export default function ScheduleView() {
   const customNcaaAliases = useScheduleStore((s) => s.customNcaaAliases)
   const setCustomAlias = useScheduleStore((s) => s.setCustomAlias)
   const rosterMoves = useScheduleStore((s) => s.rosterMoves)
-  const rosterMovesLoading = useScheduleStore((s) => s.rosterMovesLoading)
-  const rosterMovesCheckedAt = useScheduleStore((s) => s.rosterMovesCheckedAt)
-  const checkRosterMoves = useScheduleStore((s) => s.checkRosterMoves)
   const autoAssignPlayers = useScheduleStore((s) => s.autoAssignPlayers)
+  const removePlayerAssignment = useScheduleStore((s) => s.removePlayerAssignment)
   const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
   const autoAssignResult = useScheduleStore((s) => s.autoAssignResult)
   const ncaaFailedSchools = useScheduleStore((s) => s.ncaaFailedSchools)
@@ -63,12 +47,6 @@ export default function ScheduleView() {
 
   const [startDate, setStartDate] = useState(`${new Date().getFullYear()}-03-01`)
   const [endDate, setEndDate] = useState(`${new Date().getFullYear()}-09-30`)
-  const [sourceFilters, setSourceFilters] = useState<Record<string, boolean>>({
-    pro: true, st: true, ncaa: true, hs: true,
-  })
-
-  const venueState = useVenueStore((s) => s.venues)
-
   const initialized = useRef(false)
   useEffect(() => {
     if (initialized.current) return
@@ -325,7 +303,7 @@ export default function ScheduleView() {
         {affiliatesError && (
           <div className="mb-4 rounded-lg border border-accent-red/30 bg-accent-red/5 px-4 py-2 text-sm text-accent-red">
             {affiliatesError}
-            <button onClick={fetchAffiliates} className="ml-2 underline">Retry</button>
+            <button onClick={() => fetchAffiliates()} className="ml-2 underline">Retry</button>
           </div>
         )}
 
@@ -373,14 +351,28 @@ export default function ScheduleView() {
 
         {assignedCount > 0 && (
           <div className="mt-4">
-            <h3 className="mb-2 text-xs font-medium text-text-dim">Assigned Players</h3>
+            <h3 className="mb-2 text-xs font-medium text-text-dim">
+              Assigned Players
+              <span className="ml-1 text-[10px] text-text-dim/50">— click team name to reassign, × to remove</span>
+            </h3>
             <div className="grid gap-1 sm:grid-cols-2">
-              {Object.entries(playerTeamAssignments).map(([name, assignment]) => (
-                <div key={name} className="flex items-center justify-between rounded-lg bg-accent-green/5 px-3 py-1.5 text-sm">
-                  <span className="text-text">{name}</span>
-                  <span className="text-xs text-accent-green">{assignment.teamName}</span>
-                </div>
-              ))}
+              {Object.entries(playerTeamAssignments).map(([name, assignment]) => {
+                const rosterPlayer = players.find((p) => p.playerName === name)
+                const parentId = rosterPlayer ? resolveMLBTeamId(rosterPlayer.org, customMlbAliases) : null
+                const teamOptions = parentId ? affiliatesByParent.get(parentId) ?? [] : []
+                return (
+                  <AssignedPlayerRow
+                    key={name}
+                    name={name}
+                    assignment={assignment}
+                    teamOptions={teamOptions}
+                    org={rosterPlayer?.org ?? ''}
+                    position={rosterPlayer?.position ?? ''}
+                    onReassign={(newAssignment) => assignPlayerToTeam(name, newAssignment)}
+                    onRemove={() => removePlayerAssignment(name)}
+                  />
+                )
+              })}
             </div>
           </div>
         )}
@@ -416,22 +408,22 @@ export default function ScheduleView() {
       {/* Schedule fetch controls */}
       <div className="rounded-xl border border-border bg-surface p-5">
         <div className="mb-1 flex items-center gap-2">
-          <h2 className="text-base font-semibold text-text">Pull Game Schedules</h2>
+          <h2 className="text-base font-semibold text-text">Load Pro Schedules</h2>
           {proFetchedAt && (
             <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${
               Date.now() - proFetchedAt > 24 * 60 * 60 * 1000
                 ? 'bg-accent-orange/10 text-accent-orange'
                 : 'bg-accent-green/10 text-accent-green'
             }`}>
-              Pro: {formatTimeAgo(proFetchedAt)}
+              {formatTimeAgo(proFetchedAt)}
             </span>
           )}
           {!proFetchedAt && proGames.length === 0 && (
-            <span className="rounded bg-gray-800 px-2 py-0.5 text-[10px] text-text-dim/60">Pro: never fetched</span>
+            <span className="rounded bg-accent-red/10 px-2 py-0.5 text-[10px] font-medium text-accent-red">Required — not loaded yet</span>
           )}
         </div>
         <p className="mb-3 text-xs text-text-dim">
-          Pick a date range and load every game for your connected Pro players. This covers all levels in each organization (MLB, AAA, AA, A, etc.) so you won't miss games if a player gets promoted or sent down.
+          <strong className="text-text">Required for trip planning.</strong> This pulls real game dates and locations from the MLB API so the Trip Planner knows when and where each player will be. Covers all levels in each organization (MLB, AAA, AA, A) so you won't miss games if a player gets promoted or sent down. Re-fetch periodically to pick up schedule changes and rain-outs.
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <div>
@@ -486,62 +478,12 @@ export default function ScheduleView() {
         )}
       </div>
 
-      {/* Roster Moves Detection */}
-      {proPlayers.length > 0 && Object.keys(playerTeamAssignments).length > 0 && (
-        <div className="rounded-xl border border-border bg-surface p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-text">Player Movement Alerts</h2>
-              {rosterMovesCheckedAt && (
-                <span className="rounded px-2 py-0.5 text-[10px] font-medium bg-accent-green/10 text-accent-green">
-                  checked {formatTimeAgo(new Date(rosterMovesCheckedAt).getTime())}
-                </span>
-              )}
-            </div>
-            <button
-              onClick={checkRosterMoves}
-              disabled={rosterMovesLoading}
-              className="rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
-            >
-              {rosterMovesLoading ? 'Checking...' : 'Check for Roster Moves'}
-            </button>
-          </div>
-          <p className="mb-3 text-xs text-text-dim">
-            Checks if any of your Pro players have been promoted, demoted, or traded in the last 30 days.
+      {/* Roster moves — check via Roster tab button */}
+      {rosterMoves.length > 0 && (
+        <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-4 py-2">
+          <p className="text-xs text-accent-orange">
+            {rosterMoves.length} roster move{rosterMoves.length !== 1 ? 's' : ''} detected — see the Roster tab for details.
           </p>
-
-          {rosterMoves.length > 0 && (
-            <div className="space-y-2">
-              {rosterMoves.map((move, i) => (
-                <div key={i} className="flex items-center gap-3 rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-3 py-2">
-                  <span className="text-sm font-medium text-text">{move.player.fullName}</span>
-                  <span className="text-xs text-text-dim">
-                    {move.fromTeam?.name ?? '?'} → {move.toTeam?.name ?? '?'}
-                  </span>
-                  <span className="rounded bg-accent-orange/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-orange">
-                    {move.typeDesc}
-                  </span>
-                  <span className="ml-auto text-[11px] text-text-dim">
-                    {move.effectiveDate || move.date}
-                  </span>
-                </div>
-              ))}
-              <p className="text-[11px] text-text-dim/70">
-                These moves are detected from MLB transactions. Update the roster sheet to reflect permanent changes.
-              </p>
-            </div>
-          )}
-
-          {rosterMovesCheckedAt && rosterMoves.length === 0 && !rosterMovesError && (
-            <p className="text-sm text-accent-green">No roster moves detected in the last 30 days.</p>
-          )}
-
-          {rosterMovesError && (
-            <div className="rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-2 text-sm text-accent-red">
-              {rosterMovesError}
-              <button onClick={checkRosterMoves} className="ml-2 underline">Retry</button>
-            </div>
-          )}
         </div>
       )}
 
@@ -714,112 +656,88 @@ export default function ScheduleView() {
         </div>
       )}
 
-      {/* All-source calendar */}
-      <AllSourceCalendar
-        proGames={proGames}
-        ncaaGames={ncaaGames}
-        players={players}
-        venueState={venueState}
-        sourceFilters={sourceFilters}
-        setSourceFilters={setSourceFilters}
-        customMlbAliases={customMlbAliases}
-        customNcaaAliases={customNcaaAliases}
-      />
     </div>
   )
 }
 
-function AllSourceCalendar({
-  proGames, ncaaGames, players, venueState, sourceFilters, setSourceFilters,
-  customMlbAliases, customNcaaAliases,
+function AssignedPlayerRow({
+  name,
+  assignment,
+  teamOptions,
+  org,
+  position,
+  onReassign,
+  onRemove,
 }: {
-  proGames: GameEvent[]
-  ncaaGames: GameEvent[]
-  players: import('../../types/roster').RosterPlayer[]
-  venueState: Record<string, { name: string; coords: Coordinates; source: string }>
-  sourceFilters: Record<string, boolean>
-  setSourceFilters: (f: Record<string, boolean>) => void
-  customMlbAliases: Record<string, string>
-  customNcaaAliases: Record<string, string>
+  name: string
+  assignment: { teamId: number; sportId: number; teamName: string }
+  teamOptions: MLBAffiliate[]
+  org: string
+  position: string
+  onReassign: (a: { teamId: number; sportId: number; teamName: string }) => void
+  onRemove: () => void
 }) {
-  const combinedGames = useMemo(() => {
-    const all: GameEvent[] = []
-
-    // Pro regular season games
-    if (sourceFilters.pro) {
-      all.push(...proGames.filter((g) => g.awayTeam !== 'Spring Training'))
-    }
-
-    // Spring Training events (subset of Pro or synthetic)
-    if (sourceFilters.st) {
-      // ST games from proGames
-      all.push(...proGames.filter((g) => g.awayTeam === 'Spring Training'))
-      // Synthetic ST events
-      const y = new Date().getFullYear()
-      const stEvents = generateSpringTrainingEvents(players, `${y}-02-15`, `${y}-09-30`, customMlbAliases)
-      // Avoid duplicates with proGames by checking IDs
-      const existingIds = new Set(all.map((g) => g.id))
-      for (const e of stEvents) {
-        if (!existingIds.has(e.id)) all.push(e)
-      }
-    }
-
-    // NCAA games (real from D1Baseball + synthetic for uncovered players)
-    if (sourceFilters.ncaa) {
-      all.push(...ncaaGames)
-      const ncaaPlayersWithReal = new Set(ncaaGames.flatMap((g) => g.playerNames))
-      const syntheticNcaa = generateNcaaEvents(
-        players.filter((p) => p.level === 'NCAA' && !ncaaPlayersWithReal.has(p.playerName)),
-        `${new Date().getFullYear()}-02-14`, `${new Date().getFullYear()}-06-15`,
-        customNcaaAliases,
-      )
-      all.push(...syntheticNcaa)
-    }
-
-    // HS events (synthetic)
-    if (sourceFilters.hs) {
-      const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
-      for (const [key, v] of Object.entries(venueState)) {
-        if (v.source === 'hs-geocoded') {
-          hsVenues.set(key.replace(/^hs-/, ''), { name: v.name, coords: v.coords })
-        }
-      }
-      const hsEvents = generateHsEvents(players, `${new Date().getFullYear()}-02-14`, `${new Date().getFullYear()}-05-15`, hsVenues)
-      all.push(...hsEvents)
-    }
-
-    all.sort((a, b) => a.date.localeCompare(b.date))
-    return all
-  }, [proGames, ncaaGames, players, venueState, sourceFilters, customMlbAliases, customNcaaAliases])
-
-  const hasAnyGames = proGames.length > 0 || ncaaGames.length > 0 || players.some((p) => p.level === 'NCAA' || p.level === 'HS')
-
-  if (!hasAnyGames) return null
-
-  const toggleFilter = (key: string) => {
-    setSourceFilters({ ...sourceFilters, [key]: !sourceFilters[key] })
-  }
+  const [editing, setEditing] = useState(false)
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-5">
-      <h2 className="mb-1 text-base font-semibold text-text">Game Calendar</h2>
-      <p className="mb-3 text-xs text-text-dim">
-        All your players' games in one view. This combines Pro schedules, spring training, college, and high school into a single calendar. Use the filters to focus on specific levels.
-      </p>
-
-      {/* Source filter toggles */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-text-dim">Show:</span>
-        <button onClick={() => toggleFilter('pro')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.pro ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>Pro</button>
-        <button onClick={() => toggleFilter('st')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.st ? 'bg-pink-400/20 text-pink-400 border-pink-400/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>Spring Training</button>
-        <button onClick={() => toggleFilter('ncaa')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.ncaa ? 'bg-accent-green/20 text-accent-green border-accent-green/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>College</button>
-        <button onClick={() => toggleFilter('hs')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.hs ? 'bg-accent-orange/20 text-accent-orange border-accent-orange/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>High School</button>
-        <span className="text-[11px] text-text-dim/50">
-          {combinedGames.length} games
-        </span>
+    <div className="flex items-center gap-2 rounded-lg bg-accent-green/5 px-3 py-1.5 text-sm">
+      <div className="min-w-0 flex-1">
+        <span className="text-text">{name}</span>
+        {(position || org) && (
+          <span className="ml-1.5 text-[10px] text-text-dim/60">
+            {position}{position && org ? ' · ' : ''}{org}
+          </span>
+        )}
       </div>
-
-      <ScheduleCalendar games={combinedGames} />
+      <div className="flex shrink-0 items-center gap-1.5">
+        {editing ? (
+          <>
+            <select
+              className="rounded-lg border border-border bg-surface px-2 py-1 text-xs text-text focus:border-accent-blue focus:outline-none"
+              value={`${assignment.teamId}|${assignment.sportId}|${assignment.teamName}`}
+              onChange={(e) => {
+                const [teamId, sportId, teamName] = e.target.value.split('|')
+                if (teamId && sportId && teamName) {
+                  onReassign({ teamId: parseInt(teamId), sportId: parseInt(sportId), teamName })
+                  setEditing(false)
+                }
+              }}
+            >
+              {teamOptions
+                .sort((a, b) => a.sportId - b.sportId)
+                .map((t) => (
+                  <option key={t.teamId} value={`${t.teamId}|${t.sportId}|${t.teamName}`}>
+                    {t.teamName} ({t.sportName})
+                  </option>
+                ))}
+            </select>
+            <button
+              onClick={() => setEditing(false)}
+              className="text-[10px] text-text-dim hover:text-text"
+            >
+              cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => setEditing(true)}
+              className="text-xs text-accent-green hover:text-accent-blue transition-colors"
+              title="Click to change team assignment"
+            >
+              {assignment.teamName}
+            </button>
+            <button
+              onClick={onRemove}
+              className="flex h-4 w-4 items-center justify-center rounded text-text-dim/40 hover:bg-accent-red/10 hover:text-accent-red transition-colors"
+              title="Remove assignment"
+            >
+              ×
+            </button>
+          </>
+        )}
+      </div>
     </div>
   )
 }
+

@@ -39,7 +39,12 @@ function parseNumber(raw: string): number | null {
   return isNaN(n) ? null : n
 }
 
-export async function fetchRoster(): Promise<RosterPlayer[]> {
+export interface RosterParseResult {
+  players: RosterPlayer[]
+  warnings: string[]
+}
+
+export async function fetchRoster(): Promise<RosterParseResult> {
   if (!ROSTER_CSV_URL) {
     throw new Error('VITE_ROSTER_CSV_URL is not configured. Add it to your .env file.')
   }
@@ -49,12 +54,26 @@ export async function fetchRoster(): Promise<RosterPlayer[]> {
   const text = await res.text()
 
   const parsed = Papa.parse<RosterRow>(text, { header: true, skipEmptyLines: true })
+  const warnings: string[] = []
 
-  return parsed.data
+  const players = parsed.data
     .filter((r) => findColumn(r, ['Name', 'Player Name', 'Player']))
     .map((r) => {
       const playerName = findColumn(r, ['Name', 'Player Name', 'Player'])
-      const tier = parseNumber(findColumn(r, ['Tier', 'Player Tier'])) ?? 2
+
+      // Track defaulted values
+      const levelRaw = findColumn(r, ['Level', 'Player Level'])
+      const level = parseLevel(levelRaw)
+      if (levelRaw && level === 'Pro' && !['pro', 'professional', 'mlb', 'milb'].includes(levelRaw.toLowerCase().trim())) {
+        warnings.push(`${playerName}: unrecognized level "${levelRaw}" — defaulted to Pro`)
+      }
+
+      const tierRaw = findColumn(r, ['Tier', 'Player Tier'])
+      const tier = parseNumber(tierRaw) ?? 2
+      if (!tierRaw || tierRaw === '' || tierRaw === '-') {
+        warnings.push(`${playerName}: no tier specified — defaulted to T2`)
+      }
+
       const visitTarget = TIER_VISIT_TARGETS[tier] ?? 0
       const visitTargetRaw = parseNumber(findColumn(r, ['2026 Visit Target', 'Visit Target', 'Visits Target']))
       const visitsCompleted = parseNumber(findColumn(r, ['Visits Completed', 'Visits', 'In-Person Visits'])) ?? 0
@@ -66,7 +85,7 @@ export async function fetchRoster(): Promise<RosterPlayer[]> {
         playerName,
         normalizedName: normalizeName(playerName),
         org: findColumn(r, ['Org', 'Organization', 'Team', 'School']),
-        level: parseLevel(findColumn(r, ['Level', 'Player Level'])),
+        level,
         mlbPlayerId: parseNumber(findColumn(r, ['MLB_ID', 'MLB Id', 'MLB ID', 'MLBId'])),
         position: findColumn(r, ['Position', 'Pos']),
         state: findColumn(r, ['State', 'Home State']),
@@ -85,4 +104,6 @@ export async function fetchRoster(): Promise<RosterPlayer[]> {
         mother: findColumn(r, ['Mother', "Mother's Name", 'Mom']),
       }
     })
+
+  return { players, warnings }
 }

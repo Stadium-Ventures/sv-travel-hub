@@ -60,7 +60,7 @@ interface ScheduleState {
   autoAssignResult: { assigned: number; notFound: string[]; error?: string } | null
 
   // Actions
-  fetchAffiliates: () => Promise<void>
+  fetchAffiliates: (forceRefresh?: boolean) => Promise<void>
   assignPlayerToTeam: (playerName: string, assignment: PlayerTeamAssignment) => void
   removePlayerAssignment: (playerName: string) => void
   setCustomAlias: (type: 'mlb' | 'ncaa', raw: string, canonical: string) => void
@@ -134,9 +134,9 @@ export const useScheduleStore = create<ScheduleState>()(
       proFetchedAt: null,
       ncaaFetchedAt: null,
 
-      fetchAffiliates: async () => {
-        // Skip if already cached from localStorage
-        if (get().affiliates.length > 0) return
+      fetchAffiliates: async (forceRefresh?: boolean) => {
+        // Skip if already cached from localStorage (unless forced)
+        if (!forceRefresh && get().affiliates.length > 0) return
         set({ affiliatesLoading: true, affiliatesError: null })
         try {
           const affiliates = await fetchAllAffiliates(MLB_PARENT_IDS)
@@ -406,11 +406,15 @@ export const useScheduleStore = create<ScheduleState>()(
           const endDate = new Date().toISOString().split('T')[0]!
           const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]!
 
-          const transactions = await fetchAllTransactions(
+          const txResult = await fetchAllTransactions(
             [...parentOrgIds],
             startDate,
             endDate,
           )
+          const transactions = txResult.transactions
+          if (txResult.failedTeamIds.length > 0) {
+            console.warn(`Transaction fetch failed for ${txResult.failedTeamIds.length} team(s):`, txResult.failedTeamIds)
+          }
 
           // Cross-reference: find transactions involving assigned players
           const playerMlbIds = new Map<number, string>() // mlbPlayerId → playerName
@@ -554,10 +558,23 @@ export const useScheduleStore = create<ScheduleState>()(
         customNcaaAliases: state.customNcaaAliases,
         rosterMoves: state.rosterMoves,
         rosterMovesCheckedAt: state.rosterMovesCheckedAt,
-        proSchedules: state.proSchedules,
+        // Note: proSchedules and ncaaSchedules (raw API data) are NOT persisted
+        // to avoid localStorage bloat. They can be re-fetched. Only processed
+        // GameEvent arrays are persisted.
         proGames: state.proGames,
-        ncaaSchedules: state.ncaaSchedules,
         ncaaGames: state.ncaaGames,
+      }),
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as object),
+        // Ensure arrays/objects have safe defaults when rehydrating old localStorage
+        affiliates: (persisted as any)?.affiliates ?? [],
+        playerTeamAssignments: (persisted as any)?.playerTeamAssignments ?? {},
+        customMlbAliases: (persisted as any)?.customMlbAliases ?? {},
+        customNcaaAliases: (persisted as any)?.customNcaaAliases ?? {},
+        proGames: (persisted as any)?.proGames ?? [],
+        ncaaGames: (persisted as any)?.ncaaGames ?? [],
+        rosterMoves: (persisted as any)?.rosterMoves ?? [],
       }),
     },
   ),

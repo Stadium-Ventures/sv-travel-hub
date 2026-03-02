@@ -7,21 +7,15 @@ import { isSpringTraining } from '../../data/springTraining'
 import { isNcaaSeason, isHsSeason, analyzeBestWeeks, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../../lib/tripEngine'
 import { useVenueStore } from '../../store/venueStore'
 import type { Coordinates } from '../../types/roster'
-import TripCard, { generateItineraryText } from './TripCard'
+import TripCard, { generateItineraryText, buildVenueStops } from './TripCard'
 import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import { getTripKey } from '../../store/tripStore'
 import type { TripStatus } from '../../store/tripStore'
 import type { RosterPlayer } from '../../types/roster'
+import { formatDriveTime, formatTimeAgo, TIER_DOT_COLORS } from '../../lib/formatters'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
-
-const TIER_DOT_COLORS: Record<number, string> = {
-  1: 'bg-accent-red',
-  2: 'bg-accent-orange',
-  3: 'bg-yellow-400',
-  4: 'bg-gray-500',
-}
 
 const LEVEL_ORDER: Record<string, number> = { Pro: 0, NCAA: 1, HS: 2 }
 const LEVEL_LABELS: Record<string, string> = { Pro: 'Pro', NCAA: 'College', HS: 'High School' }
@@ -130,6 +124,7 @@ function PlayerSearchPicker({
                 >
                   <span className={`h-2 w-2 shrink-0 rounded-full ${TIER_DOT_COLORS[p.tier] ?? 'bg-gray-500'}`} />
                   <span className="text-text">{p.playerName}</span>
+                  <span className="text-[10px] text-text-dim/50">T{p.tier}</span>
                   <span className="ml-auto text-[10px] text-text-dim">{p.org}</span>
                 </button>
               ))}
@@ -154,24 +149,6 @@ function getDaysInRange(start: string, end: string): string[] {
     cur.setUTCDate(cur.getUTCDate() + 1)
   }
   return days
-}
-
-function formatDriveTime(minutes: number): string {
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  if (h === 0) return `${m}m`
-  return m > 0 ? `${h}h ${m}m` : `${h}h`
-}
-
-function formatTimeAgo(ts: number): string {
-  const diff = Date.now() - ts
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
 }
 
 const STEPS = [
@@ -265,8 +242,17 @@ export default function TripPlanner() {
   const proGames = useScheduleStore((s) => s.proGames)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
+  const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
+  const ncaaLoading = useScheduleStore((s) => s.ncaaLoading)
+  const fetchProSchedules = useScheduleStore((s) => s.fetchProSchedules)
+  const fetchNcaaSchedules = useScheduleStore((s) => s.fetchNcaaSchedules)
+  const autoAssignPlayers = useScheduleStore((s) => s.autoAssignPlayers)
+  const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
+  const playerTeamAssignments = useScheduleStore((s) => s.playerTeamAssignments)
   const players = useRosterStore((s) => s.players)
   const rosterLoading = useRosterStore((s) => s.loading)
+  const rosterError = useRosterStore((s) => s.error)
+  const rosterLastFetched = useRosterStore((s) => s.lastFetchedAt)
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
   const heartbeatPriorities = useHeartbeatStore((s) => s.priorities)
   const heartbeatUrgencyActive = heartbeatPriorities.some((p) => p.visitUrgencyScore >= 25)
@@ -370,26 +356,40 @@ export default function TripPlanner() {
     setPriorityPlayers([...new Set(next.filter(Boolean))])
   }
 
+  const [copyAllError, setCopyAllError] = useState(false)
+
   async function handleCopyAllTrips() {
     if (!tripPlan) return
-    // We can't easily access stops from here without re-building them,
-    // so generate a simplified version per trip
-    const texts: string[] = []
-    for (let i = 0; i < tripPlan.trips.length; i++) {
-      const trip = tripPlan.trips[i]!
-      // Build stops inline
-      const stops = buildSimpleStops(trip)
-      texts.push(generateItineraryText(trip, i + 1, stops, playerMap))
+    try {
+      const texts: string[] = []
+      for (let i = 0; i < tripPlan.trips.length; i++) {
+        const trip = tripPlan.trips[i]!
+        const stops = buildVenueStops(trip, playerMap)
+        texts.push(generateItineraryText(trip, i + 1, stops, playerMap))
+      }
+      await navigator.clipboard.writeText(texts.join('\n---\n\n'))
+      setCopiedAll(true)
+      setCopyAllError(false)
+      setTimeout(() => setCopiedAll(false), 2000)
+    } catch {
+      setCopyAllError(true)
+      setTimeout(() => setCopyAllError(false), 3000)
     }
-    await navigator.clipboard.writeText(texts.join('\n---\n\n'))
-    setCopiedAll(true)
-    setTimeout(() => setCopiedAll(false), 2000)
   }
 
   return (
     <div className="space-y-6">
       {/* Workflow stepper */}
-      <WorkflowStepper currentStep={stepperStep} allComplete={stepperAllComplete} step2Synthetic={step2Synthetic} />
+      <WorkflowStepper
+        currentStep={stepperStep}
+        allComplete={stepperAllComplete}
+        step2Synthetic={step2Synthetic}
+        onAction={(step) => {
+          if (step === 0) fetchRoster()
+          // Steps 1 and 2 can't be directly triggered from here — user needs to go to Data Setup / adjust dates
+          if (step === 3 && canGenerate) generateTrips()
+        }}
+      />
 
       {/* Controls */}
       <div className="rounded-xl border border-border bg-surface p-5">
@@ -417,14 +417,48 @@ export default function TripPlanner() {
         </div>
 
         {showFreshnessWarning && (
-          <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
+          <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
             <p className="text-[11px] text-accent-orange">
               {!proFetchedAt && hasProPlayers && 'Pro game schedules haven\'t been loaded yet. '}
               {proStale && 'Pro game data is more than 24 hours old. '}
               {!ncaaFetchedAt && hasNcaaPlayers && 'College game schedules haven\'t been loaded yet. '}
               {ncaaStale && 'College game data is more than 24 hours old. '}
-              Go to the Data Setup tab to load or refresh game data.
+              Load schedules below to enable trip generation.
             </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {hasProPlayers && (!proFetchedAt || proStale) && (
+                <>
+                  {Object.keys(playerTeamAssignments).length === 0 && (
+                    <button
+                      onClick={autoAssignPlayers}
+                      disabled={autoAssignLoading}
+                      className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
+                    >
+                      {autoAssignLoading ? 'Scanning rosters...' : '1. Auto-Assign Players'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      const y = new Date().getFullYear()
+                      fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+                    }}
+                    disabled={schedulesLoading || Object.keys(playerTeamAssignments).length === 0}
+                    className="rounded-lg bg-accent-blue px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
+                  >
+                    {schedulesLoading ? 'Loading...' : Object.keys(playerTeamAssignments).length === 0 ? 'Assign players first' : `${!proFetchedAt ? '' : 'Re'}load Pro Schedules`}
+                  </button>
+                </>
+              )}
+              {hasNcaaPlayers && (!ncaaFetchedAt || ncaaStale) && (
+                <button
+                  onClick={() => fetchNcaaSchedules(players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org })))}
+                  disabled={ncaaLoading}
+                  className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
+                >
+                  {ncaaLoading ? 'Loading...' : `${!ncaaFetchedAt ? '' : 'Re'}load College Schedules`}
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -434,6 +468,33 @@ export default function TripPlanner() {
               {hsPlayersCount} high school player{hsPlayersCount !== 1 ? 's' : ''} found but their school locations haven't been mapped yet.
               Open the Player Map tab first — it will automatically geocode school addresses. Without locations, HS players won't appear in trip results.
             </p>
+          </div>
+        )}
+
+        {/* Roster staleness warning */}
+        {rosterLastFetched && (Date.now() - new Date(rosterLastFetched).getTime() > 24 * 60 * 60 * 1000) && (
+          <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
+            <p className="text-[11px] text-accent-orange">
+              Roster data is more than 24 hours old (loaded {new Date(rosterLastFetched).toLocaleDateString()}).
+              <button onClick={fetchRoster} disabled={rosterLoading} className="ml-1 underline hover:no-underline">
+                {rosterLoading ? 'Refreshing...' : 'Refresh now'}
+              </button>
+            </p>
+          </div>
+        )}
+
+        {/* Roster load error in Trip Planner */}
+        {rosterError && players.length === 0 && (
+          <div className="mb-4 rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-2">
+            <p className="text-sm text-accent-red">Failed to load roster: {rosterError}</p>
+            <button
+              onClick={fetchRoster}
+              disabled={rosterLoading}
+              className="mt-2 rounded-lg bg-accent-blue px-3 py-1 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
+            >
+              {rosterLoading ? 'Retrying...' : 'Retry'}
+            </button>
+            <p className="mt-1 text-[10px] text-text-dim">Or go to the Roster tab for more details.</p>
           </div>
         )}
 
@@ -515,6 +576,7 @@ export default function TripPlanner() {
               <input
                 type="date"
                 value={startDate}
+                max={endDate}
                 onChange={(e) => setDateRange(e.target.value, endDate)}
                 className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
               />
@@ -529,6 +591,7 @@ export default function TripPlanner() {
               <input
                 type="date"
                 value={endDate}
+                min={startDate}
                 onChange={(e) => setDateRange(startDate, e.target.value)}
                 className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
               />
@@ -555,9 +618,12 @@ export default function TripPlanner() {
               {' · estimates only'}
             </p>
           </div>
+          {startDate > endDate && (
+            <p className="self-center text-xs text-accent-red">End date is before start date</p>
+          )}
           <button
             onClick={generateTrips}
-            disabled={!canGenerate}
+            disabled={!canGenerate || startDate > endDate}
             className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
           >
             {computing ? 'Computing...' : 'Generate Trips'}
@@ -672,11 +738,18 @@ export default function TripPlanner() {
           )}
 
           {/* Coverage stats */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             <StatCard label="Road Trips" value={tripPlan.trips.length} />
+            <div title="Total player-visit appearances across all trips. T1 players can appear in up to 5 trips, T2 in 3, T3 in 2 — matching their visit targets.">
+              <StatCard label="Visits Planned" value={tripPlan.totalVisitsPlanned ?? tripPlan.totalVisitsCovered} accent="blue" />
+            </div>
             <StatCard label="Fly-in Visits" value={tripPlan.flyInVisits.length} />
-            <StatCard label="Players Reached" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
-            <StatCard label="No Games Found" value={tripPlan.unvisitablePlayers.length} accent={tripPlan.unvisitablePlayers.length > 0 ? 'red' : 'green'} />
+            <div title={`Percentage of players with visits remaining (${players.filter((p) => p.visitsRemaining > 0).length} total) that appear in at least one generated trip. Does not count players with zero visits remaining.`}>
+              <StatCard label="Players Reached" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
+            </div>
+            <div title="Players who need visits but have zero game events in the selected date range — check their schedule sources.">
+              <StatCard label="No Games Found" value={tripPlan.unvisitablePlayers.length} accent={tripPlan.unvisitablePlayers.length > 0 ? 'red' : 'green'} />
+            </div>
           </div>
 
           {/* Analysis summary */}
@@ -731,9 +804,9 @@ export default function TripPlanner() {
               })
             }
 
-            // Apply sort
+            // Apply sort — use scoreBreakdown.finalScore (displayed value) for consistency
             indexedTrips.sort((a, b) => {
-              if (sortBy === 'score') return b.trip.visitValue - a.trip.visitValue
+              if (sortBy === 'score') return (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) - (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue)
               if (sortBy === 'players') return b.trip.totalPlayersVisited - a.trip.totalPlayersVisited
               if (sortBy === 'drive') return a.trip.totalDriveMinutes - b.trip.totalDriveMinutes
               if (sortBy === 'date') return a.trip.anchorGame.date.localeCompare(b.trip.anchorGame.date)
@@ -745,18 +818,23 @@ export default function TripPlanner() {
             return (
             <div>
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-text">
-                  Road Trips
-                  <span className="ml-2 text-xs font-normal text-text-dim">
-                    Drivable from Orlando within {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''} radius
-                  </span>
-                </h3>
+                <div>
+                  <h3 className="text-sm font-semibold text-text">
+                    Road Trips
+                    <span className="ml-2 text-xs font-normal text-text-dim">
+                      Drivable from Orlando within {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''} radius
+                    </span>
+                  </h3>
+                  <p className="text-[10px] text-text-dim/60">
+                    Score = T1 (5pts) + T2 (3pts) + T3 (1pt) per visit remaining · Thu anchor +20%
+                  </p>
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleCopyAllTrips}
                     className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
                   >
-                    {copiedAll ? 'Copied!' : 'Copy All Trips'}
+                    {copiedAll ? 'Copied!' : copyAllError ? 'Copy Failed' : 'Copy All Trips'}
                   </button>
                   <button
                     onClick={() => {
@@ -775,7 +853,7 @@ export default function TripPlanner() {
               <div className="sticky top-0 z-10 -mx-5 mb-3 rounded-b-lg bg-surface px-5 pb-2 pt-2 border-b border-border/30">
               <div className="flex flex-wrap items-center gap-2">
                 {/* Sort */}
-                <span className="text-[11px] text-text-dim" title="Score = how many high-priority players with visits remaining. Higher tier + more visits needed = higher score.">Sort:</span>
+                <span className="text-[11px] text-text-dim" title="Score = tier weight × visits remaining per player. T1=5pts, T2=3pts, T3=1pt. Thursday anchor +20%.">Sort:</span>
                 {([
                   { key: 'score', label: 'Score' },
                   { key: 'players', label: 'Players' },
@@ -846,7 +924,7 @@ export default function TripPlanner() {
 
               <div className="space-y-4">
                 {indexedTrips.map(({ trip, originalIndex }, i) => (
-                  <TripCard key={`trip-${originalIndex}`} trip={trip} index={originalIndex} defaultExpanded={i === 0 && statusFilter === 'all' && !filterHasT1 && !filterHasT2} onPlayerClick={setSelectedPlayer} />
+                  <TripCard key={`trip-${originalIndex}`} trip={trip} index={originalIndex} playerMap={playerMap} defaultExpanded={i === 0 && statusFilter === 'all' && !filterHasT1 && !filterHasT2} onPlayerClick={setSelectedPlayer} />
                 ))}
                 {filteredTrips.length === 0 && (
                   <p className="py-4 text-center text-sm text-text-dim">No trips match the selected filters.</p>
@@ -1095,89 +1173,10 @@ export default function TripPlanner() {
   )
 }
 
-// Simplified stop builder for Copy All Trips (mirrors TripCard logic)
-function buildSimpleStops(trip: import('../../types/schedule').TripCandidate) {
-  const venueMap = new Map<string, {
-    venueName: string; venueKey: string; players: string[]; driveFromAnchor: number; driveFromPrev: number
-    isAnchor: boolean; dates: string[]; confidence?: import('../../types/schedule').VisitConfidence
-    confidenceNote?: string; source: import('../../types/schedule').ScheduleSource
-    isHome: boolean; homeTeam: string; awayTeam: string; sourceUrl?: string; orgLabel: string
-  }>()
-
-  const anchorKey = `${trip.anchorGame.venue.coords.lat.toFixed(4)},${trip.anchorGame.venue.coords.lng.toFixed(4)}`
-  venueMap.set(anchorKey, {
-    venueName: trip.anchorGame.venue.name,
-    venueKey: anchorKey,
-    players: [...trip.anchorGame.playerNames],
-    driveFromAnchor: 0,
-    driveFromPrev: 0,
-    isAnchor: true,
-    dates: [trip.anchorGame.date],
-    confidence: trip.anchorGame.confidence,
-    confidenceNote: trip.anchorGame.confidenceNote,
-    source: trip.anchorGame.source,
-    isHome: trip.anchorGame.isHome,
-    homeTeam: trip.anchorGame.homeTeam,
-    awayTeam: trip.anchorGame.awayTeam,
-    sourceUrl: trip.anchorGame.sourceUrl,
-    orgLabel: trip.anchorGame.homeTeam,
-  })
-
-  for (const game of trip.nearbyGames) {
-    const key = `${game.venue.coords.lat.toFixed(4)},${game.venue.coords.lng.toFixed(4)}`
-    const existing = venueMap.get(key)
-    if (existing) {
-      for (const name of game.playerNames) {
-        if (!existing.players.includes(name)) existing.players.push(name)
-      }
-      if (!existing.dates.includes(game.date)) existing.dates.push(game.date)
-    } else {
-      venueMap.set(key, {
-        venueName: game.venue.name,
-        venueKey: key,
-        players: [...game.playerNames],
-        driveFromAnchor: game.driveMinutes,
-        driveFromPrev: 0,
-        isAnchor: false,
-        dates: [game.date],
-        confidence: game.confidence,
-        confidenceNote: game.confidenceNote,
-        source: game.source,
-        isHome: game.isHome,
-        homeTeam: game.homeTeam,
-        awayTeam: game.awayTeam,
-        sourceUrl: game.sourceUrl,
-        orgLabel: game.homeTeam,
-      })
-    }
-  }
-
-  const sorted = [...venueMap.values()].sort((a, b) => {
-    if (a.isAnchor) return -1
-    if (b.isAnchor) return 1
-    return a.driveFromAnchor - b.driveFromAnchor
-  })
-
-  // Compute sequential drive times
-  for (let i = 1; i < sorted.length; i++) {
-    const [pLat, pLng] = sorted[i - 1]!.venueKey.split(',').map(Number)
-    const [cLat, cLng] = sorted[i]!.venueKey.split(',').map(Number)
-    const R = 6371
-    const dLat = ((cLat! - pLat!) * Math.PI) / 180
-    const dLng = ((cLng! - pLng!) * Math.PI) / 180
-    const sinLat = Math.sin(dLat / 2)
-    const sinLng = Math.sin(dLng / 2)
-    const h = sinLat * sinLat + Math.cos((pLat! * Math.PI) / 180) * Math.cos((cLat! * Math.PI) / 180) * sinLng * sinLng
-    const km = R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
-    sorted[i]!.driveFromPrev = Math.round((km * 1.3 / 90) * 60)
-  }
-
-  return sorted
-}
-
 function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   const accentColor =
     accent === 'green' ? 'text-accent-green' :
+    accent === 'blue' ? 'text-accent-blue' :
     accent === 'orange' ? 'text-accent-orange' :
     accent === 'red' ? 'text-accent-red' :
     'text-text'

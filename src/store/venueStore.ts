@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { Coordinates } from '../types/roster'
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import { SPRING_TRAINING_SITES } from '../data/springTraining'
@@ -16,6 +17,7 @@ interface VenueState {
   venues: Record<string, VenueInfo>
   hsGeocodingProgress: { completed: number; total: number } | null
   hsGeocodingError: string | null
+  hsGeocodingFailedSchools: string[]
 
   loadNcaaVenues: () => void
   loadSpringTrainingVenues: () => void
@@ -24,10 +26,13 @@ interface VenueState {
   getVenue: (key: string) => VenueInfo | undefined
 }
 
-export const useVenueStore = create<VenueState>((set, get) => ({
+export const useVenueStore = create<VenueState>()(
+  persist(
+    (set, get) => ({
   venues: {},
   hsGeocodingProgress: null,
   hsGeocodingError: null,
+  hsGeocodingFailedSchools: [],
 
   loadNcaaVenues: () => {
     const venues = { ...get().venues }
@@ -64,7 +69,7 @@ export const useVenueStore = create<VenueState>((set, get) => ({
   },
 
   geocodeHsVenues: async (schools) => {
-    set({ hsGeocodingProgress: { completed: 0, total: schools.length }, hsGeocodingError: null })
+    set({ hsGeocodingProgress: { completed: 0, total: schools.length }, hsGeocodingError: null, hsGeocodingFailedSchools: [] })
 
     try {
       const results = await geocodeAllHsVenues(schools, (completed, total) => {
@@ -72,6 +77,8 @@ export const useVenueStore = create<VenueState>((set, get) => ({
       })
 
       const venues = { ...get().venues }
+      const failedSchools: string[] = []
+
       for (const [key, coords] of results.entries()) {
         venues[`hs-${key}`] = {
           name: key.split('|')[0] ?? key,
@@ -80,7 +87,15 @@ export const useVenueStore = create<VenueState>((set, get) => ({
         }
       }
 
-      set({ venues, hsGeocodingProgress: null })
+      // Track schools that weren't geocoded
+      for (const school of schools) {
+        const key = `${school.schoolName}|${school.city}, ${school.state}`
+        if (!results.has(key)) {
+          failedSchools.push(`${school.schoolName} (${school.city}, ${school.state})`)
+        }
+      }
+
+      set({ venues, hsGeocodingProgress: null, hsGeocodingFailedSchools: failedSchools })
     } catch (e) {
       set({
         hsGeocodingError: e instanceof Error ? e.message : 'Geocoding failed',
@@ -90,4 +105,12 @@ export const useVenueStore = create<VenueState>((set, get) => ({
   },
 
   getVenue: (key) => get().venues[key],
-}))
+}),
+    {
+      name: 'sv-travel-venues',
+      partialize: (state) => ({
+        venues: state.venues,
+      }),
+    },
+  ),
+)

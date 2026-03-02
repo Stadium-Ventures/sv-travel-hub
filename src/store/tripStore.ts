@@ -149,7 +149,15 @@ export const useTripStore = create<TripState>()(
         priorityPlayers,
         urgencyMap.size > 0 ? urgencyMap : undefined,
       )
-      set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '' })
+      // Prune stale tripStatuses — only keep keys that match current trips
+      const currentKeys = new Set(plan.trips.map(getTripKey))
+      const oldStatuses = get().tripStatuses
+      const prunedStatuses: Record<string, TripStatus> = {}
+      for (const [key, status] of Object.entries(oldStatuses)) {
+        if (currentKeys.has(key)) prunedStatuses[key] = status
+      }
+
+      set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '', tripStatuses: prunedStatuses })
     } catch (e) {
       set({
         computing: false,
@@ -168,6 +176,12 @@ export const useTripStore = create<TripState>()(
         maxDriveMinutes: state.maxDriveMinutes,
         priorityPlayers: state.priorityPlayers,
         tripStatuses: state.tripStatuses,
+      }),
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as object),
+        priorityPlayers: (persisted as any)?.priorityPlayers ?? [],
+        tripStatuses: (persisted as any)?.tripStatuses ?? {},
       }),
     },
   ),

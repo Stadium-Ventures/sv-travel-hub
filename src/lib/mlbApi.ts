@@ -90,7 +90,10 @@ export interface MLBRosterEntry {
 export async function fetchTeamRoster(teamId: number, sportId: number): Promise<MLBRosterEntry[]> {
   const url = `${MLB_BASE}/teams/${teamId}/roster?rosterType=fullRoster`
   const res = await fetch(url)
-  if (!res.ok) return [] // Some teams may not have rosters available
+  if (!res.ok) {
+    console.warn(`Roster fetch failed for team ${teamId}: HTTP ${res.status}`)
+    return [] // Some teams may not have rosters available
+  }
   const data = await res.json()
 
   return (data.roster ?? []).map((entry: Record<string, unknown>) => {
@@ -219,27 +222,40 @@ export async function fetchTransactions(
 }
 
 // Batch fetch transactions for multiple teams
+export interface TransactionFetchResult {
+  transactions: MLBTransaction[]
+  failedTeamIds: number[]
+}
+
 export async function fetchAllTransactions(
   teamIds: number[],
   startDate: string,
   endDate: string,
   onProgress?: (completed: number, total: number) => void,
-): Promise<MLBTransaction[]> {
+): Promise<TransactionFetchResult> {
   const all: MLBTransaction[] = []
+  const failedTeamIds: number[] = []
   const concurrency = 5
   let completed = 0
 
   for (let i = 0; i < teamIds.length; i += concurrency) {
     const batch = teamIds.slice(i, i + concurrency)
     const results = await Promise.all(
-      batch.map((id) => fetchTransactions(id, startDate, endDate).catch(() => [] as MLBTransaction[])),
+      batch.map(async (id) => {
+        try {
+          return { id, txns: await fetchTransactions(id, startDate, endDate) }
+        } catch {
+          return { id, txns: [] as MLBTransaction[], failed: true }
+        }
+      }),
     )
-    for (const txns of results) {
-      all.push(...txns)
+    for (const r of results) {
+      all.push(...r.txns)
+      if ('failed' in r && r.failed) failedTeamIds.push(r.id)
     }
     completed += batch.length
     onProgress?.(completed, teamIds.length)
   }
 
-  return all
+  return { transactions: all, failedTeamIds }
 }

@@ -1,30 +1,19 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRosterStore } from '../../store/rosterStore'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
 import { generateTripIcs, downloadIcs } from '../../lib/icsExport'
+import { haversineKm, HOME_BASE } from '../../lib/tripEngine'
+import { formatDate, formatDriveTime, TIER_DOT_COLORS } from '../../lib/formatters'
 import type { TripStatus } from '../../store/tripStore'
 import type { RosterPlayer } from '../../types/roster'
 
 interface Props {
   trip: TripCandidate
   index: number
+  playerMap: Map<string, RosterPlayer>
   defaultExpanded?: boolean
   onPlayerClick?: (playerName: string) => void
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T12:00:00Z')
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${d.getUTCDate()}`
-}
-
-function formatDriveTime(minutes: number): string {
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  if (h === 0) return `${m}m`
-  return m > 0 ? `${h}h ${m}m` : `${h}h`
 }
 
 function formatGameTime(timeStr?: string, source?: ScheduleSource): string {
@@ -85,32 +74,29 @@ function getOrgLabel(
   homeTeam: string,
   awayTeam: string,
   playerNames: string[],
-  players: RosterPlayer[],
+  playerMap: Map<string, RosterPlayer>,
 ): string {
   if (awayTeam === 'Spring Training') {
-    // ST events have venue name as homeTeam — derive org from player
-    const player = players.find((p) => playerNames.includes(p.playerName))
-    return player?.org ?? ''
+    for (const name of playerNames) {
+      const player = playerMap.get(name)
+      if (player) return player.org
+    }
+    return ''
   }
   if (source === 'mlb-api') {
-    // Regular pro game: homeTeam is already like "Cincinnati Reds"
     return homeTeam
   }
   if (source === 'ncaa-lookup') {
-    return homeTeam // School name
+    return homeTeam
   }
   if (source === 'hs-lookup') {
-    const player = players.find((p) => playerNames.includes(p.playerName))
-    return player ? `${player.org}, ${player.state}` : homeTeam
+    for (const name of playerNames) {
+      const player = playerMap.get(name)
+      if (player) return `${player.org}, ${player.state}`
+    }
+    return homeTeam
   }
   return homeTeam
-}
-
-const TIER_DOT_COLORS: Record<number, string> = {
-  1: 'bg-accent-red',
-  2: 'bg-accent-orange',
-  3: 'bg-yellow-400',
-  4: 'bg-gray-500',
 }
 
 // Deduplicate venues: merge nearby games at the same coords into one stop
@@ -134,14 +120,14 @@ interface VenueStop {
   gameStatus?: string
 }
 
-function buildVenueStops(trip: TripCandidate, players: RosterPlayer[]): VenueStop[] {
+export function buildVenueStops(trip: TripCandidate, playerMap: Map<string, RosterPlayer>): VenueStop[] {
   const venueMap = new Map<string, VenueStop>()
 
   // Add anchor venue
   const anchorKey = `${trip.anchorGame.venue.coords.lat.toFixed(4)},${trip.anchorGame.venue.coords.lng.toFixed(4)}`
   const anchorOrg = getOrgLabel(
     trip.anchorGame.source, trip.anchorGame.homeTeam, trip.anchorGame.awayTeam,
-    trip.anchorGame.playerNames, players,
+    trip.anchorGame.playerNames, playerMap,
   )
   venueMap.set(anchorKey, {
     venueName: trip.anchorGame.venue.name,
@@ -173,7 +159,7 @@ function buildVenueStops(trip: TripCandidate, players: RosterPlayer[]): VenueSto
       }
       if (!existing.dates.includes(game.date)) existing.dates.push(game.date)
     } else {
-      const org = getOrgLabel(game.source, game.homeTeam, game.awayTeam, game.playerNames, players)
+      const org = getOrgLabel(game.source, game.homeTeam, game.awayTeam, game.playerNames, playerMap)
       venueMap.set(key, {
         venueName: game.venue.name,
         venueKey: key,
@@ -219,17 +205,6 @@ function parseVenueKey(key: string): { lat: number; lng: number } {
   return { lat: lat!, lng: lng! }
 }
 
-// Haversine distance in km (duplicated from tripEngine for self-contained display)
-function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const R = 6371
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180
-  const sinLat = Math.sin(dLat / 2)
-  const sinLng = Math.sin(dLng / 2)
-  const h = sinLat * sinLat + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * sinLng * sinLng
-  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
-}
-
 // Generate plain-text itinerary for a trip
 export function generateItineraryText(trip: TripCandidate, index: number, stops: VenueStop[], playerMap: Map<string, RosterPlayer>): string {
   const startDate = formatDate(trip.suggestedDays[0]!)
@@ -271,7 +246,6 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
   let returnMin = 0
   if (lastStop) {
     const lastCoords = parseVenueKey(lastStop.venueKey)
-    const HOME_BASE = { lat: 28.5383, lng: -81.3792 }
     returnMin = Math.round((haversineKm(lastCoords, HOME_BASE) * 1.3 / 90) * 60)
   }
   const totalDriveText = trip.driveFromHomeMinutes + interDrive + returnMin
@@ -280,12 +254,10 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
   return text
 }
 
-export default function TripCard({ trip, index, defaultExpanded = false, onPlayerClick }: Props) {
-  const players = useRosterStore((s) => s.players)
-  const playerMap = new Map<string, RosterPlayer>()
-  for (const p of players) playerMap.set(p.playerName, p)
+export default function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick }: Props) {
+  const setVisitOverride = useRosterStore((s) => s.setVisitOverride)
 
-  const stops = buildVenueStops(trip, players)
+  const stops = useMemo(() => buildVenueStops(trip, playerMap), [trip, playerMap])
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [showScoreDetail, setShowScoreDetail] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -345,7 +317,6 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
   const lastStop = stops[stops.length - 1]
   if (lastStop) {
     const lastCoords = parseVenueKey(lastStop.venueKey)
-    const HOME_BASE = { lat: 28.5383, lng: -81.3792 } // Orlando
     const returnKm = haversineKm(lastCoords, HOME_BASE)
     const returnMinutes = Math.round((returnKm * 1.3 / 90) * 60)
     if (returnMinutes > 0) {
@@ -372,17 +343,35 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
     summary += ` Also seeing: ${t2Names.join(', ')}.`
   }
 
+  // Track which players have been marked as visited (persists across collapse/expand)
+  const [markedPlayers, setMarkedPlayers] = useState<Set<string>>(new Set())
+
+  const [copyError, setCopyError] = useState(false)
+  const [calError, setCalError] = useState(false)
+
   async function handleCopyItinerary() {
-    const text = generateItineraryText(trip, index, stops, playerMap)
-    await navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    try {
+      const text = generateItineraryText(trip, index, stops, playerMap)
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setCopyError(false)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopyError(true)
+      setTimeout(() => setCopyError(false), 3000)
+    }
   }
 
   function handleExportCalendar(e: React.MouseEvent) {
     e.stopPropagation()
-    const ics = generateTripIcs(trip, index, playerMap)
-    downloadIcs(ics, `sv-trip-${index}.ics`)
+    try {
+      const ics = generateTripIcs(trip, index, playerMap)
+      downloadIcs(ics, `sv-trip-${index}.ics`)
+      setCalError(false)
+    } catch {
+      setCalError(true)
+      setTimeout(() => setCalError(false), 3000)
+    }
   }
 
   return (
@@ -390,7 +379,11 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
       {/* Header — always visible, clickable to expand/collapse */}
       <div
         className="flex cursor-pointer items-start justify-between gap-4"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded) } }}
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -427,24 +420,24 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
             </span>
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
           <button
             onClick={(e) => { e.stopPropagation(); handleCopyItinerary() }}
-            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors hidden sm:block"
             title="Copy trip itinerary to clipboard"
           >
-            {copied ? 'Copied!' : 'Copy'}
+            {copied ? 'Copied!' : copyError ? 'Failed' : 'Copy'}
           </button>
           <button
             onClick={handleExportCalendar}
-            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors hidden sm:block"
             title="Download .ics calendar file"
           >
-            Calendar
+            {calError ? 'Failed' : 'Calendar'}
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); setSelectedTripIndex(index - 1) }}
-            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors hidden sm:block"
             title="Highlight this trip on the Map tab"
           >
             Map
@@ -464,7 +457,7 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
               {tierCounts.t3 > 0 && <span className="text-yellow-400">{tierCounts.t3}×T3</span>}
             </div>
           )}
-          <div className="rounded-lg bg-gray-950/60 px-2.5 py-1">
+          <div className="hidden rounded-lg bg-gray-950/60 px-2.5 py-1 sm:block">
             <span className="text-sm font-bold text-text">{stops.length}</span>
             <span className="ml-1 text-[11px] text-text-dim">
               venue{stops.length !== 1 ? 's' : ''}
@@ -527,8 +520,8 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
             </span>
           ))}
         </div>
-        <p className="mt-1 text-text-dim/60">
-          Total drive: ~{formatDriveTime(computedTotalDrive)}
+        <p className="mt-1 text-text-dim/60" title="Estimates use straight-line distance with a 30% detour factor at ~55 mph average. Actual times will vary with traffic and route.">
+          Total drive: ~{formatDriveTime(computedTotalDrive)} <span className="text-text-dim/40">(estimates only)</span>
         </p>
       </div>
 
@@ -650,8 +643,57 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
         })}
       </div>
 
-      {/* Player list */}
+      {/* Mobile action buttons (hidden on desktop where they appear in header) */}
+      <div className="mt-3 flex gap-2 sm:hidden">
+        <button
+          onClick={(e) => { e.stopPropagation(); handleCopyItinerary() }}
+          className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text"
+        >
+          {copied ? 'Copied!' : copyError ? 'Failed' : 'Copy'}
+        </button>
+        <button
+          onClick={handleExportCalendar}
+          className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text"
+        >
+          {calError ? 'Failed' : 'Calendar'}
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); setSelectedTripIndex(index - 1) }}
+          className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text"
+        >
+          Map
+        </button>
+      </div>
+
+      {/* Mark Visited — quick-log visits from the trip card */}
       <div className="mt-4 border-t border-border/30 pt-3">
+        <p className="mb-2 text-[11px] font-medium text-text-dim">Mark Visited</p>
+        <div className="flex flex-wrap gap-1.5">
+          {[...allPlayers].map((name) => {
+            const player = playerMap.get(name)
+            if (!player) return null
+            const tier = player.tier
+            const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+            return (
+              <MarkVisitedChip
+                key={name}
+                name={name}
+                tier={tier}
+                dotColor={dotColor}
+                marked={markedPlayers.has(name)}
+                onMark={() => {
+                  const today = new Date().toISOString().split('T')[0]!
+                  setVisitOverride(name, player.visitsCompleted + 1, today)
+                  setMarkedPlayers((prev) => new Set(prev).add(name))
+                }}
+              />
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Player list */}
+      <div className="mt-3 border-t border-border/30 pt-3">
         <p className="text-xs text-text-dim">
           <span className="font-medium text-text">{allPlayers.size} players:</span>{' '}
           {[...allPlayers].map((name) => {
@@ -671,6 +713,40 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
       )}
       </div>)}
     </div>
+  )
+}
+
+function MarkVisitedChip({ name, tier, dotColor, marked, onMark }: {
+  name: string
+  tier: number
+  dotColor: string
+  marked: boolean
+  onMark: () => void
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+        if (marked) return
+        onMark()
+      }}
+      disabled={marked}
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+        marked
+          ? 'bg-accent-green/15 text-accent-green'
+          : 'bg-surface text-text hover:bg-accent-green/10'
+      }`}
+      title={marked ? `Logged visit for ${name}` : `Log an in-person visit for ${name} today`}
+    >
+      <span className={`inline-block h-2 w-2 rounded-full ${marked ? 'bg-accent-green' : dotColor}`} />
+      {name}
+      <span className="text-text-dim/60">T{tier}</span>
+      {marked ? (
+        <span className="ml-0.5 text-accent-green">&#10003;</span>
+      ) : (
+        <span className="ml-0.5 text-text-dim/40">+1</span>
+      )}
+    </button>
   )
 }
 

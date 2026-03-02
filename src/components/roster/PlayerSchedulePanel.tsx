@@ -4,6 +4,7 @@ import { useScheduleStore } from '../../store/scheduleStore'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useVenueStore } from '../../store/venueStore'
 import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../../lib/tripEngine'
+import { formatDate } from '../../lib/formatters'
 import type { GameEvent } from '../../types/schedule'
 import type { Coordinates } from '../../types/roster'
 
@@ -18,13 +19,6 @@ const SOURCE_LABELS: Record<string, string> = {
   'mlb-api': 'Pro',
   'ncaa-lookup': 'NCAA',
   'hs-lookup': 'HS',
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T12:00:00Z')
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${d.getUTCDate()}`
 }
 
 interface Props {

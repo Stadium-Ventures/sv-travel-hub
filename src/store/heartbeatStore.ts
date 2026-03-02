@@ -42,6 +42,8 @@ export interface HeartbeatPlayer {
 interface HeartbeatState {
   priorities: HeartbeatPriority[]
   players: HeartbeatPlayer[]
+  playerLookup: Map<string, HeartbeatPlayer>
+  urgencyLookup: Map<string, HeartbeatPriority>
   loading: boolean
   error: string | null
   lastFetchedAt: string | null
@@ -56,11 +58,21 @@ function normalizeName(name: string): string {
   return name.trim().toLowerCase()
 }
 
+function buildLookups(players: HeartbeatPlayer[], priorities: HeartbeatPriority[]) {
+  const playerLookup = new Map<string, HeartbeatPlayer>()
+  for (const p of players) playerLookup.set(normalizeName(p.name), p)
+  const urgencyLookup = new Map<string, HeartbeatPriority>()
+  for (const p of priorities) urgencyLookup.set(normalizeName(p.name), p)
+  return { playerLookup, urgencyLookup }
+}
+
 export const useHeartbeatStore = create<HeartbeatState>()(
   persist(
     (set, get) => ({
       priorities: [],
       players: [],
+      playerLookup: new Map(),
+      urgencyLookup: new Map(),
       loading: false,
       error: null,
       lastFetchedAt: null,
@@ -79,9 +91,15 @@ export const useHeartbeatStore = create<HeartbeatState>()(
           const priorityData = await priorityRes.json()
           const summaryData = await summaryRes.json()
 
+          const priorities = priorityData.priorities ?? []
+          const players = summaryData.players ?? []
+          const { playerLookup, urgencyLookup } = buildLookups(players, priorities)
+
           set({
-            priorities: priorityData.priorities ?? [],
-            players: summaryData.players ?? [],
+            priorities,
+            players,
+            playerLookup,
+            urgencyLookup,
             loading: false,
             lastFetchedAt: new Date().toISOString(),
           })
@@ -94,13 +112,11 @@ export const useHeartbeatStore = create<HeartbeatState>()(
       },
 
       getPlayerData: (playerName: string) => {
-        const normalized = normalizeName(playerName)
-        return get().players.find((p) => normalizeName(p.name) === normalized)
+        return get().playerLookup.get(normalizeName(playerName))
       },
 
       getPlayerUrgency: (playerName: string) => {
-        const normalized = normalizeName(playerName)
-        return get().priorities.find((p) => normalizeName(p.name) === normalized)
+        return get().urgencyLookup.get(normalizeName(playerName))
       },
     }),
     {
@@ -110,6 +126,19 @@ export const useHeartbeatStore = create<HeartbeatState>()(
         players: state.players,
         lastFetchedAt: state.lastFetchedAt,
       }),
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as object),
+        players: (persisted as any)?.players ?? [],
+        priorities: (persisted as any)?.priorities ?? [],
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          const { playerLookup, urgencyLookup } = buildLookups(state.players ?? [], state.priorities ?? [])
+          state.playerLookup = playerLookup
+          state.urgencyLookup = urgencyLookup
+        }
+      },
     },
   ),
 )

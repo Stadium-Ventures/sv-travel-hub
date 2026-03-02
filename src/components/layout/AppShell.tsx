@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 
-export type TabId = 'roster' | 'schedule' | 'trips' | 'map'
+export type TabId = 'roster' | 'schedule' | 'calendar' | 'trips' | 'map'
 
 const TABS: { id: TabId; label: string; heading: string; description: string }[] = [
   {
@@ -14,6 +14,12 @@ const TABS: { id: TabId; label: string; heading: string; description: string }[]
     label: 'Data Setup',
     heading: 'Data Setup',
     description: 'Connect each player to their current team so we can look up where and when they play. Once connected, the app pulls their game schedules automatically.',
+  },
+  {
+    id: 'calendar',
+    label: 'Calendar',
+    heading: 'Game Calendar',
+    description: 'All your players\' games in one view — Pro, spring training, college, and high school combined. Use the filters to focus on specific levels.',
   },
   {
     id: 'trips',

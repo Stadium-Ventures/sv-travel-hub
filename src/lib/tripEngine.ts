@@ -20,7 +20,7 @@ const TIER_WEIGHTS: Record<number, number> = {
 }
 
 // Haversine distance in km between two coordinates
-function haversineKm(a: Coordinates, b: Coordinates): number {
+export function haversineKm(a: Coordinates, b: Coordinates): number {
   const R = 6371
   const dLat = ((b.lat - a.lat) * Math.PI) / 180
   const dLng = ((b.lng - a.lng) * Math.PI) / 180
@@ -34,7 +34,7 @@ function haversineKm(a: Coordinates, b: Coordinates): number {
 
 // Estimate drive time in minutes from straight-line distance
 // ~90 km/h avg speed with 1.3 detour factor (reasonable for Florida highway driving)
-function estimateDriveMinutes(a: Coordinates, b: Coordinates): number {
+export function estimateDriveMinutes(a: Coordinates, b: Coordinates): number {
   const km = haversineKm(a, b)
   return Math.round((km * 1.3 / 90) * 60)
 }
@@ -436,6 +436,7 @@ export async function generateTrips(
       analyzedEventCount: 0,
       totalPlayersWithVisits: 0,
       totalVisitsCovered: 0,
+      totalVisitsPlanned: 0,
       coveragePercent: 0,
     }
   }
@@ -581,10 +582,50 @@ export async function generateTrips(
 
   onProgress?.('Optimizing', `${candidates.length} trip candidates — selecting best trips...`)
 
+  // --- Multi-visit tracking ---
+  // Track how many trips each player appears in. A player is "saturated" when
+  // they have enough trip appearances to cover their visitsRemaining.
+  // This means T1 players (needing 5 visits) can appear in up to 5 trips.
+  const playerVisitCounts = new Map<string, number>()
+
+  function isPlayerSaturated(name: string): boolean {
+    const player = playerMap.get(name)
+    if (!player) return true
+    return (playerVisitCounts.get(name) ?? 0) >= player.visitsRemaining
+  }
+
+  function addPlayerVisit(name: string) {
+    if (eligiblePlayers.has(name)) {
+      playerVisitCounts.set(name, (playerVisitCounts.get(name) ?? 0) + 1)
+    }
+  }
+
+  function recordTripPlayers(trip: TripCandidate) {
+    for (const name of trip.anchorGame.playerNames) addPlayerVisit(name)
+    for (const g of trip.nearbyGames) {
+      for (const name of g.playerNames) addPlayerVisit(name)
+    }
+  }
+
+  // Score a trip accounting for visits already planned
+  function scoreWithCoverage(playerNames: string[]): number {
+    let score = 0
+    for (const name of playerNames) {
+      const player = playerMap.get(name)
+      if (!player) continue
+      const weight = TIER_WEIGHTS[player.tier] ?? 0
+      const remainingNeed = Math.max(0, player.visitsRemaining - (playerVisitCounts.get(name) ?? 0))
+      if (remainingNeed <= 0) continue
+      const base = weight * remainingNeed
+      const urgencyBoost = urgencyMap?.get(name) ?? 1.0
+      score += Math.round(base * urgencyBoost)
+    }
+    return score
+  }
+
   // --- Priority player handling ---
   const priorityResults: PriorityResult[] = []
   const selectedTrips: TripCandidate[] = []
-  const visitedPlayers = new Set<string>()
 
   if (priorityPlayers.length > 0) {
     onProgress?.('Priority', `Building trip around ${priorityPlayers.join(' & ')}...`)
@@ -613,36 +654,20 @@ export async function generateTrips(
       })
 
       if (bothCandidates.length > 0) {
-        // Found a trip with both — pick the highest value one
         bothCandidates.sort((a, b) => b.visitValue - a.visitValue)
         const best = bothCandidates[0]!
         selectedTrips.push(best)
-        for (const name of best.anchorGame.playerNames) {
-          if (eligiblePlayers.has(name)) visitedPlayers.add(name)
-        }
-        for (const g of best.nearbyGames) {
-          for (const name of g.playerNames) {
-            if (eligiblePlayers.has(name)) visitedPlayers.add(name)
-          }
-        }
+        recordTripPlayers(best)
         priorityResults.push({ playerName: p1, status: 'included' })
         priorityResults.push({ playerName: p2, status: 'included' })
       } else {
-        // Can't combine — build separate priority trips for each
         for (const pName of [p1, p2]) {
           const pCandidates = candidatesWithPlayer(pName)
           if (pCandidates.length > 0) {
             pCandidates.sort((a, b) => b.visitValue - a.visitValue)
             const best = pCandidates[0]!
             selectedTrips.push(best)
-            for (const name of best.anchorGame.playerNames) {
-              if (eligiblePlayers.has(name)) visitedPlayers.add(name)
-            }
-            for (const g of best.nearbyGames) {
-              for (const name of g.playerNames) {
-                if (eligiblePlayers.has(name)) visitedPlayers.add(name)
-              }
-            }
+            recordTripPlayers(best)
             priorityResults.push({
               playerName: pName,
               status: 'separate-trip',
@@ -664,14 +689,7 @@ export async function generateTrips(
         pCandidates.sort((a, b) => b.visitValue - a.visitValue)
         const best = pCandidates[0]!
         selectedTrips.push(best)
-        for (const name of best.anchorGame.playerNames) {
-          if (eligiblePlayers.has(name)) visitedPlayers.add(name)
-        }
-        for (const g of best.nearbyGames) {
-          for (const name of g.playerNames) {
-            if (eligiblePlayers.has(name)) visitedPlayers.add(name)
-          }
-        }
+        recordTripPlayers(best)
         priorityResults.push({ playerName: pName, status: 'included' })
       } else {
         priorityResults.push({
@@ -684,18 +702,20 @@ export async function generateTrips(
   }
 
   // --- Greedy selection for remaining trips ---
+  // Players can appear in multiple trips until their visit quota is met.
   const remainingCandidates = [...candidates].sort((a, b) => b.visitValue - a.visitValue)
 
   while (remainingCandidates.length > 0) {
-    // Rescore remaining candidates excluding already-visited players
+    // Rescore remaining candidates based on unsaturated player value
     for (const trip of remainingCandidates) {
-      const remainingPlayerNames = [
+      const tripPlayerNames = [
         ...trip.anchorGame.playerNames,
         ...trip.nearbyGames.flatMap((g) => g.playerNames),
-      ].filter((n) => eligiblePlayers.has(n) && !visitedPlayers.has(n))
+      ].filter((n) => eligiblePlayers.has(n) && !isPlayerSaturated(n))
 
-      trip.visitValue = scoreTripCandidate([...new Set(remainingPlayerNames)], playerMap, urgencyMap)
-      trip.totalPlayersVisited = new Set(remainingPlayerNames).size
+      const uniqueNames = [...new Set(tripPlayerNames)]
+      trip.visitValue = scoreWithCoverage(uniqueNames)
+      trip.totalPlayersVisited = uniqueNames.length
     }
 
     // Re-sort and pick best
@@ -705,16 +725,7 @@ export async function generateTrips(
     if (best.visitValue === 0) break
 
     selectedTrips.push(best)
-
-    // Mark players as visited
-    for (const name of best.anchorGame.playerNames) {
-      if (eligiblePlayers.has(name)) visitedPlayers.add(name)
-    }
-    for (const g of best.nearbyGames) {
-      for (const name of g.playerNames) {
-        if (eligiblePlayers.has(name)) visitedPlayers.add(name)
-      }
-    }
+    recordTripPlayers(best)
 
     // Remove this candidate
     remainingCandidates.shift()
@@ -723,6 +734,7 @@ export async function generateTrips(
   // --- Fly-in visits for players beyond driving range ---
   onProgress?.('Fly-in analysis', 'Finding fly-in options for distant players...')
 
+  const visitedPlayers = new Set(playerVisitCounts.keys())
   const playersNotOnRoadTrips = [...eligiblePlayers].filter((n) => !visitedPlayers.has(n))
   const flyInVisits: FlyInVisit[] = []
   const flyInCovered = new Set<string>()
@@ -825,6 +837,7 @@ export async function generateTrips(
   })
 
   const totalCovered = visitedPlayers.size + flyInCovered.size
+  const totalVisitsPlanned = [...playerVisitCounts.values()].reduce((sum, v) => sum + v, 0)
   const totalTarget = players.reduce((sum, p) => sum + (TIER_VISIT_TARGETS[p.tier] ?? 0), 0)
 
   // Dedupe near-misses: only keep if player not already covered
@@ -840,6 +853,7 @@ export async function generateTrips(
     analyzedEventCount: eligibleGames.length,
     totalPlayersWithVisits: totalCovered,
     totalVisitsCovered: totalCovered,
+    totalVisitsPlanned,
     coveragePercent: totalTarget > 0 ? Math.round((totalCovered / eligiblePlayers.size) * 100) : 0,
     priorityResults: priorityResults.length > 0 ? priorityResults : undefined,
     nearMisses: filteredNearMisses.length > 0 ? filteredNearMisses : undefined,

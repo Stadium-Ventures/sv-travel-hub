@@ -160,11 +160,15 @@ export default function MapView() {
   }, [loadNcaaVenues, loadSpringTrainingVenues])
 
   // Geocode HS venues once when players are available
+  // Skip if HS venues already exist from localStorage persistence
   const hsGeocodeStarted = useRef(false)
   useEffect(() => {
     if (hsGeocodeStarted.current) return
     const hsPlayers = players.filter((p) => p.level === 'HS')
     if (hsPlayers.length === 0) return
+    // Check if HS venues are already hydrated from persistence
+    const hasHsVenues = Object.keys(venues).some((k) => k.startsWith('hs-'))
+    if (hasHsVenues) { hsGeocodeStarted.current = true; return }
     hsGeocodeStarted.current = true
     const schools = hsPlayers.map((p) => ({
       schoolName: p.org,
@@ -172,7 +176,7 @@ export default function MapView() {
       state: p.state,
     }))
     geocodeHsVenues(schools)
-  }, [players, geocodeHsVenues])
+  }, [players, venues, geocodeHsVenues])
 
   // Add pro venues from schedule data
   const lastProGamesLen = useRef(0)
@@ -442,6 +446,7 @@ function Toggle({ label, color, checked, onChange }: { label: string; color: str
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
           className="sr-only"
+          aria-label={label}
         />
         <div className={`h-4 w-8 rounded-full transition-colors ${checked ? color : 'bg-gray-700'}`} />
         <div className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${checked ? 'left-4.5' : 'left-0.5'}`} />
