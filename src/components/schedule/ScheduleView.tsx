@@ -668,16 +668,21 @@ function AllSourceCalendar({
   }
 
   return (
-    <div>
+    <div className="rounded-xl border border-border bg-surface p-5">
+      <h2 className="mb-1 text-base font-semibold text-text">Game Calendar</h2>
+      <p className="mb-3 text-xs text-text-dim">
+        All your players' games in one view. This combines Pro schedules, spring training, college, and high school into a single calendar. Use the filters to focus on specific levels.
+      </p>
+
       {/* Source filter toggles */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-text-dim">Show:</span>
         <button onClick={() => toggleFilter('pro')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.pro ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>Pro</button>
         <button onClick={() => toggleFilter('st')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.st ? 'bg-pink-400/20 text-pink-400 border-pink-400/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>Spring Training</button>
-        <button onClick={() => toggleFilter('ncaa')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.ncaa ? 'bg-accent-green/20 text-accent-green border-accent-green/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>NCAA</button>
-        <button onClick={() => toggleFilter('hs')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.hs ? 'bg-accent-orange/20 text-accent-orange border-accent-orange/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>HS</button>
+        <button onClick={() => toggleFilter('ncaa')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.ncaa ? 'bg-accent-green/20 text-accent-green border-accent-green/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>College</button>
+        <button onClick={() => toggleFilter('hs')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.hs ? 'bg-accent-orange/20 text-accent-orange border-accent-orange/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>High School</button>
         <span className="text-[11px] text-text-dim/50">
-          {combinedGames.length} events
+          {combinedGames.length} games
         </span>
       </div>
 

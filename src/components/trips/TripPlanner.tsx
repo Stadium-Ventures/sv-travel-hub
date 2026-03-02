@@ -238,7 +238,7 @@ export default function TripPlanner() {
       <div className="rounded-xl border border-border bg-surface p-5">
         <h2 className="mb-3 text-base font-semibold text-text">Trip Planner</h2>
         <p className="mb-4 text-xs text-text-dim">
-          Generate optimized road trips within driving radius. Thursdays are preferred anchor days, Sundays are blacked out.
+          Builds road trips from Orlando, grouping nearby players together. Trips are scored by how many high-priority players you'd visit. Thursdays get a bonus because games are less crowded and you'll have better access. Sundays are skipped since they're typically travel/rest days.
         </p>
 
         {/* Data freshness indicators */}
@@ -443,7 +443,7 @@ export default function TripPlanner() {
           <p className="mt-3 text-xs text-accent-orange">
             {players.length === 0
               ? 'Load the roster first.'
-              : 'No visit data for the selected date range. Adjust dates to overlap a season (ST: Feb 15–Mar 28, NCAA: Feb 14–Jun 15, HS: Feb 14–May 15) or fetch Pro schedules in the Schedule tab.'}
+              : 'No games found in the selected date range. Try adjusting dates to cover a season — Spring Training: Feb 15–Mar 28, College: Feb 14–Jun 15, High School: Feb 14–May 15. For Pro regular season games, load schedules on the Data Setup tab first.'}
           </p>
         )}
 
@@ -451,10 +451,10 @@ export default function TripPlanner() {
           <p className="mt-3 text-xs text-accent-green">
             {[
               hasStDates && hasProPlayers ? 'Spring training (Pro)' : '',
-              hasNcaaDates && hasNcaaPlayers ? 'NCAA season' : '',
-              hasHsDates && hasHsPlayers ? 'HS season' : '',
+              hasNcaaDates && hasNcaaPlayers ? 'College season' : '',
+              hasHsDates && hasHsPlayers ? 'High school season' : '',
             ].filter(Boolean).join(', ')} data available — trips can be generated now.
-            {hasProPlayers && ' For exact Pro regular season schedules, also fetch schedules in the Schedule tab.'}
+            {hasProPlayers && ' For exact Pro regular season schedules, load game data on the Data Setup tab.'}
           </p>
         )}
 
@@ -570,9 +570,9 @@ export default function TripPlanner() {
                       downloadIcs(ics, 'sv-travel-trips.ics')
                     }}
                     className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
-                    title="Download all trips as .ics calendar file"
+                    title="Download all trips as a calendar file you can import into Google Calendar, Outlook, etc."
                   >
-                    Export .ics
+                    Export to Calendar
                   </button>
                 </div>
               </div>

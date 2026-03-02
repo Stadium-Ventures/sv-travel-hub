@@ -118,7 +118,10 @@ export default function RosterDashboard() {
       {/* Per-tier coverage */}
       {stats.tiers.length > 0 && (
         <div className="rounded-xl border border-border bg-surface p-4">
-          <h3 className="mb-2 text-xs font-medium text-text-dim">Coverage by Tier</h3>
+          <h3 className="mb-1 text-xs font-medium text-text-dim">Visit Progress by Tier</h3>
+          <p className="mb-2 text-[10px] text-text-dim/60">
+            Tier 1 = top priority (visit most often) · Tier 2 = medium · Tier 3 = lower · Tier 4 = minimal
+          </p>
           <div className="flex flex-wrap gap-4">
             {stats.tiers.map(({ tier, count, target, completed, percent }) => (
               <div key={tier} className="flex items-center gap-2">
@@ -247,8 +250,14 @@ export default function RosterDashboard() {
         )
       })}
 
-      {filtered.length === 0 && (
-        <p className="py-10 text-center text-sm text-text-dim">No players match your filters.</p>
+      {filtered.length === 0 && players.length > 0 && (
+        <p className="py-10 text-center text-sm text-text-dim">No players match your filters. Try adjusting your search or level filter above.</p>
+      )}
+      {players.length === 0 && !loading && !error && (
+        <div className="py-10 text-center">
+          <p className="text-sm text-text-dim">No players loaded yet.</p>
+          <p className="mt-1 text-xs text-text-dim/60">The roster pulls automatically from the Google Sheet. Click Refresh above if it hasn't loaded.</p>
+        </div>
       )}
     </div>
   )

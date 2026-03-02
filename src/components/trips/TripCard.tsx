@@ -50,10 +50,10 @@ function getVisitContext(source: ScheduleSource, isHome: boolean, awayTeam: stri
       : { label: 'Away Game', color: 'bg-purple-500/15 text-purple-400' }
   }
   if (source === 'ncaa-lookup') {
-    return { label: 'School Visit (est.)', color: 'bg-accent-green/15 text-accent-green' }
+    return { label: 'School Visit (estimated)', color: 'bg-accent-green/15 text-accent-green' }
   }
   // hs-lookup
-  return { label: 'School Visit (est.)', color: 'bg-accent-orange/15 text-accent-orange' }
+  return { label: 'School Visit (estimated)', color: 'bg-accent-orange/15 text-accent-orange' }
 }
 
 // Get data source badge for real vs estimated
@@ -338,7 +338,10 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
               Trip #{index}
             </h3>
             {breakdown && (
-              <span className="rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue">
+              <span
+                className="rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue"
+                title="Trip value score — higher means more high-priority players visited. T1=100pts, T2=50pts, T3=25pts, +20% Thursday bonus."
+              >
                 {breakdown.finalScore} pts
               </span>
             )}
@@ -351,9 +354,9 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
                     ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
                     : 'bg-gray-800 text-text-dim/50 border border-border/30 hover:text-text-dim'
               }`}
-              title={currentStatus ? `Status: ${currentStatus} (click to cycle)` : 'Click to mark as Planned'}
+              title={currentStatus ? `Click to change status: ${currentStatus === 'planned' ? 'Planned → Completed' : 'Completed → Clear'}` : 'Click to mark this trip as Planned'}
             >
-              {currentStatus === 'planned' ? 'Planned' : currentStatus === 'completed' ? 'Completed' : 'No Status'}
+              {currentStatus === 'planned' ? 'Planned' : currentStatus === 'completed' ? 'Completed' : 'Mark Status'}
             </button>
           </div>
           <p className="mt-0.5 text-sm text-text-dim">
@@ -376,7 +379,7 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
             className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
             title="Download .ics calendar file"
           >
-            .ics
+            Calendar
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); setSelectedTripIndex(index - 1) }}
@@ -443,7 +446,7 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
             )}
           </div>
           <p className="mt-1 text-text-dim">
-            Raw: {breakdown.rawScore} → Final: {breakdown.finalScore} pts
+            Total: {breakdown.finalScore} pts — higher score = more high-priority players on this trip
           </p>
         </div>
       )}
@@ -528,8 +531,8 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
                       </span>
                     )}
                     {stop.isAnchor && (
-                      <span className="rounded bg-accent-blue/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue">
-                        BASE
+                      <span className="rounded bg-accent-blue/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue" title="The main stop this trip is built around">
+                        Main Stop
                       </span>
                     )}
                     {stop.sourceUrl && (
@@ -598,7 +601,7 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
       {hasUncertainEvents && (
         <div className="mt-2 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
           <p className="text-[11px] text-accent-orange">
-            Some stops are estimated (NCAA/HS schedules). Confirm player availability before traveling.
+            Some stops on this trip are based on estimated schedules (college or high school). Double-check that the player will actually be at the venue before making the drive.
           </p>
         </div>
       )}
@@ -611,10 +614,10 @@ function ConfidenceBadge({ confidence, note }: { confidence: VisitConfidence; no
   const colors = confidence === 'medium'
     ? 'bg-accent-orange/10 text-accent-orange'
     : 'bg-accent-red/10 text-accent-red'
-  const label = confidence === 'medium' ? 'Likely' : 'Uncertain'
+  const label = confidence === 'medium' ? 'Likely there' : 'Not confirmed'
 
   return (
-    <span className={`mt-0.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${colors}`} title={note}>
+    <span className={`mt-0.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${colors}`} title={note || (confidence === 'medium' ? 'Player is likely at this location based on schedule patterns, but not 100% confirmed' : 'This is an estimated schedule — confirm the player will be there before traveling')}>
       {label}
       {note && <span className="opacity-70">— {note}</span>}
     </span>
