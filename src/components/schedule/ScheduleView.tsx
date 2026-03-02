@@ -61,8 +61,8 @@ export default function ScheduleView() {
   const ncaaDroppedAwayGames = useScheduleStore((s) => s.ncaaDroppedAwayGames)
   const rosterMovesError = useScheduleStore((s) => s.rosterMovesError)
 
-  const [startDate, setStartDate] = useState('2026-03-01')
-  const [endDate, setEndDate] = useState('2026-09-30')
+  const [startDate, setStartDate] = useState(`${new Date().getFullYear()}-03-01`)
+  const [endDate, setEndDate] = useState(`${new Date().getFullYear()}-09-30`)
   const [sourceFilters, setSourceFilters] = useState<Record<string, boolean>>({
     pro: true, st: true, ncaa: true, hs: true,
   })
@@ -755,7 +755,8 @@ function AllSourceCalendar({
       // ST games from proGames
       all.push(...proGames.filter((g) => g.awayTeam === 'Spring Training'))
       // Synthetic ST events
-      const stEvents = generateSpringTrainingEvents(players, '2026-02-15', '2026-09-30', customMlbAliases)
+      const y = new Date().getFullYear()
+      const stEvents = generateSpringTrainingEvents(players, `${y}-02-15`, `${y}-09-30`, customMlbAliases)
       // Avoid duplicates with proGames by checking IDs
       const existingIds = new Set(all.map((g) => g.id))
       for (const e of stEvents) {
@@ -769,7 +770,7 @@ function AllSourceCalendar({
       const ncaaPlayersWithReal = new Set(ncaaGames.flatMap((g) => g.playerNames))
       const syntheticNcaa = generateNcaaEvents(
         players.filter((p) => p.level === 'NCAA' && !ncaaPlayersWithReal.has(p.playerName)),
-        '2026-02-14', '2026-06-15',
+        `${new Date().getFullYear()}-02-14`, `${new Date().getFullYear()}-06-15`,
         customNcaaAliases,
       )
       all.push(...syntheticNcaa)
@@ -783,7 +784,7 @@ function AllSourceCalendar({
           hsVenues.set(key.replace(/^hs-/, ''), { name: v.name, coords: v.coords })
         }
       }
-      const hsEvents = generateHsEvents(players, '2026-02-14', '2026-05-15', hsVenues)
+      const hsEvents = generateHsEvents(players, `${new Date().getFullYear()}-02-14`, `${new Date().getFullYear()}-05-15`, hsVenues)
       all.push(...hsEvents)
     }
 

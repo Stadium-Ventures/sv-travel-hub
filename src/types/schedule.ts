@@ -80,6 +80,8 @@ export interface TripPlan {
   trips: TripCandidate[]
   flyInVisits: FlyInVisit[]
   unvisitablePlayers: UnvisitablePlayer[]
+  skippedPlayers: Array<{ name: string; reason: string }> // T4 / no visits needed
+  analyzedEventCount: number // how many game events were analyzed
   totalPlayersWithVisits: number
   totalVisitsCovered: number
   coveragePercent: number

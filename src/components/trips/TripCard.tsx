@@ -401,7 +401,7 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
             {breakdown && (
               <span
                 className="rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue"
-                title="Trip value score — higher means more high-priority players visited. T1=100pts, T2=50pts, T3=25pts, +20% Thursday bonus."
+                title="Trip value score = tier weight × visits remaining per player. T1=5pts/visit, T2=3pts/visit, T3=1pt/visit, T4=0. Thursday anchor gets +20% bonus."
               >
                 {breakdown.finalScore} pts
               </span>

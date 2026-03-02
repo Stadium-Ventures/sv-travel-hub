@@ -381,6 +381,17 @@ export async function generateTrips(
     playerMap.set(p.playerName, p)
   }
 
+  // Track players skipped (T4 / no visits needed)
+  const skippedPlayers: Array<{ name: string; reason: string }> = []
+  for (const p of players) {
+    if (p.visitsRemaining <= 0) {
+      skippedPlayers.push({
+        name: p.playerName,
+        reason: p.tier === 4 ? 'Tier 4 — no visits required' : 'All visits already completed',
+      })
+    }
+  }
+
   // Filter to players needing visits
   const eligiblePlayers = new Set(
     players.filter((p) => p.visitsRemaining > 0).map((p) => p.playerName),
@@ -410,6 +421,8 @@ export async function generateTrips(
       trips: [],
       flyInVisits: [],
       unvisitablePlayers: unreachableWithReasons,
+      skippedPlayers,
+      analyzedEventCount: 0,
       totalPlayersWithVisits: 0,
       totalVisitsCovered: 0,
       coveragePercent: 0,
@@ -812,6 +825,8 @@ export async function generateTrips(
     trips: selectedTrips,
     flyInVisits,
     unvisitablePlayers: trulyUnreachable,
+    skippedPlayers,
+    analyzedEventCount: eligibleGames.length,
     totalPlayersWithVisits: totalCovered,
     totalVisitsCovered: totalCovered,
     coveragePercent: totalTarget > 0 ? Math.round((totalCovered / eligiblePlayers.size) * 100) : 0,

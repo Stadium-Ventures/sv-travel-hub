@@ -68,6 +68,8 @@ export const useRosterStore = create<RosterState>()(
     {
       name: 'sv-travel-roster',
       partialize: (state) => ({
+        players: state.players,
+        lastFetchedAt: state.lastFetchedAt,
         visitOverrides: state.visitOverrides,
       }),
     },
