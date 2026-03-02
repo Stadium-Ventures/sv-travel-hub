@@ -119,6 +119,7 @@ interface VenueStop {
   venueKey: string
   players: string[]
   driveFromAnchor: number
+  driveFromPrev: number // sequential drive from previous stop
   isAnchor: boolean
   dates: string[]
   confidence?: VisitConfidence
@@ -147,6 +148,7 @@ function buildVenueStops(trip: TripCandidate, players: RosterPlayer[]): VenueSto
     venueKey: anchorKey,
     players: [...trip.anchorGame.playerNames],
     driveFromAnchor: 0,
+    driveFromPrev: 0,
     isAnchor: true,
     dates: [trip.anchorGame.date],
     confidence: trip.anchorGame.confidence,
@@ -177,6 +179,7 @@ function buildVenueStops(trip: TripCandidate, players: RosterPlayer[]): VenueSto
         venueKey: key,
         players: [...game.playerNames],
         driveFromAnchor: game.driveMinutes,
+        driveFromPrev: 0, // computed after sorting
         isAnchor: false,
         dates: [game.date],
         confidence: game.confidence,
@@ -193,11 +196,38 @@ function buildVenueStops(trip: TripCandidate, players: RosterPlayer[]): VenueSto
     }
   }
 
-  return [...venueMap.values()].sort((a, b) => {
+  const sorted = [...venueMap.values()].sort((a, b) => {
     if (a.isAnchor) return -1
     if (b.isAnchor) return 1
     return a.driveFromAnchor - b.driveFromAnchor
   })
+
+  // Compute sequential drive times between stops using Haversine
+  for (let i = 1; i < sorted.length; i++) {
+    const prevCoords = parseVenueKey(sorted[i - 1]!.venueKey)
+    const currCoords = parseVenueKey(sorted[i]!.venueKey)
+    const km = haversineKm(prevCoords, currCoords)
+    sorted[i]!.driveFromPrev = Math.round((km * 1.3 / 90) * 60)
+  }
+
+  return sorted
+}
+
+// Parse "lat,lng" venue key back to coordinates
+function parseVenueKey(key: string): { lat: number; lng: number } {
+  const [lat, lng] = key.split(',').map(Number)
+  return { lat: lat!, lng: lng! }
+}
+
+// Haversine distance in km (duplicated from tripEngine for self-contained display)
+function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180
+  const sinLat = Math.sin(dLat / 2)
+  const sinLng = Math.sin(dLng / 2)
+  const h = sinLat * sinLat + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * sinLng * sinLng
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
 }
 
 // Generate plain-text itinerary for a trip
@@ -216,7 +246,7 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
       ? `${stop.orgLabel} — ${stop.venueName}`
       : stop.venueName
     const ctx = getVisitContext(stop.source, stop.isHome, stop.awayTeam)
-    const driveNote = i > 0 && stop.driveFromAnchor > 0 ? ` (${formatDriveTime(stop.driveFromAnchor)} from Stop ${1})` : ''
+    const driveNote = i > 0 && stop.driveFromPrev > 0 ? ` (${formatDriveTime(stop.driveFromPrev)} from Stop ${i})` : ''
     text += `\nStop ${i + 1}: ${label} (${ctx.label})${driveNote}\n`
     const playerDescs = stop.players.map((name) => {
       const p = playerMap.get(name)
@@ -235,7 +265,17 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
     text += `\nScore: ${b.finalScore} pts (${parts.join(' + ')})\n`
   }
 
-  text += `Total drive: ~${formatDriveTime(trip.totalDriveMinutes)}\n`
+  // Compute sequential total drive
+  const interDrive = stops.reduce((sum, s) => sum + s.driveFromPrev, 0)
+  const lastStop = stops[stops.length - 1]
+  let returnMin = 0
+  if (lastStop) {
+    const lastCoords = parseVenueKey(lastStop.venueKey)
+    const HOME_BASE = { lat: 28.5383, lng: -81.3792 }
+    returnMin = Math.round((haversineKm(lastCoords, HOME_BASE) * 1.3 / 90) * 60)
+  }
+  const totalDriveText = trip.driveFromHomeMinutes + interDrive + returnMin
+  text += `Total drive: ~${formatDriveTime(totalDriveText)}\n`
 
   return text
 }
@@ -287,28 +327,49 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
 
   const breakdown = trip.scoreBreakdown
 
-  // Compute route distance breakdown
+  // Compute route distance breakdown using sequential drives
   const routeSegments: Array<{ from: string; to: string; minutes: number }> = []
   routeSegments.push({ from: 'Orlando', to: stops[0]?.orgLabel || stops[0]?.venueName || 'Stop 1', minutes: trip.driveFromHomeMinutes })
   for (let i = 1; i < stops.length; i++) {
     const prev = stops[i - 1]!
     const curr = stops[i]!
-    if (curr.driveFromAnchor > 0) {
+    if (curr.driveFromPrev > 0) {
       routeSegments.push({
         from: prev.orgLabel || prev.venueName,
         to: curr.orgLabel || curr.venueName,
-        minutes: curr.driveFromAnchor,
+        minutes: curr.driveFromPrev,
       })
     }
   }
   // Return home from last stop
   const lastStop = stops[stops.length - 1]
   if (lastStop) {
-    const interVenueDrive = stops.slice(1).reduce((sum, s) => sum + s.driveFromAnchor, 0)
-    const returnMinutes = trip.totalDriveMinutes - trip.driveFromHomeMinutes - interVenueDrive
+    const lastCoords = parseVenueKey(lastStop.venueKey)
+    const HOME_BASE = { lat: 28.5383, lng: -81.3792 } // Orlando
+    const returnKm = haversineKm(lastCoords, HOME_BASE)
+    const returnMinutes = Math.round((returnKm * 1.3 / 90) * 60)
     if (returnMinutes > 0) {
-      routeSegments.push({ from: lastStop.orgLabel || lastStop.venueName, to: 'Orlando', minutes: Math.round(returnMinutes) })
+      routeSegments.push({ from: lastStop.orgLabel || lastStop.venueName, to: 'Orlando', minutes: returnMinutes })
     }
+  }
+  // Compute actual total drive from sequential segments
+  const computedTotalDrive = routeSegments.reduce((sum, s) => sum + s.minutes, 0)
+
+  // Build natural language summary
+  const uniquePlayerNames = [...allPlayers]
+  const t1Names = uniquePlayerNames.filter((n) => playerMap.get(n)?.tier === 1)
+  const t2Names = uniquePlayerNames.filter((n) => playerMap.get(n)?.tier === 2)
+  const stopCities = stops.map((s) => s.orgLabel || s.venueName)
+  let summary = `${dayCount}-day trip visiting ${uniquePlayerNames.length} player${uniquePlayerNames.length !== 1 ? 's' : ''} across ${stops.length} stop${stops.length !== 1 ? 's' : ''}`
+  if (stopCities.length <= 4) {
+    summary += ` (${stopCities.join(' → ')})`
+  }
+  summary += `. ~${formatDriveTime(computedTotalDrive)} total driving.`
+  if (t1Names.length > 0) {
+    summary += ` Top priority: ${t1Names.join(', ')}.`
+  }
+  if (t2Names.length > 0) {
+    summary += ` Also seeing: ${t2Names.join(', ')}.`
   }
 
   async function handleCopyItinerary() {
@@ -410,13 +471,16 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
             </span>
           </div>
           <div className="rounded-lg bg-gray-950/60 px-2.5 py-1">
-            <span className="text-[11px] text-text-dim">~{formatDriveTime(trip.totalDriveMinutes)}</span>
+            <span className="text-[11px] text-text-dim">~{formatDriveTime(computedTotalDrive)}</span>
           </div>
         </div>
       </div>
 
       {/* Expanded content */}
       {expanded && (<div className="mt-4">
+
+      {/* Natural language summary */}
+      <p className="mb-3 text-sm text-text-dim">{summary}</p>
 
       {/* Score breakdown toggle */}
       {breakdown && (
@@ -464,7 +528,7 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
           ))}
         </div>
         <p className="mt-1 text-text-dim/60">
-          Total drive: ~{formatDriveTime(trip.totalDriveMinutes)}
+          Total drive: ~{formatDriveTime(computedTotalDrive)}
         </p>
       </div>
 
@@ -477,11 +541,11 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
           return (
             <div key={stop.venueKey}>
               {/* Drive connector between stops */}
-              {i > 0 && stop.driveFromAnchor > 0 && (
+              {i > 0 && stop.driveFromPrev > 0 && (
                 <div className="my-1 flex items-center gap-2 pl-6">
                   <div className="h-px flex-1 border-t border-dashed border-border/40" />
                   <span className="text-[10px] text-text-dim/60">
-                    ~{formatDriveTime(stop.driveFromAnchor)} from stop 1
+                    ~{formatDriveTime(stop.driveFromPrev)} from stop {i}
                   </span>
                   <div className="h-px flex-1 border-t border-dashed border-border/40" />
                 </div>

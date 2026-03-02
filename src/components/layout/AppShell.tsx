@@ -34,7 +34,7 @@ interface AppShellProps {
 }
 
 export default function AppShell({ children }: AppShellProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('roster')
+  const [activeTab, setActiveTab] = useState<TabId>('trips')
   const currentTab = TABS.find((t) => t.id === activeTab)!
 
   return (

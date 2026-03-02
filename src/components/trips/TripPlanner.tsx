@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
@@ -20,6 +20,124 @@ const TIER_DOT_COLORS: Record<number, string> = {
   2: 'bg-accent-orange',
   3: 'bg-yellow-400',
   4: 'bg-gray-500',
+}
+
+const LEVEL_ORDER: Record<string, number> = { Pro: 0, NCAA: 1, HS: 2 }
+const LEVEL_LABELS: Record<string, string> = { Pro: 'Pro', NCAA: 'College', HS: 'High School' }
+const LEVEL_COLORS: Record<string, string> = {
+  Pro: 'text-accent-blue',
+  NCAA: 'text-accent-green',
+  HS: 'text-accent-orange',
+}
+
+function PlayerSearchPicker({
+  value,
+  players,
+  excludeName,
+  placeholder,
+  onChange,
+}: {
+  value: string
+  players: RosterPlayer[]
+  excludeName?: string
+  placeholder: string
+  onChange: (name: string) => void
+}) {
+  const [search, setSearch] = useState('')
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Close on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase()
+    return players
+      .filter((p) => p.playerName !== excludeName)
+      .filter((p) => !q || p.playerName.toLowerCase().includes(q) || p.org.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const levelDiff = (LEVEL_ORDER[a.level] ?? 9) - (LEVEL_ORDER[b.level] ?? 9)
+        if (levelDiff !== 0) return levelDiff
+        return a.playerName.localeCompare(b.playerName)
+      })
+  }, [players, excludeName, search])
+
+  // Group by level
+  const grouped = useMemo(() => {
+    const groups: Array<{ level: string; players: RosterPlayer[] }> = []
+    let currentLevel = ''
+    for (const p of filtered) {
+      if (p.level !== currentLevel) {
+        currentLevel = p.level
+        groups.push({ level: currentLevel, players: [] })
+      }
+      groups[groups.length - 1]!.players.push(p)
+    }
+    return groups
+  }, [filtered])
+
+  const selectedPlayer = players.find((p) => p.playerName === value)
+
+  return (
+    <div ref={containerRef} className="relative min-w-[220px]">
+      {value && selectedPlayer ? (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5">
+          <span className={`h-2 w-2 rounded-full ${TIER_DOT_COLORS[selectedPlayer.tier] ?? 'bg-gray-500'}`} />
+          <span className="text-sm text-text">{selectedPlayer.playerName}</span>
+          <span className={`text-[10px] ${LEVEL_COLORS[selectedPlayer.level] ?? 'text-text-dim'}`}>{selectedPlayer.level}</span>
+          <button
+            onClick={() => { onChange(''); setSearch('') }}
+            className="ml-auto text-text-dim hover:text-text text-xs"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          placeholder={placeholder}
+          className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text placeholder:text-text-dim/50 focus:border-accent-blue focus:outline-none"
+        />
+      )}
+
+      {open && !value && (
+        <div className="absolute left-0 top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-border bg-surface shadow-lg">
+          {grouped.length === 0 && (
+            <p className="px-3 py-2 text-xs text-text-dim">No players match "{search}"</p>
+          )}
+          {grouped.map((group) => (
+            <div key={group.level}>
+              <div className={`sticky top-0 bg-gray-950 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${LEVEL_COLORS[group.level] ?? 'text-text-dim'}`}>
+                {LEVEL_LABELS[group.level] ?? group.level} ({group.players.length})
+              </div>
+              {group.players.map((p) => (
+                <button
+                  key={p.playerName}
+                  onClick={() => { onChange(p.playerName); setSearch(''); setOpen(false) }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent-blue/10 transition-colors"
+                >
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${TIER_DOT_COLORS[p.tier] ?? 'bg-gray-500'}`} />
+                  <span className="text-text">{p.playerName}</span>
+                  <span className="ml-auto text-[10px] text-text-dim">{p.org}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function getDayName(dateStr: string): string {
@@ -56,13 +174,17 @@ function formatTimeAgo(ts: number): string {
 }
 
 const STEPS = [
-  { label: 'Load Roster', desc: 'Import players from Google Sheet', hint: 'Go to Roster tab to import' },
-  { label: 'Load Schedules', desc: 'Pull game schedules from all sources', hint: 'Go to Data Setup tab and load game schedules' },
-  { label: 'Set Dates', desc: 'Choose your travel window', hint: 'Set start and end dates below' },
-  { label: 'Generate Trips', desc: 'Build optimized trip plans', hint: 'Click "Generate Trips" below' },
+  { label: 'Load Roster', desc: 'Import players from Google Sheet' },
+  { label: 'Load Schedules', desc: 'Pull game schedules from all sources' },
+  { label: 'Set Dates', desc: 'Choose your travel window' },
+  { label: 'Generate Trips', desc: 'Build optimized trip plans' },
 ] as const
 
-function WorkflowStepper({ currentStep, allComplete }: { currentStep: number; allComplete: boolean }) {
+function WorkflowStepper({ currentStep, allComplete, onAction }: {
+  currentStep: number
+  allComplete: boolean
+  onAction?: (step: number) => void
+}) {
   if (allComplete) {
     return (
       <div className="mb-4 flex items-center gap-2 rounded-lg bg-accent-green/10 px-3 py-2 text-sm text-accent-green">
@@ -95,10 +217,13 @@ function WorkflowStepper({ currentStep, allComplete }: { currentStep: number; al
                 }`}>
                   {step.label}
                 </span>
-                {isActive && (
-                  <span className="mt-0.5 text-center text-[10px] text-accent-blue/70">
-                    {step.hint}
-                  </span>
+                {isActive && onAction && (
+                  <button
+                    onClick={() => onAction(i)}
+                    className="mt-1 rounded-full bg-accent-blue/20 px-2.5 py-0.5 text-[10px] font-medium text-accent-blue hover:bg-accent-blue/30 transition-colors"
+                  >
+                    {i === 0 ? 'Load Now' : i === 1 ? 'Load Schedules' : i === 2 ? 'Set below ↓' : 'Generate ↓'}
+                  </button>
                 )}
               </div>
               {i < STEPS.length - 1 && (
@@ -410,24 +535,21 @@ export default function TripPlanner() {
           <label className="mb-2 block text-xs font-medium text-text-dim">
             Priority Players <span className="text-text-dim/50">(optional — build first trip around these players)</span>
           </label>
-          <div className="flex flex-wrap gap-3">
-            {[0, 1].map((slot) => (
-              <select
-                key={slot}
-                value={priorityPlayers[slot] ?? ''}
-                onChange={(e) => handlePriorityChange(slot as 0 | 1, e.target.value)}
-                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text focus:border-accent-blue focus:outline-none"
-              >
-                <option value="">{slot === 0 ? 'Select player 1...' : 'Select player 2...'}</option>
-                {eligibleForPriority
-                  .filter((p) => p.playerName !== priorityPlayers[slot === 0 ? 1 : 0])
-                  .map((p) => (
-                    <option key={p.playerName} value={p.playerName}>
-                      {p.playerName} ({p.level} — {p.org})
-                    </option>
-                  ))}
-              </select>
-            ))}
+          <div className="flex flex-wrap items-center gap-3">
+            <PlayerSearchPicker
+              value={priorityPlayers[0] ?? ''}
+              players={eligibleForPriority}
+              excludeName={priorityPlayers[1]}
+              placeholder="Type to search player 1..."
+              onChange={(name) => handlePriorityChange(0, name)}
+            />
+            <PlayerSearchPicker
+              value={priorityPlayers[1] ?? ''}
+              players={eligibleForPriority}
+              excludeName={priorityPlayers[0]}
+              placeholder="Type to search player 2..."
+              onChange={(name) => handlePriorityChange(1, name)}
+            />
             {priorityPlayers.length > 0 && (
               <button
                 onClick={() => setPriorityPlayers([])}
@@ -903,7 +1025,7 @@ export default function TripPlanner() {
 // Simplified stop builder for Copy All Trips (mirrors TripCard logic)
 function buildSimpleStops(trip: import('../../types/schedule').TripCandidate) {
   const venueMap = new Map<string, {
-    venueName: string; venueKey: string; players: string[]; driveFromAnchor: number
+    venueName: string; venueKey: string; players: string[]; driveFromAnchor: number; driveFromPrev: number
     isAnchor: boolean; dates: string[]; confidence?: import('../../types/schedule').VisitConfidence
     confidenceNote?: string; source: import('../../types/schedule').ScheduleSource
     isHome: boolean; homeTeam: string; awayTeam: string; sourceUrl?: string; orgLabel: string
@@ -915,6 +1037,7 @@ function buildSimpleStops(trip: import('../../types/schedule').TripCandidate) {
     venueKey: anchorKey,
     players: [...trip.anchorGame.playerNames],
     driveFromAnchor: 0,
+    driveFromPrev: 0,
     isAnchor: true,
     dates: [trip.anchorGame.date],
     confidence: trip.anchorGame.confidence,
@@ -941,6 +1064,7 @@ function buildSimpleStops(trip: import('../../types/schedule').TripCandidate) {
         venueKey: key,
         players: [...game.playerNames],
         driveFromAnchor: game.driveMinutes,
+        driveFromPrev: 0,
         isAnchor: false,
         dates: [game.date],
         confidence: game.confidence,
@@ -955,11 +1079,27 @@ function buildSimpleStops(trip: import('../../types/schedule').TripCandidate) {
     }
   }
 
-  return [...venueMap.values()].sort((a, b) => {
+  const sorted = [...venueMap.values()].sort((a, b) => {
     if (a.isAnchor) return -1
     if (b.isAnchor) return 1
     return a.driveFromAnchor - b.driveFromAnchor
   })
+
+  // Compute sequential drive times
+  for (let i = 1; i < sorted.length; i++) {
+    const [pLat, pLng] = sorted[i - 1]!.venueKey.split(',').map(Number)
+    const [cLat, cLng] = sorted[i]!.venueKey.split(',').map(Number)
+    const R = 6371
+    const dLat = ((cLat! - pLat!) * Math.PI) / 180
+    const dLng = ((cLng! - pLng!) * Math.PI) / 180
+    const sinLat = Math.sin(dLat / 2)
+    const sinLng = Math.sin(dLng / 2)
+    const h = sinLat * sinLat + Math.cos((pLat! * Math.PI) / 180) * Math.cos((cLat! * Math.PI) / 180) * sinLng * sinLng
+    const km = R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
+    sorted[i]!.driveFromPrev = Math.round((km * 1.3 / 90) * 60)
+  }
+
+  return sorted
 }
 
 function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: string }) {

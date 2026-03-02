@@ -521,10 +521,17 @@ export async function generateTrips(
 
       const suggestedDays = [...new Set([anchor.date, ...nearbyGames.map((g) => g.date)])].sort()
 
-      // Estimate total driving
-      const interVenueDrive = nearbyGames.reduce((sum, g) => sum + g.driveMinutes, 0)
-      const lastVenueKey = nearbyGames.length > 0
-        ? coordKey(nearbyGames[nearbyGames.length - 1]!.venue.coords)
+      // Estimate total driving — sequential chain: home → anchor → stop2 → stop3 → ... → home
+      // Sort nearby games by distance from anchor so we visit closest first
+      const sortedNearby = [...nearbyGames].sort((a, b) => a.driveMinutes - b.driveMinutes)
+      let interVenueDrive = 0
+      let prevCoords = anchor.venue.coords
+      for (const g of sortedNearby) {
+        interVenueDrive += estimateDriveMinutes(prevCoords, g.venue.coords)
+        prevCoords = g.venue.coords
+      }
+      const lastVenueKey = sortedNearby.length > 0
+        ? coordKey(sortedNearby[sortedNearby.length - 1]!.venue.coords)
         : anchorKey
       const returnHome = homeToVenue.get(lastVenueKey) ?? homeToAnchor
       const totalDrive = homeToAnchor + interVenueDrive + returnHome
