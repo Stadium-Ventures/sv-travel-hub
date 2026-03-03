@@ -169,7 +169,15 @@ export const useTripStore = create<TripState>()(
 }),
     {
       name: 'sv-travel-trips',
-      version: 2, // Bump to clear old localStorage with stale tripPlan
+      version: 2,
+      migrate: (persisted: any) => ({
+        // Keep settings, drop computed trip data
+        startDate: persisted?.startDate ?? defaultStart(),
+        endDate: persisted?.endDate ?? defaultEnd(),
+        maxDriveMinutes: persisted?.maxDriveMinutes ?? MAX_DRIVE_MINUTES,
+        priorityPlayers: persisted?.priorityPlayers ?? [],
+        tripStatuses: persisted?.tripStatuses ?? {},
+      }),
       partialize: (state) => ({
         // tripPlan is NOT persisted — it's computed data that should be
         // regenerated each session to avoid stale results and schema mismatches

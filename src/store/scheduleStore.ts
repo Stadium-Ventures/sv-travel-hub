@@ -549,7 +549,18 @@ export const useScheduleStore = create<ScheduleState>()(
     }),
     {
       name: 'sv-travel-schedule',
-      version: 2, // Bump to clear old localStorage with stale game data
+      version: 2,
+      migrate: (persisted: any) => ({
+        // Keep useful settings, drop heavy game data
+        playerTeamAssignments: persisted?.playerTeamAssignments ?? {},
+        affiliates: persisted?.affiliates ?? [],
+        customMlbAliases: persisted?.customMlbAliases ?? {},
+        customNcaaAliases: persisted?.customNcaaAliases ?? {},
+        rosterMoves: persisted?.rosterMoves ?? [],
+        rosterMovesCheckedAt: persisted?.rosterMovesCheckedAt ?? null,
+        proFetchedAt: persisted?.proFetchedAt ?? null,
+        ncaaFetchedAt: persisted?.ncaaFetchedAt ?? null,
+      }),
       partialize: (state) => ({
         playerTeamAssignments: state.playerTeamAssignments,
         affiliates: state.affiliates,

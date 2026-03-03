@@ -293,12 +293,14 @@ export default function TripPlanner() {
     [players],
   )
 
-  // Best week suggestions — deferred to avoid blocking initial render
+  // Best week suggestions — computed on-demand only when user clicks "Suggest"
   const [bestWeeks, setBestWeeks] = useState<ReturnType<typeof analyzeBestWeeks>>([])
-  useEffect(() => {
-    if (players.length === 0) { setBestWeeks([]); return }
-    // Defer computation so initial render isn't blocked
-    const id = setTimeout(() => {
+  const [bestWeeksLoading, setBestWeeksLoading] = useState(false)
+  function computeBestWeeks() {
+    if (players.length === 0) return
+    setBestWeeksLoading(true)
+    // Run in next tick to allow UI to show loading state
+    setTimeout(() => {
       const stEvents = generateSpringTrainingEvents(players, startDate, endDate, customMlbAliases)
       const ncaaPlayersWithReal = new Set(ncaaGames.flatMap((g: { playerNames: string[] }) => g.playerNames))
       const syntheticNcaa = generateNcaaEvents(
@@ -313,9 +315,9 @@ export default function TripPlanner() {
       const hsEvents = generateHsEvents(players, startDate, endDate, hsVenues)
       const allGames = [...proGames, ...stEvents, ...ncaaGames, ...syntheticNcaa, ...hsEvents]
       setBestWeeks(analyzeBestWeeks(allGames, players, startDate, endDate, maxDriveMinutes))
-    }, 100)
-    return () => clearTimeout(id)
-  }, [players, proGames, ncaaGames, venueState, startDate, endDate, maxDriveMinutes, customMlbAliases, customNcaaAliases])
+      setBestWeeksLoading(false)
+    }, 0)
+  }
 
   const hasStDates = isSpringTraining(startDate) || isSpringTraining(endDate)
   const hasNcaaDates = isNcaaSeason(startDate) || isNcaaSeason(endDate)
@@ -504,7 +506,7 @@ export default function TripPlanner() {
         )}
 
         {/* Best week suggestions */}
-        {bestWeeks.length > 0 && (
+        {bestWeeks.length > 0 ? (
           <div className="mb-4 rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-2">
             <span className="text-xs font-medium text-accent-blue" title="Ranked by how many Tier 1 and Tier 2 players have drivable games that week">Best weeks: </span>
             {bestWeeks.map((w, i) => {
@@ -523,6 +525,16 @@ export default function TripPlanner() {
                 </span>
               )
             })}
+          </div>
+        ) : players.length > 0 && (
+          <div className="mb-4">
+            <button
+              onClick={computeBestWeeks}
+              disabled={bestWeeksLoading}
+              className="rounded-lg border border-accent-blue/30 bg-accent-blue/10 px-3 py-1.5 text-xs font-medium text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
+            >
+              {bestWeeksLoading ? 'Analyzing...' : 'Suggest Best Travel Weeks'}
+            </button>
           </div>
         )}
 
