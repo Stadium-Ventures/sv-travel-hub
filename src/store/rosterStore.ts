@@ -45,6 +45,7 @@ export const useRosterStore = create<RosterState>()(
       visitOverrides: {},
 
       fetchRoster: async () => {
+        if (get().loading) return
         set({ loading: true, error: null, parseWarnings: [] })
         try {
           const result = await fetchRoster()

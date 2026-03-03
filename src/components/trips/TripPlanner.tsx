@@ -297,7 +297,7 @@ export default function TripPlanner() {
   const [bestWeeks, setBestWeeks] = useState<ReturnType<typeof analyzeBestWeeks>>([])
   const [bestWeeksLoading, setBestWeeksLoading] = useState(false)
   function computeBestWeeks() {
-    if (players.length === 0) return
+    if (players.length === 0 || bestWeeksLoading) return
     setBestWeeksLoading(true)
     // Run in next tick to allow UI to show loading state
     setTimeout(() => {
@@ -364,6 +364,7 @@ export default function TripPlanner() {
   }
 
   const [copyAllError, setCopyAllError] = useState(false)
+  const [calAllError, setCalAllError] = useState(false)
 
   async function handleCopyAllTrips() {
     if (!tripPlan) return
@@ -402,7 +403,7 @@ export default function TripPlanner() {
       <div className="rounded-xl border border-border bg-surface p-5">
         <h2 className="mb-3 text-base font-semibold text-text">Trip Planner</h2>
         <p className="mb-4 text-xs text-text-dim">
-          Builds road trips from Orlando, grouping nearby players together. Trips are scored by how many high-priority players you'd visit. Thursdays get a bonus because games are less crowded and you'll have better access. Sundays are skipped since they're typically travel/rest days.
+          Builds road trips from Orlando, grouping nearby players together. Trips are scored by how many high-priority players you'd visit. Tuesdays get a bonus because MiLB position players are most accessible. Starting pitchers get a boost when they're probable starters. Sundays are skipped since they're typically travel/rest days. Max 3-day trips.
         </p>
 
         {/* Data freshness indicators */}
@@ -855,13 +856,19 @@ export default function TripPlanner() {
                   </button>
                   <button
                     onClick={() => {
-                      const ics = generateAllTripsIcs(tripPlan.trips, playerMap)
-                      downloadIcs(ics, 'sv-travel-trips.ics')
+                      try {
+                        const ics = generateAllTripsIcs(tripPlan.trips, playerMap)
+                        downloadIcs(ics, 'sv-travel-trips.ics')
+                        setCalAllError(false)
+                      } catch {
+                        setCalAllError(true)
+                        setTimeout(() => setCalAllError(false), 3000)
+                      }
                     }}
                     className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
                     title="Download all trips as a calendar file you can import into Google Calendar, Outlook, etc."
                   >
-                    Export to Calendar
+                    {calAllError ? 'Export Failed' : 'Export to Calendar'}
                   </button>
                 </div>
               </div>
@@ -870,7 +877,7 @@ export default function TripPlanner() {
               <div className="sticky top-0 z-10 -mx-5 mb-3 rounded-b-lg bg-surface px-5 pb-2 pt-2 border-b border-border/30">
               <div className="flex flex-wrap items-center gap-2">
                 {/* Sort */}
-                <span className="text-[11px] text-text-dim" title="Score = tier weight × visits remaining per player. T1=5pts, T2=3pts, T3=1pt. Thursday anchor +20%.">Sort:</span>
+                <span className="text-[11px] text-text-dim" title="Score = tier weight × visits remaining per player. T1=5pts, T2=3pts, T3=1pt. Tuesday anchor +20%. Pitcher match +50%.">Sort:</span>
                 {([
                   { key: 'score', label: 'Score' },
                   { key: 'players', label: 'Players' },
@@ -994,21 +1001,21 @@ export default function TripPlanner() {
                           <p className="mb-1 font-medium text-accent-blue">Only in #{o.tripA}</p>
                           {o.uniqueA.length > 0 ? o.uniqueA.map((n) => {
                             const p = playerMap.get(n)
-                            return <p key={n} className="text-text-dim">{n} {p ? `(T${p.tier})` : ''}</p>
+                            return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(T${p.tier})` : ''}</p>
                           }) : <p className="text-text-dim/50">None</p>}
                         </div>
                         <div>
                           <p className="mb-1 font-medium text-text-dim">Shared</p>
                           {o.shared.length > 0 ? o.shared.map((n) => {
                             const p = playerMap.get(n)
-                            return <p key={n} className="text-text-dim">{n} {p ? `(T${p.tier})` : ''}</p>
+                            return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(T${p.tier})` : ''}</p>
                           }) : <p className="text-text-dim/50">None</p>}
                         </div>
                         <div>
                           <p className="mb-1 font-medium text-accent-green">Only in #{o.tripB}</p>
                           {o.uniqueB.length > 0 ? o.uniqueB.map((n) => {
                             const p = playerMap.get(n)
-                            return <p key={n} className="text-text-dim">{n} {p ? `(T${p.tier})` : ''}</p>
+                            return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(T${p.tier})` : ''}</p>
                           }) : <p className="text-text-dim/50">None</p>}
                         </div>
                       </div>
@@ -1036,7 +1043,7 @@ export default function TripPlanner() {
                   return (
                     <div key={i} className="flex items-center gap-2 text-sm">
                       <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-                      <span className="font-medium text-text">{nm.playerName}</span>
+                      <span className="font-medium text-text cursor-pointer hover:text-yellow-400 transition-colors" onClick={() => setSelectedPlayer(nm.playerName)}>{nm.playerName}</span>
                       <span className="text-xs text-text-dim">T{tier}</span>
                       <span className="text-xs text-text-dim">@ {nm.venue}</span>
                       <span className="ml-auto text-xs text-yellow-400">
@@ -1128,6 +1135,20 @@ export default function TripPlanner() {
                           </div>
                         </div>
                         <div className="shrink-0 text-right">
+                          {visit.visitValue > 0 && (
+                            <>
+                              <p className="text-lg font-bold text-purple-400">{visit.visitValue}</p>
+                              {visit.scoreBreakdown && (
+                                <p className="text-[10px] text-text-dim">
+                                  {[
+                                    visit.scoreBreakdown.tier1Count > 0 && `${visit.scoreBreakdown.tier1Count}×T1`,
+                                    visit.scoreBreakdown.tier2Count > 0 && `${visit.scoreBreakdown.tier2Count}×T2`,
+                                    visit.scoreBreakdown.tier3Count > 0 && `${visit.scoreBreakdown.tier3Count}×T3`,
+                                  ].filter(Boolean).join(' · ')}
+                                </p>
+                              )}
+                            </>
+                          )}
                           <p className="text-sm font-medium text-purple-400">
                             ~{visit.estimatedTravelHours}h travel
                           </p>
@@ -1219,7 +1240,7 @@ function DayStrip({ startDate, endDate }: { startDate: string; endDate: string }
   }
 
   const hasSunday = dayCounts.has('Sun')
-  const hasThursday = dayCounts.has('Thu')
+  const hasTuesday = dayCounts.has('Tue')
 
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -1227,7 +1248,7 @@ function DayStrip({ startDate, endDate }: { startDate: string; endDate: string }
         {DAY_NAMES.map((day) => {
           const inRange = dayCounts.has(day)
           const isSunday = day === 'Sun'
-          const isThursday = day === 'Thu'
+          const isTuesday = day === 'Tue'
 
           return (
             <span
@@ -1237,7 +1258,7 @@ function DayStrip({ startDate, endDate }: { startDate: string; endDate: string }
                   ? 'text-text-dim/20'
                   : isSunday
                     ? 'bg-accent-red/15 text-accent-red line-through'
-                    : isThursday
+                    : isTuesday
                       ? 'bg-accent-blue/15 text-accent-blue'
                       : 'bg-gray-800 text-text-dim'
               }`}
@@ -1249,7 +1270,7 @@ function DayStrip({ startDate, endDate }: { startDate: string; endDate: string }
       </div>
       <span className="text-[11px] text-text-dim/60">
         {dayCount} day{dayCount !== 1 ? 's' : ''}
-        {hasThursday && ' · Thu preferred'}
+        {hasTuesday && ' · Tue preferred'}
         {hasSunday && ' · Sun blacked out'}
       </span>
     </div>

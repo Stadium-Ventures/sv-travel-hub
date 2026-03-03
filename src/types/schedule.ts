@@ -24,13 +24,15 @@ export interface GameEvent {
   confidenceNote?: string // e.g. "Typical home game day" or "May be traveling for away series"
   sourceUrl?: string // Link to verify this game (MLB Gameday, D1Baseball schedule, etc.)
   gameStatus?: string // e.g. "Final", "Postponed", "Cancelled" from MLB API status.detailedState
+  probablePitcherNames?: string[] // fullNames from MLB API probablePitcher hydration
 }
 
 export interface ScoreBreakdown {
   tier1Count: number; tier1Points: number
   tier2Count: number; tier2Points: number
   tier3Count: number; tier3Points: number
-  thursdayBonus: boolean
+  tuesdayBonus: boolean
+  pitcherMatchBonus: number
   rawScore: number
   finalScore: number
 }
@@ -59,6 +61,8 @@ export interface FlyInVisit {
   dates: string[]
   distanceKm: number
   estimatedTravelHours: number // flight + airport overhead
+  visitValue: number // tier-weighted score (same as road trips)
+  scoreBreakdown?: ScoreBreakdown
   source: ScheduleSource
   isHome: boolean
   sourceUrl?: string

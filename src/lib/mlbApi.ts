@@ -1,4 +1,5 @@
 import type { Coordinates } from '../types/roster'
+import { fetchWithTimeout } from './fetchWithTimeout'
 
 const MLB_BASE = 'https://statsapi.mlb.com/api/v1'
 
@@ -17,8 +18,14 @@ export interface MLBGameRaw {
   gamePk: number
   gameDate: string
   teams: {
-    away: { team: { id: number; name: string } }
-    home: { team: { id: number; name: string } }
+    away: {
+      team: { id: number; name: string }
+      probablePitcher?: { id: number; fullName: string }
+    }
+    home: {
+      team: { id: number; name: string }
+      probablePitcher?: { id: number; fullName: string }
+    }
   }
   venue: {
     id: number
@@ -37,7 +44,7 @@ export interface MLBGameRaw {
 export async function fetchAffiliates(parentTeamId: number): Promise<MLBAffiliate[]> {
   const sportIds = MILB_SPORT_IDS.join(',')
   const url = `${MLB_BASE}/teams/affiliates?teamIds=${parentTeamId}&sportIds=${sportIds}`
-  const res = await fetch(url)
+  const res = await fetchWithTimeout(url)
   if (!res.ok) throw new Error(`MLB affiliates fetch failed: ${res.status}`)
   const data = await res.json()
 
@@ -57,8 +64,8 @@ export async function fetchSchedule(
   startDate: string, // YYYY-MM-DD
   endDate: string,
 ): Promise<MLBGameRaw[]> {
-  const url = `${MLB_BASE}/schedule?sportId=${sportId}&teamId=${teamId}&startDate=${startDate}&endDate=${endDate}&hydrate=venue(location)`
-  const res = await fetch(url)
+  const url = `${MLB_BASE}/schedule?sportId=${sportId}&teamId=${teamId}&startDate=${startDate}&endDate=${endDate}&hydrate=venue(location),probablePitcher`
+  const res = await fetchWithTimeout(url)
   if (!res.ok) throw new Error(`MLB schedule fetch failed: ${res.status}`)
   const data = await res.json()
 
@@ -89,7 +96,7 @@ export interface MLBRosterEntry {
 
 export async function fetchTeamRoster(teamId: number, sportId: number): Promise<MLBRosterEntry[]> {
   const url = `${MLB_BASE}/teams/${teamId}/roster?rosterType=fullRoster`
-  const res = await fetch(url)
+  const res = await fetchWithTimeout(url, { timeoutMs: 10000 })
   if (!res.ok) {
     console.warn(`Roster fetch failed for team ${teamId}: HTTP ${res.status}`)
     return [] // Some teams may not have rosters available
@@ -203,7 +210,7 @@ export async function fetchTransactions(
   endDate: string,
 ): Promise<MLBTransaction[]> {
   const url = `${MLB_BASE}/transactions?teamId=${teamId}&startDate=${startDate}&endDate=${endDate}`
-  const res = await fetch(url)
+  const res = await fetchWithTimeout(url)
   if (!res.ok) throw new Error(`MLB transactions fetch failed: ${res.status}`)
   const data = await res.json()
 

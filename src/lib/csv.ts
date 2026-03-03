@@ -1,6 +1,7 @@
 import Papa from 'papaparse'
 import type { RosterPlayer, PlayerLevel } from '../types/roster'
 import { TIER_VISIT_TARGETS } from '../types/roster'
+import { fetchWithTimeout } from './fetchWithTimeout'
 
 const ROSTER_CSV_URL = import.meta.env.VITE_ROSTER_CSV_URL as string | undefined
 
@@ -49,7 +50,7 @@ export async function fetchRoster(): Promise<RosterParseResult> {
     throw new Error('VITE_ROSTER_CSV_URL is not configured. Add it to your .env file.')
   }
 
-  const res = await fetch(ROSTER_CSV_URL)
+  const res = await fetchWithTimeout(ROSTER_CSV_URL, { timeoutMs: 10000 })
   if (!res.ok) throw new Error(`Sheet fetch failed: ${res.status}`)
   const text = await res.text()
 

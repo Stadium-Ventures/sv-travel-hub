@@ -118,7 +118,7 @@ export default function ScheduleCalendar({ games }: Props) {
           const dayGames = gamesByDate.get(cell.date) ?? []
           const dayOfWeek = new Date(cell.date + 'T12:00:00Z').getUTCDay()
           const isSunday = dayOfWeek === 0
-          const isThursday = dayOfWeek === 4
+          const isTuesday = dayOfWeek === 2
           const isSelected = cell.date === selectedDate
           const gameCount = dayGames.length
 
@@ -131,7 +131,7 @@ export default function ScheduleCalendar({ games }: Props) {
                   ? 'border-accent-blue bg-accent-blue/10 ring-1 ring-accent-blue/30'
                   : isSunday
                     ? 'border-accent-red/20 bg-accent-red/5 hover:bg-accent-red/10'
-                    : isThursday
+                    : isTuesday
                       ? 'border-accent-blue/20 bg-accent-blue/5 hover:bg-accent-blue/10'
                       : 'border-border/30 bg-gray-950/50 hover:bg-gray-950/80'
               }`}
@@ -259,7 +259,7 @@ export default function ScheduleCalendar({ games }: Props) {
           <span className="h-2 w-2 rounded-full bg-accent-red/40" /> Sunday (blackout)
         </span>
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-accent-blue/40" /> Thursday (anchor)
+          <span className="h-2 w-2 rounded-full bg-accent-blue/40" /> Tuesday (anchor)
         </span>
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-accent-blue" /> Pro

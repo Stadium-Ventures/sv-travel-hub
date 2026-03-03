@@ -1,4 +1,5 @@
 import type { Coordinates } from '../types/roster'
+import { fetchWithTimeout } from './fetchWithTimeout'
 
 const NOMINATIM_BASE = 'https://nominatim.openstreetmap.org/search'
 const CACHE_KEY = 'sv-travel-geocode-cache'
@@ -45,7 +46,8 @@ export async function geocodeVenue(
       countrycodes: 'us',
     })
 
-    const res = await fetch(`${NOMINATIM_BASE}?${params}`, {
+    const res = await fetchWithTimeout(`${NOMINATIM_BASE}?${params}`, {
+      timeoutMs: 8000,
       headers: {
         'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures internal tool)',
       },

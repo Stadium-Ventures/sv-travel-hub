@@ -78,6 +78,15 @@ function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[])
   const date = new Date(game.gameDate)
   const isHome = game.teams.home.team.id === teamId
 
+  // Extract probable pitcher names
+  const pitcherNames: string[] = []
+  if (game.teams.home.probablePitcher?.fullName) {
+    pitcherNames.push(game.teams.home.probablePitcher.fullName)
+  }
+  if (game.teams.away.probablePitcher?.fullName) {
+    pitcherNames.push(game.teams.away.probablePitcher.fullName)
+  }
+
   return {
     id: `mlb-${game.gamePk}`,
     date: game.gameDate.split('T')[0]!,
@@ -95,6 +104,7 @@ function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[])
     sportId: undefined,
     sourceUrl: `https://www.mlb.com/gameday/${game.gamePk}`,
     gameStatus: game.status?.detailedState,
+    probablePitcherNames: pitcherNames.length > 0 ? pitcherNames : undefined,
   }
 }
 
@@ -135,6 +145,7 @@ export const useScheduleStore = create<ScheduleState>()(
       ncaaFetchedAt: null,
 
       fetchAffiliates: async (forceRefresh?: boolean) => {
+        if (get().affiliatesLoading) return
         // Skip if already cached from localStorage (unless forced)
         if (!forceRefresh && get().affiliates.length > 0) return
         set({ affiliatesLoading: true, affiliatesError: null })
@@ -176,10 +187,20 @@ export const useScheduleStore = create<ScheduleState>()(
       },
 
       autoAssignPlayers: async () => {
-        const state = get()
-        const allAffiliates = state.affiliates
+        if (get().autoAssignLoading) return
+        set({ autoAssignLoading: true, autoAssignResult: null })
+
+        let state = get()
         const customMlb = state.customMlbAliases
         const rosterPlayers = useRosterStore.getState().players
+
+        // Auto-fetch affiliates if not loaded yet
+        if (state.affiliates.length === 0) {
+          await get().fetchAffiliates()
+          state = get() // re-read after fetch
+        }
+
+        const allAffiliates = state.affiliates
 
         // Get Pro players that need assignment
         const proPlayers = rosterPlayers.filter(
@@ -187,57 +208,105 @@ export const useScheduleStore = create<ScheduleState>()(
         )
 
         if (proPlayers.length === 0) {
-          set({ autoAssignResult: { assigned: 0, notFound: [] } })
+          set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, notFound: [] } })
           return
         }
 
-        // Collect unique parent org IDs for these players
+        // Collect unique parent org IDs and build orgId → orgName lookup
         const parentOrgIds = new Set<number>()
+        const orgIdToName = new Map<number, string>()
         for (const p of proPlayers) {
           const orgId = resolveMLBTeamId(p.org, customMlb)
-          if (orgId) parentOrgIds.add(orgId)
+          if (orgId) {
+            parentOrgIds.add(orgId)
+            if (!orgIdToName.has(orgId)) orgIdToName.set(orgId, p.org)
+          }
         }
 
         if (parentOrgIds.size === 0) {
-          set({ autoAssignResult: { assigned: 0, notFound: proPlayers.map((p) => p.playerName) } })
+          set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, notFound: proPlayers.map((p) => p.playerName) } })
           return
         }
 
-        set({ autoAssignLoading: true, autoAssignResult: null })
-
         try {
-          // Get all affiliate teams for these parent orgs
-          const teamsToQuery = allAffiliates
-            .filter((a) => parentOrgIds.has(a.parentOrgId))
-            .map((a) => ({ teamId: a.teamId, sportId: a.sportId, teamName: a.teamName }))
+          const newAssignments: Record<string, PlayerTeamAssignment> = { ...state.playerTeamAssignments }
+          let assignedCount = 0
+          const notFoundNames: string[] = []
 
-          // Fetch rosters for all affiliate teams
-          const rosterEntries = await fetchAllRosters(teamsToQuery)
+          // Phase 1: Try MLB-level rosters first (sportId=1) — players on the
+          // 40-man roster can be assigned directly to the parent org without
+          // needing to search through all affiliate teams.
+          const mlbTeamsToQuery = [...parentOrgIds].map((orgId) => {
+            // Try to get the canonical team name from affiliates, fall back to org name
+            const affEntry = allAffiliates.find((a) => a.parentOrgId === orgId && a.sportId === 1)
+            const teamName = affEntry?.teamName ?? orgIdToName.get(orgId) ?? `Team ${orgId}`
+            return { teamId: orgId, sportId: 1, teamName }
+          })
 
-          // Build mlbPlayerId → team assignment lookup
-          const playerIdToTeam = new Map<number, PlayerTeamAssignment>()
-          for (const entry of rosterEntries) {
+          const mlbRosterEntries = await fetchAllRosters(mlbTeamsToQuery)
+          const mlbPlayerIdToTeam = new Map<number, PlayerTeamAssignment>()
+          for (const entry of mlbRosterEntries) {
             if (entry.playerId > 0) {
-              playerIdToTeam.set(entry.playerId, {
+              mlbPlayerIdToTeam.set(entry.playerId, {
                 teamId: entry.teamId,
-                sportId: entry.sportId,
+                sportId: 1,
                 teamName: entry.teamName,
               })
             }
           }
 
-          // Match our roster players
-          const newAssignments: Record<string, PlayerTeamAssignment> = { ...state.playerTeamAssignments }
-          let assignedCount = 0
-          const notFoundNames: string[] = []
-
+          // Assign MLB-level players directly
+          const remainingPlayers: typeof proPlayers = []
           for (const player of proPlayers) {
-            const match = playerIdToTeam.get(player.mlbPlayerId!)
+            const match = mlbPlayerIdToTeam.get(player.mlbPlayerId!)
             if (match) {
               newAssignments[player.playerName] = match
               assignedCount++
             } else {
-              notFoundNames.push(player.playerName)
+              remainingPlayers.push(player)
+            }
+          }
+
+          // Phase 2: For remaining players, search affiliate rosters (MiLB levels)
+          if (remainingPlayers.length > 0) {
+            const remainingOrgIds = new Set<number>()
+            for (const p of remainingPlayers) {
+              const orgId = resolveMLBTeamId(p.org, customMlb)
+              if (orgId) remainingOrgIds.add(orgId)
+            }
+
+            // Get MiLB affiliate teams only (exclude sportId=1 since we already checked)
+            const teamsToQuery = allAffiliates
+              .filter((a) => remainingOrgIds.has(a.parentOrgId) && a.sportId !== 1)
+              .map((a) => ({ teamId: a.teamId, sportId: a.sportId, teamName: a.teamName }))
+
+            if (teamsToQuery.length > 0) {
+              const rosterEntries = await fetchAllRosters(teamsToQuery)
+              const playerIdToTeam = new Map<number, PlayerTeamAssignment>()
+              for (const entry of rosterEntries) {
+                if (entry.playerId > 0) {
+                  playerIdToTeam.set(entry.playerId, {
+                    teamId: entry.teamId,
+                    sportId: entry.sportId,
+                    teamName: entry.teamName,
+                  })
+                }
+              }
+
+              for (const player of remainingPlayers) {
+                const match = playerIdToTeam.get(player.mlbPlayerId!)
+                if (match) {
+                  newAssignments[player.playerName] = match
+                  assignedCount++
+                } else {
+                  notFoundNames.push(player.playerName)
+                }
+              }
+            } else {
+              // No affiliate teams to query — all remaining are not found
+              for (const player of remainingPlayers) {
+                notFoundNames.push(player.playerName)
+              }
             }
           }
 
@@ -303,6 +372,7 @@ export const useScheduleStore = create<ScheduleState>()(
       },
 
       fetchProSchedules: async (startDate, endDate) => {
+        if (get().schedulesLoading) return
         const state = get()
         const assignments = state.playerTeamAssignments
         const allAffiliates = state.affiliates
@@ -386,6 +456,7 @@ export const useScheduleStore = create<ScheduleState>()(
         }
       },
       checkRosterMoves: async () => {
+        if (get().rosterMovesLoading) return
         const state = get()
         const assignments = state.playerTeamAssignments
         const allAffiliates = state.affiliates
@@ -454,6 +525,7 @@ export const useScheduleStore = create<ScheduleState>()(
         }
       },
       fetchNcaaSchedules: async (playerOrgs) => {
+        if (get().ncaaLoading) return
         // Resolve each player's org to a canonical NCAA school name
         const customNcaa = get().customNcaaAliases
         const schoolToPlayers = new Map<string, string[]>()
@@ -558,22 +630,17 @@ export const useScheduleStore = create<ScheduleState>()(
         customNcaaAliases: persisted?.customNcaaAliases ?? {},
         rosterMoves: persisted?.rosterMoves ?? [],
         rosterMovesCheckedAt: persisted?.rosterMovesCheckedAt ?? null,
-        proFetchedAt: persisted?.proFetchedAt ?? null,
-        ncaaFetchedAt: persisted?.ncaaFetchedAt ?? null,
       }),
       partialize: (state) => ({
         playerTeamAssignments: state.playerTeamAssignments,
         affiliates: state.affiliates,
-        proFetchedAt: state.proFetchedAt,
-        ncaaFetchedAt: state.ncaaFetchedAt,
         customMlbAliases: state.customMlbAliases,
         customNcaaAliases: state.customNcaaAliases,
         rosterMoves: state.rosterMoves,
         rosterMovesCheckedAt: state.rosterMovesCheckedAt,
-        // proGames and ncaaGames are NOT persisted — they're large arrays
-        // (thousands of games) that cause page freezes on reload. They should
-        // be re-fetched each session. proFetchedAt/ncaaFetchedAt track when
-        // they were last loaded so the UI can prompt for a reload.
+        // proGames/ncaaGames and proFetchedAt/ncaaFetchedAt are NOT persisted.
+        // Games are too large, and timestamps are meaningless without the data.
+        // Both are re-fetched each session.
       }),
       merge: (persisted, current) => {
         const p = persisted as any
@@ -586,6 +653,8 @@ export const useScheduleStore = create<ScheduleState>()(
           customNcaaAliases: p?.customNcaaAliases ?? {},
           proGames: [],  // Always start fresh — re-fetch each session
           ncaaGames: [], // Always start fresh — re-fetch each session
+          proFetchedAt: null,  // Clear stale timestamps — games aren't persisted
+          ncaaFetchedAt: null, // Clear stale timestamps — games aren't persisted
           rosterMoves: p?.rosterMoves ?? [],
         }
       },

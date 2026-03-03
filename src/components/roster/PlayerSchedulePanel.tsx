@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { useRosterStore } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useTripStore, getTripKey } from '../../store/tripStore'
@@ -26,7 +26,7 @@ interface Props {
   onClose: () => void
 }
 
-export default function PlayerSchedulePanel({ playerName, onClose }: Props) {
+function PlayerSchedulePanel({ playerName, onClose }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   const players = useRosterStore((s) => s.players)
   const player = players.find((p) => p.playerName === playerName)
@@ -282,3 +282,5 @@ export default function PlayerSchedulePanel({ playerName, onClose }: Props) {
     </div>
   )
 }
+
+export default React.memo(PlayerSchedulePanel)

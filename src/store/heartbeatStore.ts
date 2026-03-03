@@ -78,6 +78,7 @@ export const useHeartbeatStore = create<HeartbeatState>()(
       lastFetchedAt: null,
 
       fetchHeartbeat: async () => {
+        if (get().loading) return
         set({ loading: true, error: null })
         try {
           const [priorityRes, summaryRes] = await Promise.all([

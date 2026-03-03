@@ -2,6 +2,7 @@ import { D1_BASEBALL_SLUGS } from '../data/d1baseballSlugs'
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import { resolveNcaaName } from '../data/aliases'
 import type { Coordinates } from '../types/roster'
+import { fetchWithTimeout } from './fetchWithTimeout'
 
 // CORS proxies with fallback — if the primary goes down, try alternatives
 interface CorsProxy {
@@ -122,7 +123,7 @@ async function fetchWithCorsProxy(targetUrl: string): Promise<string> {
 
   for (const proxy of CORS_PROXIES) {
     try {
-      const res = await fetch(`${proxy.url}${encodeURIComponent(targetUrl)}`)
+      const res = await fetchWithTimeout(`${proxy.url}${encodeURIComponent(targetUrl)}`, { timeoutMs: 20000 })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const html = await proxy.extract(res)
       if (!html) throw new Error('Empty response')

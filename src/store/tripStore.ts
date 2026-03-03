@@ -84,6 +84,7 @@ export const useTripStore = create<TripState>()(
   }),
 
   generateTrips: async () => {
+    if (get().computing) return
     const { startDate, endDate, maxDriveMinutes, priorityPlayers } = get()
     const players = useRosterStore.getState().players
     const scheduleState = useScheduleStore.getState()

@@ -3,7 +3,7 @@ import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '../../data/aliases'
 import { NCAA_VENUES } from '../../data/ncaaVenues'
-import { isSpringTraining, getSpringTrainingSite, isGrapefruitLeague } from '../../data/springTraining'
+import { isSpringTraining, getSpringTrainingSite, isGrapefruitLeague, SPRING_TRAINING_SITES } from '../../data/springTraining'
 import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
 import { formatTimeAgo } from '../../lib/formatters'
 import type { MLBAffiliate } from '../../lib/mlbApi'
@@ -401,6 +401,42 @@ export default function ScheduleView() {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ST Mailing Directory — always visible during spring training */}
+      {isSpringTraining(new Date().toISOString().slice(0, 10)) && (
+        <div className="rounded-xl border border-border/30 bg-surface/50 p-5">
+          <h2 className="mb-3 text-base font-semibold text-text">ST Mailing Directory</h2>
+          <p className="mb-3 text-xs text-text-dim">
+            Mailing addresses for all 30 Spring Training facilities. Grapefruit League (Florida) listed first.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {Object.entries(SPRING_TRAINING_SITES)
+              .sort(([, a], [, b]) => {
+                // Grapefruit first, then alphabetical by team name
+                if (a.league !== b.league) return a.league === 'Grapefruit' ? -1 : 1
+                return a.teamName.localeCompare(b.teamName)
+              })
+              .map(([id, site]) => (
+                <div key={id} className="rounded-lg bg-gray-950/50 px-3 py-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-text">{site.teamName}</span>
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      site.league === 'Grapefruit'
+                        ? 'bg-accent-green/15 text-accent-green'
+                        : 'bg-accent-orange/15 text-accent-orange'
+                    }`}>
+                      {site.league}
+                    </span>
+                  </div>
+                  <div className="text-xs text-text-dim">{site.complexName}</div>
+                  <div className="text-xs text-text-dim">
+                    {site.streetAddress}, {site.cityState} {site.zip}
+                  </div>
+                </div>
+              ))}
           </div>
         </div>
       )}

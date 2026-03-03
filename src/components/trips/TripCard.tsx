@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useRosterStore } from '../../store/rosterStore'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
@@ -236,7 +236,8 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
     if (b.tier1Count > 0) parts.push(`${b.tier1Count}x T1`)
     if (b.tier2Count > 0) parts.push(`${b.tier2Count}x T2`)
     if (b.tier3Count > 0) parts.push(`${b.tier3Count}x T3`)
-    if (b.thursdayBonus) parts.push('Thu bonus')
+    if (b.tuesdayBonus) parts.push('Tue bonus')
+    if (b.pitcherMatchBonus > 0) parts.push(`pitcher +${b.pitcherMatchBonus}`)
     text += `\nScore: ${b.finalScore} pts (${parts.join(' + ')})\n`
   }
 
@@ -254,7 +255,7 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
   return text
 }
 
-export default function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick }: Props) {
+function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick }: Props) {
   const setVisitOverride = useRosterStore((s) => s.setVisitOverride)
 
   const stops = useMemo(() => buildVenueStops(trip, playerMap), [trip, playerMap])
@@ -394,7 +395,7 @@ export default function TripCard({ trip, index, playerMap, defaultExpanded = fal
             {breakdown && (
               <span
                 className="rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue"
-                title="Trip value score = tier weight × visits remaining per player. T1=5pts/visit, T2=3pts/visit, T3=1pt/visit, T4=0. Thursday anchor gets +20% bonus."
+                title="Trip value score = tier weight × visits remaining per player. T1=5pts/visit, T2=3pts/visit, T3=1pt/visit, T4=0. Tuesday anchor gets +20% bonus."
               >
                 {breakdown.finalScore} pts
               </span>
@@ -498,8 +499,11 @@ export default function TripCard({ trip, index, playerMap, defaultExpanded = fal
             {breakdown.tier3Count > 0 && (
               <span className="text-text">{breakdown.tier3Count}x Tier 3 <span className="text-text-dim">({breakdown.tier3Points}pts)</span></span>
             )}
-            {breakdown.thursdayBonus && (
-              <span className="text-accent-blue">Thu bonus +20%</span>
+            {breakdown.tuesdayBonus && (
+              <span className="text-accent-blue">Tue bonus +20%</span>
+            )}
+            {breakdown.pitcherMatchBonus > 0 && (
+              <span className="text-accent-green">Pitcher match +{breakdown.pitcherMatchBonus}pts</span>
             )}
           </div>
           <p className="mt-1 text-text-dim">
@@ -715,6 +719,8 @@ export default function TripCard({ trip, index, playerMap, defaultExpanded = fal
     </div>
   )
 }
+
+export default React.memo(TripCard)
 
 function MarkVisitedChip({ name, tier, dotColor, marked, onMark }: {
   name: string
