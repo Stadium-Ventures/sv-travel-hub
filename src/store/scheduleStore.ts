@@ -549,6 +549,7 @@ export const useScheduleStore = create<ScheduleState>()(
     }),
     {
       name: 'sv-travel-schedule',
+      version: 2, // Bump to clear old localStorage with stale game data
       partialize: (state) => ({
         playerTeamAssignments: state.playerTeamAssignments,
         affiliates: state.affiliates,
@@ -558,11 +559,10 @@ export const useScheduleStore = create<ScheduleState>()(
         customNcaaAliases: state.customNcaaAliases,
         rosterMoves: state.rosterMoves,
         rosterMovesCheckedAt: state.rosterMovesCheckedAt,
-        // Note: proSchedules and ncaaSchedules (raw API data) are NOT persisted
-        // to avoid localStorage bloat. They can be re-fetched. Only processed
-        // GameEvent arrays are persisted.
-        proGames: state.proGames,
-        ncaaGames: state.ncaaGames,
+        // proGames and ncaaGames are NOT persisted — they're large arrays
+        // (thousands of games) that cause page freezes on reload. They should
+        // be re-fetched each session. proFetchedAt/ncaaFetchedAt track when
+        // they were last loaded so the UI can prompt for a reload.
       }),
       merge: (persisted, current) => {
         const p = persisted as any
@@ -573,8 +573,8 @@ export const useScheduleStore = create<ScheduleState>()(
           playerTeamAssignments: p?.playerTeamAssignments ?? {},
           customMlbAliases: p?.customMlbAliases ?? {},
           customNcaaAliases: p?.customNcaaAliases ?? {},
-          proGames: p?.proGames ?? [],
-          ncaaGames: p?.ncaaGames ?? [],
+          proGames: [],  // Always start fresh — re-fetch each session
+          ncaaGames: [], // Always start fresh — re-fetch each session
           rosterMoves: p?.rosterMoves ?? [],
         }
       },

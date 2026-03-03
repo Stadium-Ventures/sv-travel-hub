@@ -293,23 +293,28 @@ export default function TripPlanner() {
     [players],
   )
 
-  // Best week suggestions
-  const bestWeeks = useMemo(() => {
-    if (players.length === 0) return []
-    const stEvents = generateSpringTrainingEvents(players, startDate, endDate, customMlbAliases)
-    const ncaaPlayersWithReal = new Set(ncaaGames.flatMap((g) => g.playerNames))
-    const syntheticNcaa = generateNcaaEvents(
-      players.filter((p) => p.level === 'NCAA' && !ncaaPlayersWithReal.has(p.playerName)),
-      startDate, endDate,
-      customNcaaAliases,
-    )
-    const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
-    for (const [key, v] of Object.entries(venueState)) {
-      if (v.source === 'hs-geocoded') hsVenues.set(key.replace(/^hs-/, ''), { name: v.name, coords: v.coords })
-    }
-    const hsEvents = generateHsEvents(players, startDate, endDate, hsVenues)
-    const allGames = [...proGames, ...stEvents, ...ncaaGames, ...syntheticNcaa, ...hsEvents]
-    return analyzeBestWeeks(allGames, players, startDate, endDate, maxDriveMinutes)
+  // Best week suggestions — deferred to avoid blocking initial render
+  const [bestWeeks, setBestWeeks] = useState<ReturnType<typeof analyzeBestWeeks>>([])
+  useEffect(() => {
+    if (players.length === 0) { setBestWeeks([]); return }
+    // Defer computation so initial render isn't blocked
+    const id = setTimeout(() => {
+      const stEvents = generateSpringTrainingEvents(players, startDate, endDate, customMlbAliases)
+      const ncaaPlayersWithReal = new Set(ncaaGames.flatMap((g: { playerNames: string[] }) => g.playerNames))
+      const syntheticNcaa = generateNcaaEvents(
+        players.filter((p) => p.level === 'NCAA' && !ncaaPlayersWithReal.has(p.playerName)),
+        startDate, endDate,
+        customNcaaAliases,
+      )
+      const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
+      for (const [key, v] of Object.entries(venueState)) {
+        if (v.source === 'hs-geocoded') hsVenues.set(key.replace(/^hs-/, ''), { name: v.name, coords: v.coords })
+      }
+      const hsEvents = generateHsEvents(players, startDate, endDate, hsVenues)
+      const allGames = [...proGames, ...stEvents, ...ncaaGames, ...syntheticNcaa, ...hsEvents]
+      setBestWeeks(analyzeBestWeeks(allGames, players, startDate, endDate, maxDriveMinutes))
+    }, 100)
+    return () => clearTimeout(id)
   }, [players, proGames, ncaaGames, venueState, startDate, endDate, maxDriveMinutes, customMlbAliases, customNcaaAliases])
 
   const hasStDates = isSpringTraining(startDate) || isSpringTraining(endDate)

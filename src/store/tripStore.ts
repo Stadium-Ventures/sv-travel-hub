@@ -169,6 +169,7 @@ export const useTripStore = create<TripState>()(
 }),
     {
       name: 'sv-travel-trips',
+      version: 2, // Bump to clear old localStorage with stale tripPlan
       partialize: (state) => ({
         // tripPlan is NOT persisted — it's computed data that should be
         // regenerated each session to avoid stale results and schema mismatches
