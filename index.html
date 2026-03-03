@@ -8,6 +8,28 @@
   </head>
   <body class="bg-gray-950 text-gray-100 antialiased">
     <div id="root"></div>
+    <script>
+      // Catch ALL errors including module import failures
+      function showCrashUI(msg) {
+        var root = document.getElementById('root');
+        if (root && root.children.length === 0) {
+          root.innerHTML = '<div style="max-width:500px;margin:80px auto;padding:24px;font-family:system-ui;color:#e0e0e0;text-align:center">'
+            + '<h1 style="color:#ff6b6b;font-size:20px">App failed to start</h1>'
+            + '<p style="margin:12px 0;font-size:13px;color:#999">' + msg + '</p>'
+            + '<p style="margin:12px 0;font-size:12px;color:#666">This is usually caused by corrupted saved data.</p>'
+            + '<button onclick="Object.keys(localStorage).filter(function(k){return k.startsWith(\'sv-travel\')}).forEach(function(k){localStorage.removeItem(k)});location.reload()"'
+            + ' style="margin:8px;padding:10px 20px;background:#3b82f6;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px">'
+            + 'Clear App Data &amp; Reload</button>'
+            + '<button onclick="location.reload()"'
+            + ' style="margin:8px;padding:10px 20px;background:#374151;color:#ccc;border:none;border-radius:8px;cursor:pointer;font-size:14px">'
+            + 'Just Reload</button></div>';
+        }
+      }
+      window.addEventListener('error', function(e) { showCrashUI(e.message || 'Unknown error'); });
+      window.addEventListener('unhandledrejection', function(e) { showCrashUI(e.reason && e.reason.message || 'Async error'); });
+      // Fallback: if nothing renders in 10 seconds, show recovery UI
+      setTimeout(function() { showCrashUI('App took too long to load. Try clearing data.'); }, 10000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
