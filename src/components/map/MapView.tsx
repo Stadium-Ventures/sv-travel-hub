@@ -5,7 +5,9 @@ import { useScheduleStore } from '../../store/scheduleStore'
 import { useTripStore } from '../../store/tripStore'
 import { HOME_BASE } from '../../lib/tripEngine'
 import { resolveMLBTeamId, resolveNcaaName } from '../../data/aliases'
+import { resolveMaxPrepsSlug } from '../../lib/maxpreps'
 import { isSpringTraining } from '../../data/springTraining'
+import { formatTimeAgo } from '../../lib/formatters'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 
 // Build a mapping from venue key → player names at that venue
@@ -234,6 +236,22 @@ export default function MapView() {
   const hsGeocodingProgress = useVenueStore((s) => s.hsGeocodingProgress)
   const hsGeocodingError = useVenueStore((s) => s.hsGeocodingError)
   const proGames = useScheduleStore((s) => s.proGames)
+  const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
+  const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
+  const hsFetchedAt = useScheduleStore((s) => s.hsFetchedAt)
+  const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
+  const schedulesProgress = useScheduleStore((s) => s.schedulesProgress)
+  const ncaaLoading = useScheduleStore((s) => s.ncaaLoading)
+  const ncaaProgress = useScheduleStore((s) => s.ncaaProgress)
+  const hsLoading = useScheduleStore((s) => s.hsLoading)
+  const hsProgress = useScheduleStore((s) => s.hsProgress)
+  const fetchProSchedules = useScheduleStore((s) => s.fetchProSchedules)
+  const fetchNcaaSchedules = useScheduleStore((s) => s.fetchNcaaSchedules)
+  const fetchHsSchedules = useScheduleStore((s) => s.fetchHsSchedules)
+  const autoAssignPlayers = useScheduleStore((s) => s.autoAssignPlayers)
+  const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
+  const playerTeamAssignments = useScheduleStore((s) => s.playerTeamAssignments)
+  const customNcaaAliases = useScheduleStore((s) => s.customNcaaAliases)
   const tripPlan = useTripStore((s) => s.tripPlan)
   const selectedTripIndex = useTripStore((s) => s.selectedTripIndex)
   const setSelectedTripIndex = useTripStore((s) => s.setSelectedTripIndex)
@@ -265,7 +283,44 @@ export default function MapView() {
 
   const isStActive = isSpringTraining(new Date().toISOString().slice(0, 10))
   const hasProPlayers = players.some((p) => p.level === 'Pro')
+  const hasNcaaPlayers = players.some((p) => p.level === 'NCAA')
   const hasHsPlayers = players.some((p) => p.level === 'HS')
+
+  // Schedule freshness
+  const proStale = proFetchedAt && (Date.now() - proFetchedAt > 24 * 60 * 60 * 1000)
+  const needsProSchedules = hasProPlayers && !proFetchedAt
+  const needsNcaaSchedules = hasNcaaPlayers && !ncaaFetchedAt
+  const needsHsSchedules = hasHsPlayers && !hsFetchedAt
+  const hsVenueCount = Object.values(venues).filter((v) => v.source === 'hs-geocoded').length
+  const hsVenueMissing = hasHsPlayers && hsVenueCount === 0
+  const anyScheduleNeeded = needsProSchedules || needsNcaaSchedules || needsHsSchedules
+
+  // Player org lists for schedule loading
+  const ncaaPlayerOrgs = useMemo(() =>
+    players.filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+      .map((p) => ({ playerName: p.playerName, org: p.org })),
+    [players],
+  )
+  const ncaaSchoolCount = useMemo(() => {
+    const schools = new Set<string>()
+    for (const { org } of ncaaPlayerOrgs) {
+      const canonical = resolveNcaaName(org, customNcaaAliases)
+      if (canonical) schools.add(canonical)
+    }
+    return schools.size
+  }, [ncaaPlayerOrgs, customNcaaAliases])
+  const hsPlayerOrgs = useMemo(() =>
+    players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+      .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state })),
+    [players],
+  )
+  const hsSchoolCount = useMemo(() => {
+    const schools = new Set<string>()
+    for (const { org, state } of hsPlayerOrgs) {
+      if (resolveMaxPrepsSlug(org, state)) schools.add(`${org}|${state}`)
+    }
+    return schools.size
+  }, [hsPlayerOrgs])
 
   // Load NCAA + Spring Training venues once
   const venuesLoaded = useRef(false)
@@ -645,23 +700,153 @@ export default function MapView() {
         </div>
       )}
 
-      {/* Status messages */}
-      <div className="flex flex-wrap gap-2">
-        {hasProPlayers && venueCounts.pro === 0 && (
-          <div className="rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-1.5 text-[11px] text-accent-blue">
-            {isStActive
-              ? 'During spring training, Pro players are shown at their ST sites (pink dots). Load game schedules on the Data Setup tab to see regular season stadiums too.'
-              : 'Load Pro game schedules on the Data Setup tab to see their stadiums on the map.'}
+      {/* Schedule loading — show when any schedules are missing */}
+      {players.length > 0 && anyScheduleNeeded && (
+        <div className="rounded-xl border border-accent-orange/20 bg-accent-orange/5 p-3">
+          <p className="mb-2 text-[11px] text-accent-orange">
+            Load game schedules to see all venues and enable the date filter.
+            {isStActive && ' During spring training, Pro players show at ST sites (pink dots).'}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Load All button */}
+            {(() => {
+              const needsPro = hasProPlayers && !proFetchedAt && Object.keys(playerTeamAssignments).length > 0
+              const needsNcaa = hasNcaaPlayers && !ncaaFetchedAt
+              const needsHs = hasHsPlayers && !hsFetchedAt
+              const sectionsNeeded = [needsPro, needsNcaa, needsHs].filter(Boolean).length
+              if (sectionsNeeded < 2) return null
+              const anyLoading = schedulesLoading || ncaaLoading || hsLoading || !!hsGeocodingProgress
+              return (
+                <button
+                  onClick={() => {
+                    const y = new Date().getFullYear()
+                    if (needsPro) fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+                    if (needsNcaa) fetchNcaaSchedules(ncaaPlayerOrgs)
+                    if (needsHs && hsVenueMissing) {
+                      const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+                      geocodeHsVenues(hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state })))
+                    }
+                    if (needsHs) fetchHsSchedules(hsPlayerOrgs)
+                  }}
+                  disabled={anyLoading}
+                  className="rounded-lg bg-white px-3 py-1 text-[11px] font-medium text-gray-900 hover:bg-gray-200 disabled:opacity-50"
+                >
+                  {anyLoading ? 'Loading...' : 'Load All Schedules'}
+                </button>
+              )
+            })()}
+
+            {/* Pro */}
+            {hasProPlayers && !proFetchedAt && (
+              <>
+                {Object.keys(playerTeamAssignments).length === 0 && (
+                  <button
+                    onClick={autoAssignPlayers}
+                    disabled={autoAssignLoading}
+                    className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
+                  >
+                    {autoAssignLoading ? 'Scanning...' : '1. Auto-Assign Players'}
+                  </button>
+                )}
+                <button
+                  onClick={() => { const y = new Date().getFullYear(); fetchProSchedules(`${y}-03-01`, `${y}-09-30`) }}
+                  disabled={schedulesLoading || Object.keys(playerTeamAssignments).length === 0}
+                  className="rounded-lg bg-accent-blue px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
+                >
+                  {schedulesLoading ? 'Loading...' : Object.keys(playerTeamAssignments).length === 0 ? 'Assign first' : 'Load Pro Schedules'}
+                </button>
+              </>
+            )}
+
+            {/* NCAA */}
+            {hasNcaaPlayers && !ncaaFetchedAt && ncaaSchoolCount > 0 && (
+              <button
+                onClick={() => fetchNcaaSchedules(ncaaPlayerOrgs)}
+                disabled={ncaaLoading}
+                className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
+              >
+                {ncaaLoading ? 'Loading...' : `Load College (~${ncaaSchoolCount * 5}s)`}
+              </button>
+            )}
+
+            {/* HS */}
+            {hasHsPlayers && !hsFetchedAt && (
+              <>
+                {hsVenueMissing && (
+                  <button
+                    onClick={() => {
+                      const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+                      geocodeHsVenues(hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state })))
+                    }}
+                    disabled={!!hsGeocodingProgress}
+                    className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
+                  >
+                    {hsGeocodingProgress ? `Geocoding... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}` : `1. Geocode HS Schools`}
+                  </button>
+                )}
+                {hsSchoolCount > 0 && (
+                  <button
+                    onClick={() => fetchHsSchedules(hsPlayerOrgs)}
+                    disabled={hsLoading}
+                    className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
+                  >
+                    {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}Load HS (~${hsSchoolCount * 5}s)`}
+                  </button>
+                )}
+              </>
+            )}
           </div>
-        )}
-        {hasHsPlayers && venueCounts.hs === 0 && !hsGeocodingProgress && (
-          <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5 text-[11px] text-accent-orange">
-            {hsGeocodingError
-              ? `Couldn't locate high school addresses: ${hsGeocodingError}. Try refreshing the page.`
-              : 'High school locations are being looked up from school names. They\'ll appear once the roster is loaded.'}
-          </div>
-        )}
-      </div>
+
+          {/* Progress indicators */}
+          {(schedulesProgress || ncaaProgress || hsProgress) && (
+            <div className="mt-2 space-y-0.5">
+              {schedulesProgress && (
+                <div className="text-[10px] text-text-dim">
+                  Pro: {schedulesProgress.completed}/{schedulesProgress.total} teams
+                </div>
+              )}
+              {ncaaProgress && (
+                <div className="text-[10px] text-text-dim">
+                  College: {ncaaProgress.completed}/{ncaaProgress.total} schools
+                </div>
+              )}
+              {hsProgress && (
+                <div className="text-[10px] text-text-dim">
+                  HS: {hsProgress.completed}/{hsProgress.total} schools
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Schedule freshness badges — show when loaded */}
+      {players.length > 0 && !anyScheduleNeeded && (proFetchedAt || ncaaFetchedAt || hsFetchedAt) && (
+        <div className="flex flex-wrap gap-2 text-[11px]">
+          {proFetchedAt && (
+            <span className={`rounded px-2 py-0.5 ${proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
+              Pro: loaded {formatTimeAgo(proFetchedAt)}
+            </span>
+          )}
+          {ncaaFetchedAt && (
+            <span className="rounded bg-accent-green/10 px-2 py-0.5 text-accent-green">
+              College: loaded {formatTimeAgo(ncaaFetchedAt)}
+            </span>
+          )}
+          {hsFetchedAt && (
+            <span className="rounded bg-accent-green/10 px-2 py-0.5 text-accent-green">
+              HS: loaded {formatTimeAgo(hsFetchedAt)}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* HS geocoding error */}
+      {hasHsPlayers && venueCounts.hs === 0 && !hsGeocodingProgress && hsGeocodingError && (
+        <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5 text-[11px] text-accent-orange">
+          Couldn't locate high school addresses: {hsGeocodingError}. Try refreshing the page.
+        </div>
+      )}
 
       {/* Map container */}
       <div className="overflow-hidden rounded-xl border border-border">
