@@ -443,6 +443,7 @@ export default function TripPlanner() {
 
   const [copyAllError, setCopyAllError] = useState(false)
   const [calAllError, setCalAllError] = useState(false)
+  const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
 
   async function handleCopyAllTrips() {
     if (!tripPlan) return
@@ -462,6 +463,195 @@ export default function TripPlanner() {
       setTimeout(() => setCopyAllError(false), 3000)
     }
   }
+
+  // Compute whether priority player is fly-in only — controls section ordering
+  const priorityIsFlyIn = tripPlan?.priorityResults?.some((r) => r.status === 'fly-in-only') ?? false
+
+  // Pre-compute fly-in section so it can be rendered in reordered position
+  const flyInSection = tripPlan && tripPlan.flyInVisits.length > 0 ? (() => {
+    const sortedVisits = [...tripPlan.flyInVisits].sort((a, b) => {
+      const aHasPriority = a.playerNames.some((n) => priorityPlayers.includes(n)) ? 1 : 0
+      const bHasPriority = b.playerNames.some((n) => priorityPlayers.includes(n)) ? 1 : 0
+      if (aHasPriority !== bHasPriority) return bHasPriority - aHasPriority
+      return b.visitValue - a.visitValue
+    })
+
+    return (
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-purple-400">
+          Fly-in Visits
+          <span className="ml-2 text-xs font-normal text-text-dim">
+            Beyond driving range — requires flight
+          </span>
+        </h3>
+        <p className="mb-3 text-xs text-text-dim">
+          These players have games outside driving radius. Estimated travel includes flight + airport + rental car.
+        </p>
+        <div className="space-y-2">
+          {sortedVisits.map((visit, i) => {
+            const firstPlayer = players.find((p) => visit.playerNames.includes(p.playerName))
+            let orgLabel = ''
+            if (visit.source === 'hs-lookup' && firstPlayer) orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
+            else if (visit.source === 'ncaa-lookup' && firstPlayer) orgLabel = firstPlayer.org
+            else if (visit.source === 'mlb-api' && firstPlayer) orgLabel = firstPlayer.org
+
+            const coordKey = `${visit.venue.coords.lat.toFixed(4)},${visit.venue.coords.lng.toFixed(4)}`
+            const flyInKey = `flyin-${coordKey}`
+            const flyInStatus = tripStatuses[flyInKey] as TripStatus | undefined
+
+            const formatFlyInDate = (d: string) => {
+              const dt = new Date(d + 'T12:00:00Z')
+              const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]
+              const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()]
+              return `${dayName} ${monthName} ${dt.getUTCDate()}`
+            }
+
+            const milesDisplay = Math.round(visit.distanceKm * 0.621).toLocaleString()
+            const firstDate = visit.dates[0] ? new Date(visit.dates[0] + 'T12:00:00Z') : null
+            const lastDate = visit.dates[visit.dates.length - 1] ? new Date(visit.dates[visit.dates.length - 1]! + 'T12:00:00Z') : null
+            const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+            const dateRangeLabel = firstDate && lastDate
+              ? `${monthNames[firstDate.getUTCMonth()]} ${firstDate.getUTCDate()}–${monthNames[lastDate.getUTCMonth()]} ${lastDate.getUTCDate()}`
+              : ''
+            const summaryText = `Fly-in to visit ${visit.playerNames.length} player${visit.playerNames.length !== 1 ? 's' : ''} at ${visit.venue.name}. ~${visit.estimatedTravelHours}h travel (${milesDisplay} mi). ${visit.dates.length} date${visit.dates.length !== 1 ? 's' : ''} available ${dateRangeLabel}.`
+
+            const handleCopyFlyIn = async () => {
+              const playerDescs = visit.playerNames.map((name) => {
+                const p = playerMap.get(name)
+                return p ? `${name} (T${p.tier})` : name
+              })
+              let text = `Fly-in Visit — ${orgLabel || visit.venue.name}\n`
+              text += `Venue: ${visit.venue.name}\n`
+              text += `Players: ${playerDescs.join(', ')}\n`
+              text += `Travel: ~${visit.estimatedTravelHours}h (${milesDisplay} mi)\n`
+              text += `Available dates: ${visit.dates.map(formatFlyInDate).join(', ')}\n`
+              try {
+                await navigator.clipboard.writeText(text)
+                setCopiedFlyIn(flyInKey)
+                setTimeout(() => setCopiedFlyIn(null), 2000)
+              } catch { /* ignore */ }
+            }
+
+            return (
+              <div key={i} className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {orgLabel && orgLabel !== visit.venue.name ? (
+                        <>
+                          <span className="text-sm font-medium text-text">{orgLabel}</span>
+                          <span className="text-xs text-text-dim">— {visit.venue.name}</span>
+                        </>
+                      ) : (
+                        <span className="text-sm font-medium text-text">{visit.venue.name}</span>
+                      )}
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                        visit.source === 'mlb-api'
+                          ? visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400'
+                          : (visit.source === 'hs-lookup' && visit.confidence === 'high')
+                            ? 'bg-accent-green/15 text-accent-green'
+                            : (visit.source === 'ncaa-lookup' && visit.confidence === 'high')
+                              ? 'bg-accent-green/15 text-accent-green'
+                              : 'bg-accent-orange/15 text-accent-orange'
+                      }`}>
+                        {visit.source === 'mlb-api'
+                          ? (visit.isHome ? 'Home Game' : 'Away Game')
+                          : visit.source === 'hs-lookup' && visit.confidence === 'high'
+                            ? 'Home Game (MaxPreps)'
+                            : visit.source === 'ncaa-lookup' && visit.confidence === 'high'
+                              ? 'School Visit (D1Baseball)'
+                              : 'School Visit (est.)'}
+                      </span>
+                      {visit.sourceUrl && (
+                        <a
+                          href={visit.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-purple-400 transition-colors"
+                          title="Verify this game on the source schedule"
+                        >
+                          {`Verify \u2197`}
+                        </a>
+                      )}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {visit.playerNames.map((name) => {
+                        const player = playerMap.get(name)
+                        const tier = player?.tier ?? 4
+                        const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                        return (
+                          <span
+                            key={name}
+                            className="inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text cursor-pointer hover:bg-accent-blue/10"
+                            onClick={() => setSelectedPlayer(name)}
+                          >
+                            <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} title={`Tier ${tier}`} />
+                            {name}
+                            <span className="text-text-dim/60">T{tier}</span>
+                          </span>
+                        )
+                      })}
+                    </div>
+                    <div className="mt-2 text-[11px] text-text-dim">
+                      {visit.dates.slice(0, 5).map(formatFlyInDate).join(', ')}
+                      {visit.dates.length > 5 && ` +${visit.dates.length - 5} more`}
+                    </div>
+                    <p className="mt-1 text-[11px] text-text-dim/70">{summaryText}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={handleCopyFlyIn}
+                        className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
+                      >
+                        {copiedFlyIn === flyInKey ? 'Copied!' : 'Copy'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (!flyInStatus) setTripStatus(flyInKey, 'planned')
+                          else if (flyInStatus === 'planned') setTripStatus(flyInKey, 'completed')
+                          else setTripStatus(flyInKey, null)
+                        }}
+                        className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                          flyInStatus === 'planned'
+                            ? 'bg-accent-blue/20 text-accent-blue'
+                            : flyInStatus === 'completed'
+                              ? 'bg-accent-green/20 text-accent-green'
+                              : 'bg-gray-800 text-text-dim hover:text-text hover:bg-gray-700'
+                        }`}
+                      >
+                        {flyInStatus === 'planned' ? 'Planned' : flyInStatus === 'completed' ? 'Completed' : 'Mark Status'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    {visit.visitValue > 0 && (
+                      <>
+                        <p className="text-lg font-bold text-purple-400">{visit.visitValue}</p>
+                        {visit.scoreBreakdown && (
+                          <p className="text-[10px] text-text-dim">
+                            {[
+                              visit.scoreBreakdown.tier1Count > 0 && `${visit.scoreBreakdown.tier1Count}×T1`,
+                              visit.scoreBreakdown.tier2Count > 0 && `${visit.scoreBreakdown.tier2Count}×T2`,
+                              visit.scoreBreakdown.tier3Count > 0 && `${visit.scoreBreakdown.tier3Count}×T3`,
+                            ].filter(Boolean).join(' · ')}
+                          </p>
+                        )}
+                      </>
+                    )}
+                    <p className="text-sm font-medium text-purple-400">
+                      ~{visit.estimatedTravelHours}h travel
+                    </p>
+                    <p className="text-[11px] text-text-dim">
+                      {milesDisplay} mi
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  })() : null
 
   return (
     <div className="space-y-6">
@@ -1053,6 +1243,9 @@ export default function TripPlanner() {
             )}
           </div>
 
+          {/* Fly-in visits — shown before road trips when priority player is fly-in-only */}
+          {priorityIsFlyIn && flyInSection}
+
           {/* Zero road trips explanation */}
           {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length > 0 && (
             <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-4 py-3">
@@ -1259,7 +1452,7 @@ export default function TripPlanner() {
             return (
               <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-4">
                 <h3 className="mb-1 text-sm font-semibold text-accent-orange">Trip Date Overlaps</h3>
-                <p className="mb-3 text-[11px] text-text-dim">These trips share dates — you can only take one per time slot. Mark the one you want as "Planned" above.</p>
+                <p className="mb-3 text-[11px] text-text-dim">These trips share dates — you can only take one per time slot. Choosing marks it as "Planned" so you can filter by status above.</p>
                 <div className="space-y-4">
                   {overlaps.map((o, i) => {
                     const tripAKey = getTripKey(tripPlan.trips[o.tripA - 1]!)
@@ -1358,127 +1551,8 @@ export default function TripPlanner() {
             </div>
           )}
 
-          {/* Fly-in visits */}
-          {tripPlan.flyInVisits.length > 0 && (
-            <div>
-              <h3 className="mb-2 text-sm font-semibold text-purple-400">
-                Fly-in Visits
-                <span className="ml-2 text-xs font-normal text-text-dim">
-                  Beyond driving range — requires flight
-                </span>
-              </h3>
-              <p className="mb-3 text-xs text-text-dim">
-                These players have games outside driving radius. Estimated travel includes flight + airport + rental car.
-              </p>
-              <div className="space-y-2">
-                {[...tripPlan.flyInVisits].sort((a, b) => {
-                  // Priority players' fly-in visits sort to the top
-                  const aHasPriority = a.playerNames.some((n) => priorityPlayers.includes(n)) ? 1 : 0
-                  const bHasPriority = b.playerNames.some((n) => priorityPlayers.includes(n)) ? 1 : 0
-                  if (aHasPriority !== bHasPriority) return bHasPriority - aHasPriority
-                  return b.visitValue - a.visitValue
-                }).map((visit, i) => {
-                  // Derive org label for fly-in
-                  const firstPlayer = players.find((p) => visit.playerNames.includes(p.playerName))
-                  let orgLabel = ''
-                  if (visit.source === 'hs-lookup' && firstPlayer) {
-                    orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
-                  } else if (visit.source === 'ncaa-lookup' && firstPlayer) {
-                    orgLabel = firstPlayer.org
-                  } else if (visit.source === 'mlb-api' && firstPlayer) {
-                    orgLabel = firstPlayer.org
-                  }
-
-                  return (
-                    <div key={i} className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {orgLabel && orgLabel !== visit.venue.name ? (
-                              <>
-                                <span className="text-sm font-medium text-text">{orgLabel}</span>
-                                <span className="text-xs text-text-dim">— {visit.venue.name}</span>
-                              </>
-                            ) : (
-                              <span className="text-sm font-medium text-text">{visit.venue.name}</span>
-                            )}
-                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                              visit.source === 'mlb-api'
-                                ? visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400'
-                                : (visit.source === 'hs-lookup' && visit.confidence === 'high')
-                                  ? 'bg-accent-green/15 text-accent-green'
-                                  : (visit.source === 'ncaa-lookup' && visit.confidence === 'high')
-                                    ? 'bg-accent-green/15 text-accent-green'
-                                    : 'bg-accent-orange/15 text-accent-orange'
-                            }`}>
-                              {visit.source === 'mlb-api'
-                                ? (visit.isHome ? 'Home Game' : 'Away Game')
-                                : visit.source === 'hs-lookup' && visit.confidence === 'high'
-                                  ? 'Home Game (MaxPreps)'
-                                  : visit.source === 'ncaa-lookup' && visit.confidence === 'high'
-                                    ? 'School Visit (D1Baseball)'
-                                    : 'School Visit (est.)'}
-                            </span>
-                            {visit.sourceUrl && (
-                              <a
-                                href={visit.sourceUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="rounded px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-purple-400 transition-colors"
-                                title="Verify this game on the source schedule"
-                              >
-                                {`Verify \u2197`}
-                              </a>
-                            )}
-                          </div>
-                          <div className="mt-1.5 flex flex-wrap gap-1">
-                            {visit.playerNames.map((name) => {
-                              const player = playerMap.get(name)
-                              const tier = player?.tier ?? 4
-                              const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                              return (
-                                <span
-                                  key={name}
-                                  className="inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text cursor-pointer hover:bg-accent-blue/10"
-                                  onClick={() => setSelectedPlayer(name)}
-                                >
-                                  <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} title={`Tier ${tier}`} />
-                                  {name}
-                                  <span className="text-text-dim/60">T{tier}</span>
-                                </span>
-                              )
-                            })}
-                          </div>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          {visit.visitValue > 0 && (
-                            <>
-                              <p className="text-lg font-bold text-purple-400">{visit.visitValue}</p>
-                              {visit.scoreBreakdown && (
-                                <p className="text-[10px] text-text-dim">
-                                  {[
-                                    visit.scoreBreakdown.tier1Count > 0 && `${visit.scoreBreakdown.tier1Count}×T1`,
-                                    visit.scoreBreakdown.tier2Count > 0 && `${visit.scoreBreakdown.tier2Count}×T2`,
-                                    visit.scoreBreakdown.tier3Count > 0 && `${visit.scoreBreakdown.tier3Count}×T3`,
-                                  ].filter(Boolean).join(' · ')}
-                                </p>
-                              )}
-                            </>
-                          )}
-                          <p className="text-sm font-medium text-purple-400">
-                            ~{visit.estimatedTravelHours}h travel
-                          </p>
-                          <p className="text-[11px] text-text-dim">
-                            {Math.round(visit.distanceKm * 0.621).toLocaleString()} mi
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
+          {/* Fly-in visits — default position (after overlaps/near-misses) */}
+          {!priorityIsFlyIn && flyInSection}
 
           {/* Truly unreachable players (no games at all) — with reasons */}
           {(() => {
