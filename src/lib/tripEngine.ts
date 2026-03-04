@@ -6,6 +6,7 @@ import { isSpringTraining, getSpringTrainingSite } from '../data/springTraining'
 import { resolveMLBTeamId, resolveNcaaName } from '../data/aliases'
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import { D1_BASEBALL_SLUGS } from '../data/d1baseballSlugs'
+import { resolveMaxPrepsSlug } from './maxpreps'
 
 // Constants
 const HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
@@ -349,6 +350,13 @@ export function generateHsEvents(
 
   for (const [key, { players: playerNames, venue }] of playersBySchool) {
     const schoolName = key.split('|')[0] ?? key
+    const stateName = key.split('|')[1] ?? ''
+    // Look up MaxPreps slug for verify link
+    const mpSlug = resolveMaxPrepsSlug(schoolName, stateName)
+    const sourceUrl = mpSlug
+      ? `https://www.maxpreps.com/${mpSlug}/baseball/schedule/`
+      : undefined
+
     for (const date of dates) {
       const d = new Date(date + 'T12:00:00Z')
       const dow = d.getUTCDay()
@@ -380,6 +388,7 @@ export function generateHsEvents(
         playerNames,
         confidence,
         confidenceNote,
+        sourceUrl,
       })
     }
   }
@@ -418,6 +427,7 @@ export async function generateTrips(
   maxDriveMinutes: number = MAX_DRIVE_MINUTES,
   priorityPlayers: string[] = [],
   urgencyMap?: UrgencyMap,
+  maxFlightHours: number = 8,
 ): Promise<TripPlan> {
   onProgress?.('Preparing', 'Filtering eligible players...')
 
@@ -789,7 +799,11 @@ export async function generateTrips(
     isHome: boolean
     distanceKm: number
     sourceUrl?: string
+    confidence?: VisitConfidence
   }>()
+
+  // Confidence priority for taking highest per venue
+  const confidenceRank: Record<string, number> = { high: 3, medium: 2, low: 1 }
 
   for (const game of eligibleGames) {
     if (game.venue.coords.lat === 0 && game.venue.coords.lng === 0) continue
@@ -801,6 +815,11 @@ export async function generateTrips(
     if (existing) {
       for (const name of relevantPlayers) existing.players.add(name)
       existing.dates.add(game.date)
+      // Take highest confidence per venue
+      if (game.confidence && (confidenceRank[game.confidence] ?? 0) > (confidenceRank[existing.confidence ?? ''] ?? 0)) {
+        existing.confidence = game.confidence
+      }
+      if (game.sourceUrl && !existing.sourceUrl) existing.sourceUrl = game.sourceUrl
     } else {
       const distKm = haversineKm(HOME_BASE, game.venue.coords)
       flyInVenueMap.set(key, {
@@ -811,6 +830,7 @@ export async function generateTrips(
         isHome: game.isHome,
         distanceKm: distKm,
         sourceUrl: game.sourceUrl,
+        confidence: game.confidence,
       })
     }
   }
@@ -835,6 +855,7 @@ export async function generateTrips(
       source: entry.source,
       isHome: entry.isHome,
       sourceUrl: entry.sourceUrl,
+      confidence: entry.confidence,
     })
 
     for (const name of entry.players) flyInCovered.add(name)
@@ -842,6 +863,31 @@ export async function generateTrips(
 
   // Sort fly-in visits by score (highest value first)
   flyInVisits.sort((a, b) => b.visitValue - a.visitValue)
+
+  // Filter out fly-in visits beyond max flight range
+  const beyondFlightRange: UnvisitablePlayer[] = []
+  const filteredFlyIns = flyInVisits.filter((v) => {
+    if (v.estimatedTravelHours <= maxFlightHours) return true
+    // Move these players to unreachable
+    for (const name of v.playerNames) {
+      if (flyInCovered.has(name)) {
+        // Only mark unreachable if this was their only fly-in option
+        const otherFlyIn = flyInVisits.some(
+          (other) => other !== v && other.estimatedTravelHours <= maxFlightHours && other.playerNames.includes(name),
+        )
+        if (!otherFlyIn) {
+          flyInCovered.delete(name)
+          beyondFlightRange.push({
+            name,
+            reason: `Beyond max flight range (${v.estimatedTravelHours}h travel)`,
+          })
+        }
+      }
+    }
+    return false
+  })
+  flyInVisits.length = 0
+  flyInVisits.push(...filteredFlyIns)
 
   // Truly unreachable: no games at all in date range (not even fly-in)
   const trulyUnreachableNames = playersNotOnRoadTrips.filter((n) => !flyInCovered.has(n))
@@ -881,6 +927,9 @@ export async function generateTrips(
 
     return { name, reason: 'No games in date range' }
   })
+
+  // Merge players filtered out by max flight range
+  trulyUnreachable.push(...beyondFlightRange)
 
   const totalCovered = visitedPlayers.size + flyInCovered.size
   const totalVisitsPlanned = [...playerVisitCounts.values()].reduce((sum, v) => sum + v, 0)

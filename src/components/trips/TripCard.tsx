@@ -26,7 +26,7 @@ function formatGameTime(timeStr?: string, source?: ScheduleSource): string {
 }
 
 // Derive a human-readable reason the player should be at this venue
-function getVisitContext(source: ScheduleSource, isHome: boolean, awayTeam: string): {
+function getVisitContext(source: ScheduleSource, isHome: boolean, awayTeam: string, confidence?: VisitConfidence): {
   label: string
   color: string
 } {
@@ -39,9 +39,15 @@ function getVisitContext(source: ScheduleSource, isHome: boolean, awayTeam: stri
       : { label: 'Away Game', color: 'bg-purple-500/15 text-purple-400' }
   }
   if (source === 'ncaa-lookup') {
-    return { label: 'School Visit (estimated)', color: 'bg-accent-green/15 text-accent-green' }
+    if (confidence === 'high') {
+      return { label: 'School Visit (D1Baseball)', color: 'bg-accent-green/15 text-accent-green' }
+    }
+    return { label: 'School Visit (estimated)', color: 'bg-accent-orange/15 text-accent-orange' }
   }
   // hs-lookup
+  if (confidence === 'high') {
+    return { label: 'Home Game (MaxPreps)', color: 'bg-accent-green/15 text-accent-green' }
+  }
   return { label: 'School Visit (estimated)', color: 'bg-accent-orange/15 text-accent-orange' }
 }
 
@@ -63,6 +69,9 @@ function getSourceBadge(source: ScheduleSource, confidence: VisitConfidence | un
     return { label: 'Estimated', color: 'bg-accent-orange/15 text-accent-orange' }
   }
   if (source === 'hs-lookup') {
+    if (confidence === 'high') {
+      return { label: 'MaxPreps', color: 'bg-accent-green/15 text-accent-green' }
+    }
     return { label: 'Estimated', color: 'bg-accent-orange/15 text-accent-orange' }
   }
   return null
@@ -220,7 +229,7 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
     const label = stop.orgLabel && stop.orgLabel !== stop.venueName
       ? `${stop.orgLabel} — ${stop.venueName}`
       : stop.venueName
-    const ctx = getVisitContext(stop.source, stop.isHome, stop.awayTeam)
+    const ctx = getVisitContext(stop.source, stop.isHome, stop.awayTeam, stop.confidence)
     const driveNote = i > 0 && stop.driveFromPrev > 0 ? ` (${formatDriveTime(stop.driveFromPrev)} from Stop ${i})` : ''
     text += `\nStop ${i + 1}: ${label} (${ctx.label})${driveNote}\n`
     const playerDescs = stop.players.map((name) => {
@@ -532,7 +541,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
       {/* Venue stops */}
       <div className="space-y-2">
         {stops.map((stop, i) => {
-          const ctx = getVisitContext(stop.source, stop.isHome, stop.awayTeam)
+          const ctx = getVisitContext(stop.source, stop.isHome, stop.awayTeam, stop.confidence)
           const srcBadge = getSourceBadge(stop.source, stop.confidence, stop.awayTeam)
 
           return (
@@ -708,13 +717,34 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
       </div>
 
       {/* Confidence warning */}
-      {hasUncertainEvents && (
-        <div className="mt-2 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
-          <p className="text-[11px] text-accent-orange">
-            Some stops on this trip are based on estimated schedules (college or high school). Double-check that the player will actually be at the venue before making the drive.
-          </p>
-        </div>
-      )}
+      {hasUncertainEvents && (() => {
+        const estimatedStops = stops.filter((s) => s.confidence && s.confidence !== 'high')
+        return (
+          <div className="mt-2 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
+            <p className="text-[11px] text-accent-orange">
+              {estimatedStops.length === 1 ? '1 stop is' : `${estimatedStops.length} stops are`} based on estimated schedules — verify before traveling:
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {estimatedStops.map((s) => (
+                <li key={s.venueKey} className="text-[11px] text-accent-orange flex items-center gap-1.5">
+                  <span className="text-accent-orange/40">•</span>
+                  <span>{s.orgLabel || s.venueName}</span>
+                  {s.sourceUrl && (
+                    <a
+                      href={s.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent-orange hover:text-accent-blue underline transition-colors"
+                    >
+                      Verify ↗
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      })()}
       </div>)}
     </div>
   )

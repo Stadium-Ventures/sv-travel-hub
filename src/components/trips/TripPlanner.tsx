@@ -5,6 +5,8 @@ import { useRosterStore } from '../../store/rosterStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { isSpringTraining } from '../../data/springTraining'
 import { isNcaaSeason, isHsSeason, analyzeBestWeeks, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../../lib/tripEngine'
+import { resolveMaxPrepsSlug } from '../../lib/maxpreps'
+import { resolveNcaaName } from '../../data/aliases'
 import { useVenueStore } from '../../store/venueStore'
 import type { Coordinates } from '../../types/roster'
 import TripCard, { generateItineraryText, buildVenueStops } from './TripCard'
@@ -235,6 +237,8 @@ export default function TripPlanner() {
   const progressDetail = useTripStore((s) => s.progressDetail)
   const setDateRange = useTripStore((s) => s.setDateRange)
   const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
+  const maxFlightHours = useTripStore((s) => s.maxFlightHours)
+  const setMaxFlightHours = useTripStore((s) => s.setMaxFlightHours)
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const clearTrips = useTripStore((s) => s.clearTrips)
@@ -243,9 +247,15 @@ export default function TripPlanner() {
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
   const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
+  const schedulesProgress = useScheduleStore((s) => s.schedulesProgress)
   const ncaaLoading = useScheduleStore((s) => s.ncaaLoading)
+  const ncaaProgress = useScheduleStore((s) => s.ncaaProgress)
+  const hsLoading = useScheduleStore((s) => s.hsLoading)
+  const hsProgress = useScheduleStore((s) => s.hsProgress)
+  const hsFetchedAt = useScheduleStore((s) => s.hsFetchedAt)
   const fetchProSchedules = useScheduleStore((s) => s.fetchProSchedules)
   const fetchNcaaSchedules = useScheduleStore((s) => s.fetchNcaaSchedules)
+  const fetchHsSchedules = useScheduleStore((s) => s.fetchHsSchedules)
   const autoAssignPlayers = useScheduleStore((s) => s.autoAssignPlayers)
   const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
   const playerTeamAssignments = useScheduleStore((s) => s.playerTeamAssignments)
@@ -276,9 +286,13 @@ export default function TripPlanner() {
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
 
   const ncaaGames = useScheduleStore((s) => s.ncaaGames)
+  const hsGamesReal = useScheduleStore((s) => s.hsGames)
   const customMlbAliases = useScheduleStore((s) => s.customMlbAliases)
   const customNcaaAliases = useScheduleStore((s) => s.customNcaaAliases)
   const venueState = useVenueStore((s) => s.venues)
+  const geocodeHsVenues = useVenueStore((s) => s.geocodeHsVenues)
+  const hsGeocodingProgress = useVenueStore((s) => s.hsGeocodingProgress)
+  const hsGeocodingFailedSchools = useVenueStore((s) => s.hsGeocodingFailedSchools)
 
   // Build player lookup
   const playerMap = useMemo(() => {
@@ -308,12 +322,16 @@ export default function TripPlanner() {
         startDate, endDate,
         customNcaaAliases,
       )
+      const hsPlayersWithReal = new Set(hsGamesReal.flatMap((g: { playerNames: string[] }) => g.playerNames))
       const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
       for (const [key, v] of Object.entries(venueState)) {
         if (v.source === 'hs-geocoded') hsVenues.set(key.replace(/^hs-/, ''), { name: v.name, coords: v.coords })
       }
-      const hsEvents = generateHsEvents(players, startDate, endDate, hsVenues)
-      const allGames = [...proGames, ...stEvents, ...ncaaGames, ...syntheticNcaa, ...hsEvents]
+      const syntheticHs = generateHsEvents(
+        players.filter((p) => p.level === 'HS' && !hsPlayersWithReal.has(p.playerName)),
+        startDate, endDate, hsVenues,
+      )
+      const allGames = [...proGames, ...stEvents, ...ncaaGames, ...syntheticNcaa, ...hsGamesReal, ...syntheticHs]
       setBestWeeks(analyzeBestWeeks(allGames, players, startDate, endDate, maxDriveMinutes))
       setBestWeeksLoading(false)
     }, 0)
@@ -340,10 +358,65 @@ export default function TripPlanner() {
   // Data freshness checks
   const proStale = proFetchedAt && (Date.now() - proFetchedAt > 24 * 60 * 60 * 1000)
   const ncaaStale = ncaaFetchedAt && (Date.now() - ncaaFetchedAt > 24 * 60 * 60 * 1000)
-  const showFreshnessWarning = (hasProPlayers && (proStale || !proFetchedAt)) || (hasNcaaPlayers && (ncaaStale || !ncaaFetchedAt))
+  const hsStale = hsFetchedAt && (Date.now() - hsFetchedAt > 24 * 60 * 60 * 1000)
+  const showFreshnessWarning = (hasProPlayers && (proStale || !proFetchedAt)) || (hasNcaaPlayers && (ncaaStale || !ncaaFetchedAt)) || (hasHsPlayers && (hsStale || !hsFetchedAt))
+
+  // Tier-based player orgs for loading buttons
+  const customNcaaAliasesRef = useScheduleStore((s) => s.customNcaaAliases)
+  const ncaaT1T2PlayerOrgs = useMemo(() =>
+    players.filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0 && p.tier <= 2)
+      .map((p) => ({ playerName: p.playerName, org: p.org })),
+    [players],
+  )
+  const ncaaAllPlayerOrgs = useMemo(() =>
+    players.filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+      .map((p) => ({ playerName: p.playerName, org: p.org })),
+    [players],
+  )
+  const ncaaT1T2SchoolCount = useMemo(() => {
+    const schools = new Set<string>()
+    for (const { org } of ncaaT1T2PlayerOrgs) {
+      const canonical = resolveNcaaName(org, customNcaaAliasesRef)
+      if (canonical) schools.add(canonical)
+    }
+    return schools.size
+  }, [ncaaT1T2PlayerOrgs, customNcaaAliasesRef])
+  const ncaaAllSchoolCount = useMemo(() => {
+    const schools = new Set<string>()
+    for (const { org } of ncaaAllPlayerOrgs) {
+      const canonical = resolveNcaaName(org, customNcaaAliasesRef)
+      if (canonical) schools.add(canonical)
+    }
+    return schools.size
+  }, [ncaaAllPlayerOrgs, customNcaaAliasesRef])
+
+  const hsT1T2PlayerOrgs = useMemo(() =>
+    players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0 && p.tier <= 2)
+      .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state })),
+    [players],
+  )
+  const hsAllPlayerOrgs = useMemo(() =>
+    players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+      .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state })),
+    [players],
+  )
+  const hsT1T2SchoolCount = useMemo(() => {
+    const schools = new Set<string>()
+    for (const { org, state } of hsT1T2PlayerOrgs) {
+      if (resolveMaxPrepsSlug(org, state)) schools.add(`${org}|${state}`)
+    }
+    return schools.size
+  }, [hsT1T2PlayerOrgs])
+  const hsAllSchoolCount = useMemo(() => {
+    const schools = new Set<string>()
+    for (const { org, state } of hsAllPlayerOrgs) {
+      if (resolveMaxPrepsSlug(org, state)) schools.add(`${org}|${state}`)
+    }
+    return schools.size
+  }, [hsAllPlayerOrgs])
 
   // Workflow stepper — determine current step
-  const schedulesActuallyLoaded = !!proFetchedAt || !!ncaaFetchedAt
+  const schedulesActuallyLoaded = !!proFetchedAt || !!ncaaFetchedAt || !!hsFetchedAt
   const stepperStep = players.length === 0 ? 0
     : (!schedulesActuallyLoaded && proGames.length === 0 && !hasStDates && !hasNcaaDates && !hasHsDates) ? 1
     : !tripPlan ? 3
@@ -422,6 +495,15 @@ export default function TripPlanner() {
           }`}>
             College games: {ncaaFetchedAt ? `loaded ${formatTimeAgo(ncaaFetchedAt)}` : 'not loaded yet'}
           </span>
+          {hasHsPlayers && (
+            <span className={`rounded px-2 py-0.5 ${
+              hsFetchedAt
+                ? hsStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
+                : 'bg-gray-800 text-text-dim/60'
+            }`}>
+              HS games: {hsFetchedAt ? `loaded ${formatTimeAgo(hsFetchedAt)}` : 'not loaded yet'}
+            </span>
+          )}
         </div>
 
         {showFreshnessWarning && (
@@ -429,8 +511,10 @@ export default function TripPlanner() {
             <p className="text-[11px] text-accent-orange">
               {!proFetchedAt && hasProPlayers && 'Pro game schedules haven\'t been loaded yet. '}
               {proStale && 'Pro game data is more than 24 hours old. '}
-              {!ncaaFetchedAt && hasNcaaPlayers && 'College game schedules haven\'t been loaded yet. '}
+              {!ncaaFetchedAt && hasNcaaPlayers && 'College game schedules haven\'t been loaded yet (using Tue/Fri/Sat estimates). '}
               {ncaaStale && 'College game data is more than 24 hours old. '}
+              {!hsFetchedAt && hasHsPlayers && 'HS schedules haven\'t been loaded yet (using Tue/Thu estimates). '}
+              {hsStale && 'HS game data is more than 24 hours old. '}
               Load schedules below to enable trip generation.
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -458,15 +542,68 @@ export default function TripPlanner() {
                 </>
               )}
               {hasNcaaPlayers && (!ncaaFetchedAt || ncaaStale) && (
-                <button
-                  onClick={() => fetchNcaaSchedules(players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org })))}
-                  disabled={ncaaLoading}
-                  className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
-                >
-                  {ncaaLoading ? 'Loading...' : `${!ncaaFetchedAt ? '' : 'Re'}load College Schedules`}
-                </button>
+                <>
+                  {ncaaT1T2SchoolCount > 0 && ncaaT1T2SchoolCount < ncaaAllSchoolCount && (
+                    <button
+                      onClick={() => fetchNcaaSchedules(ncaaT1T2PlayerOrgs, { merge: true })}
+                      disabled={ncaaLoading}
+                      className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
+                    >
+                      {ncaaLoading ? 'Loading...' : `Load College T1&T2 (~${ncaaT1T2SchoolCount * 3}s)`}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => fetchNcaaSchedules(ncaaAllPlayerOrgs)}
+                    disabled={ncaaLoading}
+                    className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
+                  >
+                    {ncaaLoading ? 'Loading...' : `${!ncaaFetchedAt ? '' : 'Re'}load All College (~${ncaaAllSchoolCount * 3}s)`}
+                  </button>
+                </>
+              )}
+              {hasHsPlayers && (!hsFetchedAt || hsStale) && (
+                <>
+                  {hsT1T2SchoolCount > 0 && hsT1T2SchoolCount < hsAllSchoolCount && (
+                    <button
+                      onClick={() => fetchHsSchedules(hsT1T2PlayerOrgs, { merge: true })}
+                      disabled={hsLoading}
+                      className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
+                    >
+                      {hsLoading ? 'Loading...' : `Load HS T1&T2 (~${hsT1T2SchoolCount * 3}s)`}
+                    </button>
+                  )}
+                  {hsAllSchoolCount > 0 && (
+                    <button
+                      onClick={() => fetchHsSchedules(hsAllPlayerOrgs)}
+                      disabled={hsLoading}
+                      className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
+                    >
+                      {hsLoading ? 'Loading...' : `${!hsFetchedAt ? '' : 'Re'}load All HS (~${hsAllSchoolCount * 3}s)`}
+                    </button>
+                  )}
+                </>
               )}
             </div>
+            {/* Loading progress indicators */}
+            {(schedulesProgress || ncaaProgress || hsProgress) && (
+              <div className="mt-2 space-y-0.5">
+                {schedulesProgress && (
+                  <div className="text-[10px] text-text-dim">
+                    Pro: {schedulesProgress.completed}/{schedulesProgress.total} teams (~{Math.max(0, (schedulesProgress.total - schedulesProgress.completed) * 2)}s remaining)
+                  </div>
+                )}
+                {ncaaProgress && (
+                  <div className="text-[10px] text-text-dim">
+                    College: {ncaaProgress.completed}/{ncaaProgress.total} schools (~{Math.max(0, (ncaaProgress.total - ncaaProgress.completed) * 3)}s remaining)
+                  </div>
+                )}
+                {hsProgress && (
+                  <div className="text-[10px] text-text-dim">
+                    HS: {hsProgress.completed}/{hsProgress.total} schools (~{Math.max(0, (hsProgress.total - hsProgress.completed) * 3)}s remaining)
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -474,8 +611,28 @@ export default function TripPlanner() {
           <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
             <p className="text-[11px] text-accent-orange">
               {hsPlayersCount} high school player{hsPlayersCount !== 1 ? 's' : ''} found but their school locations haven't been mapped yet.
-              Open the Player Map tab first — it will automatically geocode school addresses. Without locations, HS players won't appear in trip results.
+              Without locations, HS players won't appear in trip results.
             </p>
+            <div className="mt-1.5 flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+                  const schools = hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
+                  geocodeHsVenues(schools)
+                }}
+                disabled={!!hsGeocodingProgress}
+                className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
+              >
+                {hsGeocodingProgress
+                  ? `Geocoding... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
+                  : `Geocode ${hsPlayersCount} HS Schools`}
+              </button>
+              {hsGeocodingFailedSchools.length > 0 && (
+                <span className="text-[10px] text-accent-red">
+                  {hsGeocodingFailedSchools.length} failed
+                </span>
+              )}
+            </div>
           </div>
         )}
 
@@ -634,6 +791,23 @@ export default function TripPlanner() {
             <p className="mt-0.5 text-[9px] text-text-dim/50" title="Drive times are rough estimates based on straight-line distance with a 30% detour factor at ~55 mph average. Actual times vary with traffic and route.">
               {maxDriveMinutes <= 150 ? 'Covers central FL' : maxDriveMinutes <= 210 ? 'Reaches Tampa, Jacksonville, Port St. Lucie' : maxDriveMinutes <= 270 ? 'Reaches Tallahassee, South FL' : 'Reaches most of FL + southern GA'}
               {' · estimates only'}
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-text-dim">
+              Max Flight: {maxFlightHours}h
+            </label>
+            <input
+              type="range"
+              min={3}
+              max={12}
+              step={0.5}
+              value={maxFlightHours}
+              onChange={(e) => setMaxFlightHours(parseFloat(e.target.value))}
+              className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
+            />
+            <p className="mt-0.5 text-[9px] text-text-dim/50" title="Total travel time including airport overhead and flight. Filters fly-in visit options beyond this threshold.">
+              {maxFlightHours <= 4 ? 'Southeast US only' : maxFlightHours <= 6 ? 'Reaches Midwest, Northeast' : maxFlightHours <= 8 ? 'Most domestic destinations' : maxFlightHours <= 10 ? 'Coast-to-coast + Hawaii' : 'All domestic + nearby international'}
             </p>
           </div>
           {startDate > endDate && (
@@ -1097,11 +1271,19 @@ export default function TripPlanner() {
                             <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
                               visit.source === 'mlb-api'
                                 ? visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400'
-                                : 'bg-accent-orange/15 text-accent-orange'
+                                : (visit.source === 'hs-lookup' && visit.confidence === 'high')
+                                  ? 'bg-accent-green/15 text-accent-green'
+                                  : (visit.source === 'ncaa-lookup' && visit.confidence === 'high')
+                                    ? 'bg-accent-green/15 text-accent-green'
+                                    : 'bg-accent-orange/15 text-accent-orange'
                             }`}>
                               {visit.source === 'mlb-api'
                                 ? (visit.isHome ? 'Home Game' : 'Away Game')
-                                : 'School Visit (est.)'}
+                                : visit.source === 'hs-lookup' && visit.confidence === 'high'
+                                  ? 'Home Game (MaxPreps)'
+                                  : visit.source === 'ncaa-lookup' && visit.confidence === 'high'
+                                    ? 'School Visit (D1Baseball)'
+                                    : 'School Visit (est.)'}
                             </span>
                             {visit.sourceUrl && (
                               <a

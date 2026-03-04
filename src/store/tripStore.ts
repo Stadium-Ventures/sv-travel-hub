@@ -37,6 +37,7 @@ interface TripState {
   startDate: string
   endDate: string
   maxDriveMinutes: number
+  maxFlightHours: number
   priorityPlayers: string[]
   tripPlan: TripPlan | null
   computing: boolean
@@ -47,6 +48,7 @@ interface TripState {
 
   setDateRange: (start: string, end: string) => void
   setMaxDriveMinutes: (minutes: number) => void
+  setMaxFlightHours: (hours: number) => void
   setPriorityPlayers: (players: string[]) => void
   generateTrips: () => Promise<void>
   clearTrips: () => void
@@ -60,6 +62,7 @@ export const useTripStore = create<TripState>()(
   startDate: defaultStart(),
   endDate: defaultEnd(),
   maxDriveMinutes: MAX_DRIVE_MINUTES,
+  maxFlightHours: 8,
   priorityPlayers: [],
   tripPlan: null,
   computing: false,
@@ -70,6 +73,7 @@ export const useTripStore = create<TripState>()(
 
   setDateRange: (startDate, endDate) => set({ startDate, endDate }),
   setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes }),
+  setMaxFlightHours: (maxFlightHours) => set({ maxFlightHours }),
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
   clearTrips: () => set({ tripPlan: null, selectedTripIndex: null }),
   setSelectedTripIndex: (selectedTripIndex) => set({ selectedTripIndex }),
@@ -85,7 +89,7 @@ export const useTripStore = create<TripState>()(
 
   generateTrips: async () => {
     if (get().computing) return
-    const { startDate, endDate, maxDriveMinutes, priorityPlayers } = get()
+    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers } = get()
     const players = useRosterStore.getState().players
     const scheduleState = useScheduleStore.getState()
     const scheduledGames = scheduleState.proGames
@@ -110,6 +114,12 @@ export const useTripStore = create<TripState>()(
       customNcaaAliases,
     )
 
+    // Use real MaxPreps HS schedules if available, otherwise fall back to synthetic
+    const realHsGames = scheduleState.hsGames
+    const hsPlayersWithRealSchedules = new Set(
+      realHsGames.flatMap((g) => g.playerNames),
+    )
+
     // Build HS venue lookup from venue store
     const venueState = useVenueStore.getState().venues
     const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
@@ -119,9 +129,13 @@ export const useTripStore = create<TripState>()(
         hsVenues.set(venueKey, { name: v.name, coords: v.coords })
       }
     }
-    const hsEvents = generateHsEvents(players, startDate, endDate, hsVenues)
+    // Only generate synthetic events for HS players WITHOUT real schedules
+    const hsSyntheticEvents = generateHsEvents(
+      players.filter((p) => p.level === 'HS' && !hsPlayersWithRealSchedules.has(p.playerName)),
+      startDate, endDate, hsVenues,
+    )
 
-    const allGames = [...scheduledGames, ...stEvents, ...realNcaaGames, ...ncaaSyntheticEvents, ...hsEvents]
+    const allGames = [...scheduledGames, ...stEvents, ...realNcaaGames, ...ncaaSyntheticEvents, ...realHsGames, ...hsSyntheticEvents]
 
     // Build urgency map from heartbeat data
     const urgencyMap: UrgencyMap = new Map()
@@ -149,6 +163,7 @@ export const useTripStore = create<TripState>()(
         maxDriveMinutes,
         priorityPlayers,
         urgencyMap.size > 0 ? urgencyMap : undefined,
+        maxFlightHours,
       )
       // Prune stale tripStatuses — only keep keys that match current trips
       const currentKeys = new Set(plan.trips.map(getTripKey))
@@ -170,12 +185,13 @@ export const useTripStore = create<TripState>()(
 }),
     {
       name: 'sv-travel-trips',
-      version: 2,
+      version: 3,
       migrate: (persisted: any) => ({
         // Keep settings, drop computed trip data
         startDate: persisted?.startDate ?? defaultStart(),
         endDate: persisted?.endDate ?? defaultEnd(),
         maxDriveMinutes: persisted?.maxDriveMinutes ?? MAX_DRIVE_MINUTES,
+        maxFlightHours: persisted?.maxFlightHours ?? 8,
         priorityPlayers: persisted?.priorityPlayers ?? [],
         tripStatuses: persisted?.tripStatuses ?? {},
       }),
@@ -185,6 +201,7 @@ export const useTripStore = create<TripState>()(
         startDate: state.startDate,
         endDate: state.endDate,
         maxDriveMinutes: state.maxDriveMinutes,
+        maxFlightHours: state.maxFlightHours,
         priorityPlayers: state.priorityPlayers,
         tripStatuses: state.tripStatuses,
       }),
@@ -193,6 +210,7 @@ export const useTripStore = create<TripState>()(
         return {
           ...current,
           ...(p ?? {}),
+          maxFlightHours: p?.maxFlightHours ?? 8,
           priorityPlayers: p?.priorityPlayers ?? [],
           tripStatuses: p?.tripStatuses ?? {},
           tripPlan: null, // Always start fresh

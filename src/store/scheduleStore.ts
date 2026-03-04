@@ -8,7 +8,10 @@ import { extractVenueCoords } from '../lib/mlbApi'
 import type { D1Schedule } from '../lib/d1baseball'
 import { fetchAllD1Schedules, resolveOpponentVenue } from '../lib/d1baseball'
 import { NCAA_VENUES } from '../data/ncaaVenues'
+import type { MaxPrepsSchedule } from '../lib/maxpreps'
+import { fetchAllMaxPrepsSchedules, resolveMaxPrepsSlug } from '../lib/maxpreps'
 import { useRosterStore } from './rosterStore'
+import { useVenueStore } from './venueStore'
 
 interface PlayerTeamAssignment {
   teamId: number
@@ -45,6 +48,15 @@ interface ScheduleState {
   ncaaFailedSchools: string[]         // schools whose schedule fetch failed
   ncaaDroppedAwayGames: number        // away games skipped due to unknown opponent venue
 
+  // HS schedules (from MaxPreps)
+  hsSchedules: Record<string, MaxPrepsSchedule> // org|state key → schedule
+  hsGames: GameEvent[]
+  hsLoading: boolean
+  hsError: string | null
+  hsProgress: { completed: number; total: number } | null
+  hsFailedSchools: string[]
+  hsFetchedAt: number | null
+
   // Roster moves detection
   rosterMoves: MLBTransaction[]
   rosterMovesLoading: boolean
@@ -68,7 +80,8 @@ interface ScheduleState {
   fetchProSchedules: (startDate: string, endDate: string) => Promise<void>
   regenerateProGames: () => void
   checkRosterMoves: () => Promise<void>
-  fetchNcaaSchedules: (playerOrgs: Array<{ playerName: string; org: string }>) => Promise<void>
+  fetchNcaaSchedules: (playerOrgs: Array<{ playerName: string; org: string }>, opts?: { merge?: boolean }) => Promise<void>
+  fetchHsSchedules: (playerOrgs: Array<{ playerName: string; org: string; state: string }>, opts?: { merge?: boolean }) => Promise<void>
 }
 
 function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[]): GameEvent | null {
@@ -132,6 +145,14 @@ export const useScheduleStore = create<ScheduleState>()(
       ncaaProgress: null,
       ncaaFailedSchools: [],
       ncaaDroppedAwayGames: 0,
+
+      hsSchedules: {},
+      hsGames: [],
+      hsLoading: false,
+      hsError: null,
+      hsProgress: null,
+      hsFailedSchools: [],
+      hsFetchedAt: null,
 
       autoAssignLoading: false,
       autoAssignResult: null,
@@ -524,7 +545,7 @@ export const useScheduleStore = create<ScheduleState>()(
           console.error('Failed to check roster moves:', e)
         }
       },
-      fetchNcaaSchedules: async (playerOrgs) => {
+      fetchNcaaSchedules: async (playerOrgs, { merge = false } = {}) => {
         if (get().ncaaLoading) return
         // Resolve each player's org to a canonical NCAA school name
         const customNcaa = get().customNcaaAliases
@@ -542,7 +563,14 @@ export const useScheduleStore = create<ScheduleState>()(
           return
         }
 
-        set({ ncaaLoading: true, ncaaError: null, ncaaProgress: { completed: 0, total: schoolToPlayers.size }, ncaaFailedSchools: [], ncaaDroppedAwayGames: 0 })
+        const prevState = get()
+        set({
+          ncaaLoading: true,
+          ncaaError: null,
+          ncaaProgress: { completed: 0, total: schoolToPlayers.size },
+          ncaaFailedSchools: merge ? prevState.ncaaFailedSchools : [],
+          ncaaDroppedAwayGames: merge ? prevState.ncaaDroppedAwayGames : 0,
+        })
 
         try {
           const { schedules, failedSchools } = await fetchAllD1Schedules(
@@ -551,9 +579,9 @@ export const useScheduleStore = create<ScheduleState>()(
           )
 
           // Convert D1 games to GameEvents
-          const allGames: GameEvent[] = []
-          const schedulesObj: Record<string, D1Schedule> = {}
-          let droppedAwayGames = 0
+          const newGames: GameEvent[] = []
+          const schedulesObj: Record<string, D1Schedule> = merge ? { ...prevState.ncaaSchedules } : {}
+          let droppedAwayGames = merge ? prevState.ncaaDroppedAwayGames : 0
 
           for (const [school, schedule] of schedules) {
             schedulesObj[school] = schedule
@@ -579,7 +607,7 @@ export const useScheduleStore = create<ScheduleState>()(
                 continue // No venue coords
               }
 
-              allGames.push({
+              newGames.push({
                 id: `ncaa-d1-${school.toLowerCase().replace(/\s+/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
                 date: game.date,
                 dayOfWeek: d.getUTCDay(),
@@ -599,15 +627,31 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
+          // Merge or replace games
+          let allGames: GameEvent[]
+          if (merge) {
+            // Dedup by game ID — new games overwrite existing ones for the same ID
+            const gameMap = new Map<string, GameEvent>()
+            for (const g of prevState.ncaaGames) gameMap.set(g.id, g)
+            for (const g of newGames) gameMap.set(g.id, g)
+            allGames = [...gameMap.values()]
+          } else {
+            allGames = newGames
+          }
           allGames.sort((a, b) => a.date.localeCompare(b.date))
+
+          // Merge failed schools — append new failures, don't duplicate
+          const mergedFailed = merge
+            ? [...new Set([...prevState.ncaaFailedSchools, ...failedSchools])]
+            : failedSchools
 
           set({
             ncaaSchedules: schedulesObj,
             ncaaGames: allGames,
             ncaaLoading: false,
             ncaaProgress: null,
-            ncaaFetchedAt: Date.now(),
-            ncaaFailedSchools: failedSchools,
+            ncaaFetchedAt: merge ? (prevState.ncaaFetchedAt ?? Date.now()) : Date.now(),
+            ncaaFailedSchools: mergedFailed,
             ncaaDroppedAwayGames: droppedAwayGames,
           })
         } catch (e) {
@@ -615,6 +659,125 @@ export const useScheduleStore = create<ScheduleState>()(
             ncaaLoading: false,
             ncaaError: e instanceof Error ? e.message : 'Failed to fetch NCAA schedules',
             ncaaProgress: null,
+          })
+        }
+      },
+      fetchHsSchedules: async (playerOrgs, { merge = false } = {}) => {
+        if (get().hsLoading) return
+
+        // Group players by org|state key
+        const schoolToPlayers = new Map<string, string[]>()
+        for (const { playerName, org, state } of playerOrgs) {
+          const key = `${org}|${state}`
+          // Skip schools without MaxPreps slugs
+          if (!resolveMaxPrepsSlug(org, state)) continue
+          const existing = schoolToPlayers.get(key)
+          if (existing) existing.push(playerName)
+          else schoolToPlayers.set(key, [playerName])
+        }
+
+        if (schoolToPlayers.size === 0) {
+          set({ hsError: 'No schools with MaxPreps slugs found' })
+          return
+        }
+
+        const prevState = get()
+        set({
+          hsLoading: true,
+          hsError: null,
+          hsProgress: { completed: 0, total: schoolToPlayers.size },
+          hsFailedSchools: merge ? prevState.hsFailedSchools : [],
+        })
+
+        try {
+          const { schedules, failedSchools } = await fetchAllMaxPrepsSchedules(
+            [...schoolToPlayers.keys()],
+            (completed, total) => set({ hsProgress: { completed, total } }),
+          )
+
+          // Convert MaxPreps games to GameEvents — home games only
+          const newGames: GameEvent[] = []
+          const schedulesObj: Record<string, MaxPrepsSchedule> = merge ? { ...prevState.hsSchedules } : {}
+
+          // Get venue store for home venue coords
+          const venueState = useVenueStore.getState().venues
+
+          for (const [schoolKey, schedule] of schedules) {
+            schedulesObj[schoolKey] = schedule
+            const playerNames = schoolToPlayers.get(schoolKey) ?? []
+
+            // Look up home venue coords from venueStore (key format: hs-{org}|{city, state})
+            let homeVenue: { name: string; coords: { lat: number; lng: number } } | null = null
+            for (const [vKey, v] of Object.entries(venueState)) {
+              if (v.source === 'hs-geocoded') {
+                const venueSchoolKey = vKey.replace(/^hs-/, '')
+                // Match on org name portion (venueStore key: "OrgName|City, State")
+                const [venueOrg] = venueSchoolKey.split('|')
+                const [schoolOrg] = schoolKey.split('|')
+                if (venueOrg?.toLowerCase() === schoolOrg?.toLowerCase()) {
+                  homeVenue = { name: v.name, coords: v.coords }
+                  break
+                }
+              }
+            }
+
+            if (!homeVenue) continue // No geocoded venue for this school
+
+            for (const game of schedule.games) {
+              // v1: home games only
+              if (!game.isHome) continue
+
+              const d = new Date(game.date + 'T12:00:00Z')
+              const [schoolOrg] = schoolKey.split('|')
+
+              newGames.push({
+                id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
+                date: game.date,
+                dayOfWeek: d.getUTCDay(),
+                time: game.time ?? game.date + 'T16:00:00Z',
+                homeTeam: schedule.teamName || schoolOrg || schoolKey,
+                awayTeam: game.opponent,
+                isHome: true,
+                venue: homeVenue,
+                source: 'hs-lookup',
+                playerNames,
+                confidence: 'high',
+                confidenceNote: 'Confirmed home game from MaxPreps',
+                sourceUrl: `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/`,
+              })
+            }
+          }
+
+          // Merge or replace games
+          let allGames: GameEvent[]
+          if (merge) {
+            const gameMap = new Map<string, GameEvent>()
+            for (const g of prevState.hsGames) gameMap.set(g.id, g)
+            for (const g of newGames) gameMap.set(g.id, g)
+            allGames = [...gameMap.values()]
+          } else {
+            allGames = newGames
+          }
+          allGames.sort((a, b) => a.date.localeCompare(b.date))
+
+          // Merge failed schools
+          const mergedFailed = merge
+            ? [...new Set([...prevState.hsFailedSchools, ...failedSchools])]
+            : failedSchools
+
+          set({
+            hsSchedules: schedulesObj,
+            hsGames: allGames,
+            hsLoading: false,
+            hsProgress: null,
+            hsFetchedAt: merge ? (prevState.hsFetchedAt ?? Date.now()) : Date.now(),
+            hsFailedSchools: mergedFailed,
+          })
+        } catch (e) {
+          set({
+            hsLoading: false,
+            hsError: e instanceof Error ? e.message : 'Failed to fetch HS schedules',
+            hsProgress: null,
           })
         }
       },
@@ -638,9 +801,9 @@ export const useScheduleStore = create<ScheduleState>()(
         customNcaaAliases: state.customNcaaAliases,
         rosterMoves: state.rosterMoves,
         rosterMovesCheckedAt: state.rosterMovesCheckedAt,
-        // proGames/ncaaGames and proFetchedAt/ncaaFetchedAt are NOT persisted.
+        // proGames/ncaaGames/hsGames and their fetchedAt are NOT persisted.
         // Games are too large, and timestamps are meaningless without the data.
-        // Both are re-fetched each session.
+        // All are re-fetched each session.
       }),
       merge: (persisted, current) => {
         const p = persisted as any
@@ -653,8 +816,10 @@ export const useScheduleStore = create<ScheduleState>()(
           customNcaaAliases: p?.customNcaaAliases ?? {},
           proGames: [],  // Always start fresh — re-fetch each session
           ncaaGames: [], // Always start fresh — re-fetch each session
+          hsGames: [],   // Always start fresh — re-fetch each session
           proFetchedAt: null,  // Clear stale timestamps — games aren't persisted
           ncaaFetchedAt: null, // Clear stale timestamps — games aren't persisted
+          hsFetchedAt: null,   // Clear stale timestamps — games aren't persisted
           rosterMoves: p?.rosterMoves ?? [],
         }
       },

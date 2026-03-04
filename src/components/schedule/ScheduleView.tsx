@@ -8,6 +8,9 @@ import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
 import { formatTimeAgo } from '../../lib/formatters'
 import type { MLBAffiliate } from '../../lib/mlbApi'
 import { D1_BASEBALL_SLUGS } from '../../data/d1baseballSlugs'
+import { resolveMaxPrepsSlug } from '../../lib/maxpreps'
+import type { RosterPlayer } from '../../types/roster'
+import type { GameEvent } from '../../types/schedule'
 
 export default function ScheduleView() {
   const players = useRosterStore((s) => s.players)
@@ -43,6 +46,13 @@ export default function ScheduleView() {
   const autoAssignResult = useScheduleStore((s) => s.autoAssignResult)
   const ncaaFailedSchools = useScheduleStore((s) => s.ncaaFailedSchools)
   const ncaaDroppedAwayGames = useScheduleStore((s) => s.ncaaDroppedAwayGames)
+  const hsGames = useScheduleStore((s) => s.hsGames)
+  const hsLoading = useScheduleStore((s) => s.hsLoading)
+  const hsProgress = useScheduleStore((s) => s.hsProgress)
+  const hsError = useScheduleStore((s) => s.hsError)
+  const fetchHsSchedules = useScheduleStore((s) => s.fetchHsSchedules)
+  const hsFetchedAt = useScheduleStore((s) => s.hsFetchedAt)
+  const hsFailedSchools = useScheduleStore((s) => s.hsFailedSchools)
   const rosterMovesError = useScheduleStore((s) => s.rosterMovesError)
 
   const [startDate, setStartDate] = useState(`${new Date().getFullYear()}-03-01`)
@@ -112,7 +122,7 @@ export default function ScheduleView() {
   }, [proPlayers, ncaaPlayers, proGames, ncaaGames, playerTeamAssignments, customNcaaAliases])
 
   // Collect all issues for the health panel
-  const hasIssues = playersWithNoGames.length > 0 || hasUnresolved || ncaaFailedSchools.length > 0 || ncaaDroppedAwayGames > 0 || schedulesError || ncaaError || rosterMovesError || (autoAssignResult?.error)
+  const hasIssues = playersWithNoGames.length > 0 || hasUnresolved || ncaaFailedSchools.length > 0 || ncaaDroppedAwayGames > 0 || hsFailedSchools.length > 0 || schedulesError || ncaaError || hsError || rosterMovesError || (autoAssignResult?.error)
 
   return (
     <div className="space-y-6">
@@ -135,6 +145,7 @@ export default function ScheduleView() {
             <span>{hsPlayers.length} HS players</span>
             {proGames.length > 0 && <span className="text-accent-green">{proGames.length} Pro games loaded</span>}
             {ncaaGames.length > 0 && <span className="text-accent-green">{ncaaGames.length} College games loaded</span>}
+            {hsGames.length > 0 && <span className="text-accent-green">{hsGames.length} HS games loaded</span>}
           </div>
 
           {/* Issues list */}
@@ -171,6 +182,16 @@ export default function ScheduleView() {
 
               {ncaaError && (
                 <p className="text-[11px] text-accent-red">College schedule error: {ncaaError}</p>
+              )}
+
+              {hsFailedSchools.length > 0 && (
+                <p className="text-[11px] text-accent-red">
+                  Failed to load HS schedules for: {hsFailedSchools.join(', ')}
+                </p>
+              )}
+
+              {hsError && (
+                <p className="text-[11px] text-accent-red">HS schedule error: {hsError}</p>
               )}
 
               {autoAssignResult?.error && (
@@ -525,171 +546,32 @@ export default function ScheduleView() {
 
       {/* NCAA players section */}
       {ncaaPlayers.length > 0 && (
-        <div className="rounded-xl border border-accent-green/30 bg-surface p-5">
-          <div className="mb-1 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-accent-green">College Players</h2>
-              <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
-                {ncaaPlayers.length} players
-              </span>
-              {ncaaFetchedAt && (
-                <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${
-                  Date.now() - ncaaFetchedAt > 24 * 60 * 60 * 1000
-                    ? 'bg-accent-orange/10 text-accent-orange'
-                    : 'bg-accent-green/10 text-accent-green'
-                }`}>
-                  loaded {formatTimeAgo(ncaaFetchedAt)}
-                </span>
-              )}
-              {isNcaaSeason(new Date().toISOString().slice(0, 10)) && (
-                <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
-                  Season Active
-                </span>
-              )}
-            </div>
-            <button
-              onClick={() => fetchNcaaSchedules(ncaaPlayers.map((p) => ({ playerName: p.playerName, org: p.org })))}
-              disabled={ncaaLoading}
-              className="rounded-lg bg-accent-green px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
-            >
-              {ncaaLoading ? 'Loading...' : ncaaGames.length > 0 ? 'Refresh All' : 'Load All Schedules'}
-            </button>
-          </div>
-          <p className="mb-3 text-xs text-text-dim">
-            Your college players and their home stadiums. Load schedules from D1Baseball to get real game dates — or load a specific school below. Without real data, the trip planner uses estimated home game days.
-          </p>
-
-          {ncaaProgress && (
-            <div className="mb-3">
-              <div className="mb-1 text-xs text-text-dim">
-                Loading schedules: {ncaaProgress.completed}/{ncaaProgress.total} schools
-              </div>
-              <div className="h-1.5 rounded-full bg-gray-800">
-                <div
-                  className="h-full rounded-full bg-accent-green transition-all"
-                  style={{ width: `${(ncaaProgress.completed / ncaaProgress.total) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {ncaaError && (
-            <p className="mb-3 text-sm text-accent-red">{ncaaError}</p>
-          )}
-
-          {ncaaGames.length > 0 && (
-            <p className="mb-3 text-sm text-accent-green">
-              Loaded {ncaaGames.length} games ({ncaaGames.filter((g) => g.isHome).length} home, {ncaaGames.filter((g) => !g.isHome).length} away)
-              {ncaaDroppedAwayGames > 0 && (
-                <span className="ml-1 text-accent-orange">
-                  — {ncaaDroppedAwayGames} away game{ncaaDroppedAwayGames !== 1 ? 's' : ''} skipped (unknown opponent stadium)
-                </span>
-              )}
-            </p>
-          )}
-
-          {ncaaFailedSchools.length > 0 && (
-            <div className="mb-3 rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-2">
-              <p className="text-xs text-accent-red">
-                Failed to load schedules for: {ncaaFailedSchools.join(', ')}
-              </p>
-              <p className="text-[11px] text-text-dim">
-                These schools' games won't appear in trip planning. Try loading them individually above or check D1Baseball for availability.
-              </p>
-            </div>
-          )}
-
-          <div className="grid gap-1 sm:grid-cols-2">
-            {ncaaPlayers.map((player) => {
-              const canonical = resolveNcaaName(player.org, customNcaaAliases)
-              const venue = canonical ? NCAA_VENUES[canonical] : null
-              const hasRealSchedule = ncaaGames.some((g) => g.playerNames.includes(player.playerName))
-              const slug = canonical ? D1_BASEBALL_SLUGS[canonical] : null
-              return (
-                <div key={player.playerName} className="flex items-center justify-between rounded-lg bg-gray-950/50 px-3 py-1.5 text-sm">
-                  <span className="text-text">{player.playerName}</span>
-                  <span className="flex items-center gap-1.5 text-xs text-text-dim">
-                    {venue ? (
-                      <>
-                        <span className="text-accent-green">
-                          {player.org} — {venue.venueName}
-                        </span>
-                        {hasRealSchedule && <span className="rounded bg-accent-blue/15 px-1 py-0.5 text-[10px] font-medium text-accent-blue">loaded</span>}
-                        {!hasRealSchedule && !ncaaLoading && (
-                          <button
-                            onClick={() => fetchNcaaSchedules([{ playerName: player.playerName, org: player.org }])}
-                            className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-green hover:bg-accent-green/25 transition-colors"
-                          >
-                            Load
-                          </button>
-                        )}
-                        {slug && (
-                          <a
-                            href={`https://d1baseball.com/team/${slug}/schedule/`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-text transition-colors"
-                            title="View on D1Baseball"
-                          >
-                            D1B ↗
-                          </a>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-accent-orange">{player.org} — venue not mapped</span>
-                    )}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-
-          {ncaaGames.length === 0 && (
-            <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
-              <p className="text-[11px] text-accent-orange">
-                Without real schedules loaded, college games are estimated based on typical home game days.
-                Load real schedules above for actual dates including away games.
-              </p>
-            </div>
-          )}
-        </div>
+        <NcaaSection
+          ncaaPlayers={ncaaPlayers}
+          ncaaGames={ncaaGames}
+          ncaaLoading={ncaaLoading}
+          ncaaProgress={ncaaProgress}
+          ncaaError={ncaaError}
+          ncaaFetchedAt={ncaaFetchedAt}
+          ncaaFailedSchools={ncaaFailedSchools}
+          ncaaDroppedAwayGames={ncaaDroppedAwayGames}
+          customNcaaAliases={customNcaaAliases}
+          fetchNcaaSchedules={fetchNcaaSchedules}
+        />
       )}
 
       {/* HS players section */}
       {hsPlayers.length > 0 && (
-        <div className="rounded-xl border border-accent-orange/30 bg-surface p-5">
-          <div className="mb-3 flex items-center gap-2">
-            <h2 className="text-base font-semibold text-accent-orange">High School Players</h2>
-            <span className="rounded-full bg-accent-orange/15 px-2 py-0.5 text-[10px] font-medium text-accent-orange">
-              {hsPlayers.length} players
-            </span>
-            {isHsSeason(new Date().toISOString().slice(0, 10)) && (
-              <span className="rounded-full bg-accent-orange/15 px-2 py-0.5 text-[10px] font-medium text-accent-orange">
-                Season Active (Feb 14 – May 15)
-              </span>
-            )}
-          </div>
-          <p className="mb-3 text-xs text-text-dim">
-            Visit opportunities based on typical home game days (Tue/Thu).
-            Players are generally at their school on weekdays.
-          </p>
-          <div className="grid gap-1 sm:grid-cols-2">
-            {hsPlayers.map((player) => (
-              <div key={player.playerName} className="flex items-center justify-between rounded-lg bg-gray-950/50 px-3 py-1.5 text-sm">
-                <span className="text-text">{player.playerName}</span>
-                <span className="text-xs text-text-dim">
-                  {player.org}{player.state ? `, ${player.state}` : ''}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
-            <p className="text-[11px] text-accent-orange">
-              Note: High school schedules are estimated since we don't have exact game dates.
-              Check the Map tab to verify that each school's location looks correct.
-            </p>
-          </div>
-        </div>
+        <HsSection
+          hsPlayers={hsPlayers}
+          hsGames={hsGames}
+          hsLoading={hsLoading}
+          hsProgress={hsProgress}
+          hsError={hsError}
+          hsFetchedAt={hsFetchedAt}
+          hsFailedSchools={hsFailedSchools}
+          fetchHsSchedules={fetchHsSchedules}
+        />
       )}
 
     </div>
@@ -773,6 +655,478 @@ function AssignedPlayerRow({
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+function NcaaSection({
+  ncaaPlayers,
+  ncaaGames,
+  ncaaLoading,
+  ncaaProgress,
+  ncaaError,
+  ncaaFetchedAt,
+  ncaaFailedSchools,
+  ncaaDroppedAwayGames,
+  customNcaaAliases,
+  fetchNcaaSchedules,
+}: {
+  ncaaPlayers: RosterPlayer[]
+  ncaaGames: GameEvent[]
+  ncaaLoading: boolean
+  ncaaProgress: { completed: number; total: number } | null
+  ncaaError: string | null
+  ncaaFetchedAt: number | null
+  ncaaFailedSchools: string[]
+  ncaaDroppedAwayGames: number
+  customNcaaAliases: Record<string, string>
+  fetchNcaaSchedules: (playerOrgs: Array<{ playerName: string; org: string }>, opts?: { merge?: boolean }) => Promise<void>
+}) {
+  // Group players by school
+  const schoolGroups = useMemo(() => {
+    const groups = new Map<string, { canonical: string; players: RosterPlayer[] }>()
+    for (const p of ncaaPlayers) {
+      const canonical = resolveNcaaName(p.org, customNcaaAliases)
+      const key = canonical ?? p.org
+      const existing = groups.get(key)
+      if (existing) existing.players.push(p)
+      else groups.set(key, { canonical: canonical ?? '', players: [p] })
+    }
+    return groups
+  }, [ncaaPlayers, customNcaaAliases])
+
+  // Compute unique schools and tier-based subsets
+  const allPlayerOrgs = useMemo(
+    () => ncaaPlayers.map((p) => ({ playerName: p.playerName, org: p.org })),
+    [ncaaPlayers],
+  )
+
+  const t1t2PlayerOrgs = useMemo(
+    () => ncaaPlayers.filter((p) => p.tier <= 2).map((p) => ({ playerName: p.playerName, org: p.org })),
+    [ncaaPlayers],
+  )
+
+  // Count unique schools for time estimates
+  const uniqueSchoolCount = schoolGroups.size
+  const t1t2Schools = useMemo(() => {
+    const schools = new Set<string>()
+    for (const p of ncaaPlayers) {
+      if (p.tier <= 2) {
+        const canonical = resolveNcaaName(p.org, customNcaaAliases)
+        if (canonical) schools.add(canonical)
+      }
+    }
+    return schools
+  }, [ncaaPlayers, customNcaaAliases])
+
+  const timeEstimateAll = Math.round(uniqueSchoolCount * 3)
+  const timeEstimateT1T2 = Math.round(t1t2Schools.size * 3)
+
+  // Time remaining during loading
+  const timeRemaining = ncaaProgress
+    ? Math.round((ncaaProgress.total - ncaaProgress.completed) * 3)
+    : null
+
+  return (
+    <div className="rounded-xl border border-accent-green/30 bg-surface p-5">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold text-accent-green">College Players</h2>
+          <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
+            {ncaaPlayers.length} players
+          </span>
+          {ncaaFetchedAt && (
+            <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+              Date.now() - ncaaFetchedAt > 24 * 60 * 60 * 1000
+                ? 'bg-accent-orange/10 text-accent-orange'
+                : 'bg-accent-green/10 text-accent-green'
+            }`}>
+              loaded {formatTimeAgo(ncaaFetchedAt)}
+            </span>
+          )}
+          {isNcaaSeason(new Date().toISOString().slice(0, 10)) && (
+            <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
+              Season Active
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {t1t2PlayerOrgs.length > 0 && t1t2PlayerOrgs.length < allPlayerOrgs.length && (
+            <button
+              onClick={() => fetchNcaaSchedules(t1t2PlayerOrgs, { merge: true })}
+              disabled={ncaaLoading}
+              className="rounded-lg bg-accent-green px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
+              title={`~${timeEstimateT1T2}s for ${t1t2Schools.size} schools`}
+            >
+              {ncaaLoading ? 'Loading...' : `Load T1 & T2`}
+            </button>
+          )}
+          <button
+            onClick={() => fetchNcaaSchedules(allPlayerOrgs)}
+            disabled={ncaaLoading}
+            className="rounded-lg bg-accent-green px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
+            title={`~${timeEstimateAll}s for ${uniqueSchoolCount} schools`}
+          >
+            {ncaaLoading ? 'Loading...' : ncaaGames.length > 0 ? 'Refresh All' : `Load All (~${timeEstimateAll}s)`}
+          </button>
+        </div>
+      </div>
+      <p className="mb-3 text-xs text-text-dim">
+        Your college players and their home stadiums. Load schedules from D1Baseball to get real game dates — or load a specific school below. Without real data, the trip planner uses estimated home game days.
+      </p>
+
+      {ncaaProgress && (
+        <div className="mb-3">
+          <div className="mb-1 text-xs text-text-dim">
+            Loading schedules: {ncaaProgress.completed}/{ncaaProgress.total} schools
+            {timeRemaining !== null && timeRemaining > 0 && (
+              <span className="ml-1 text-text-dim/70">(~{timeRemaining}s remaining)</span>
+            )}
+          </div>
+          <div className="h-1.5 rounded-full bg-gray-800">
+            <div
+              className="h-full rounded-full bg-accent-green transition-all"
+              style={{ width: `${(ncaaProgress.completed / ncaaProgress.total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {ncaaError && (
+        <p className="mb-3 text-sm text-accent-red">{ncaaError}</p>
+      )}
+
+      {ncaaGames.length > 0 && (
+        <p className="mb-3 text-sm text-accent-green">
+          Loaded {ncaaGames.length} games ({ncaaGames.filter((g) => g.isHome).length} home, {ncaaGames.filter((g) => !g.isHome).length} away)
+          {ncaaDroppedAwayGames > 0 && (
+            <span className="ml-1 text-accent-orange">
+              — {ncaaDroppedAwayGames} away game{ncaaDroppedAwayGames !== 1 ? 's' : ''} skipped (unknown opponent stadium)
+            </span>
+          )}
+        </p>
+      )}
+
+      {ncaaFailedSchools.length > 0 && (
+        <div className="mb-3 rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-2">
+          <p className="text-xs text-accent-red">
+            Failed to load schedules for: {ncaaFailedSchools.join(', ')}
+          </p>
+          <p className="text-[11px] text-text-dim">
+            These schools' games won't appear in trip planning. Try loading them individually below or check D1Baseball for availability.
+          </p>
+        </div>
+      )}
+
+      {/* School-grouped player list */}
+      <div className="space-y-2">
+        {[...schoolGroups.entries()].map(([key, { canonical, players }]) => {
+          const venue = canonical ? NCAA_VENUES[canonical] : null
+          const slug = canonical ? D1_BASEBALL_SLUGS[canonical] : null
+          const schoolHasSchedule = players.some((p) =>
+            ncaaGames.some((g) => g.playerNames.includes(p.playerName)),
+          )
+          const schoolPlayerOrgs = players.map((p) => ({ playerName: p.playerName, org: p.org }))
+
+          return (
+            <div key={key} className="rounded-lg border border-border/30 bg-gray-950/30 px-3 py-2">
+              {/* School header */}
+              <div className="mb-1 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-text">{canonical || key}</span>
+                  {venue && (
+                    <span className="text-[10px] text-text-dim">{venue.venueName}</span>
+                  )}
+                  {schoolHasSchedule && (
+                    <span className="rounded bg-accent-blue/15 px-1 py-0.5 text-[10px] font-medium text-accent-blue">loaded</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {!schoolHasSchedule && !ncaaLoading && canonical && (
+                    <button
+                      onClick={() => fetchNcaaSchedules(schoolPlayerOrgs, { merge: true })}
+                      className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-green hover:bg-accent-green/25 transition-colors"
+                    >
+                      Load
+                    </button>
+                  )}
+                  {slug && (
+                    <a
+                      href={`https://d1baseball.com/team/${slug}/schedule/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-text transition-colors"
+                      title="View on D1Baseball"
+                    >
+                      D1B
+                    </a>
+                  )}
+                </div>
+              </div>
+              {/* Players in this school */}
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                {players.map((player) => (
+                  <span key={player.playerName} className="text-xs text-text-dim">
+                    {player.playerName}
+                    <span className="ml-1 text-[10px] text-text-dim/50">T{player.tier}</span>
+                  </span>
+                ))}
+              </div>
+              {!venue && canonical === '' && (
+                <span className="text-[10px] text-accent-orange">venue not mapped</span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {ncaaGames.length === 0 && (
+        <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
+          <p className="text-[11px] text-accent-orange">
+            Without real schedules loaded, college games are estimated based on typical home game days.
+            Load real schedules above for actual dates including away games.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function HsSection({
+  hsPlayers,
+  hsGames,
+  hsLoading,
+  hsProgress,
+  hsError,
+  hsFetchedAt,
+  hsFailedSchools,
+  fetchHsSchedules,
+}: {
+  hsPlayers: RosterPlayer[]
+  hsGames: GameEvent[]
+  hsLoading: boolean
+  hsProgress: { completed: number; total: number } | null
+  hsError: string | null
+  hsFetchedAt: number | null
+  hsFailedSchools: string[]
+  fetchHsSchedules: (playerOrgs: Array<{ playerName: string; org: string; state: string }>, opts?: { merge?: boolean }) => Promise<void>
+}) {
+  // Group players by school (org|state)
+  const schoolGroups = useMemo(() => {
+    const groups = new Map<string, { org: string; state: string; players: RosterPlayer[] }>()
+    for (const p of hsPlayers) {
+      const key = `${p.org}|${p.state ?? ''}`
+      const existing = groups.get(key)
+      if (existing) existing.players.push(p)
+      else groups.set(key, { org: p.org, state: p.state ?? '', players: [p] })
+    }
+    return groups
+  }, [hsPlayers])
+
+  // Build player org lists for fetch calls
+  const allPlayerOrgs = useMemo(
+    () => hsPlayers.map((p) => ({ playerName: p.playerName, org: p.org, state: p.state ?? '' })),
+    [hsPlayers],
+  )
+
+  const t1t2PlayerOrgs = useMemo(
+    () => hsPlayers.filter((p) => p.tier <= 2).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state ?? '' })),
+    [hsPlayers],
+  )
+
+  // Count schools with slugs for time estimates
+  const schoolsWithSlugs = useMemo(() => {
+    let count = 0
+    for (const [, { org, state }] of schoolGroups) {
+      if (resolveMaxPrepsSlug(org, state)) count++
+    }
+    return count
+  }, [schoolGroups])
+
+  const t1t2Schools = useMemo(() => {
+    const schools = new Set<string>()
+    for (const p of hsPlayers) {
+      if (p.tier <= 2 && resolveMaxPrepsSlug(p.org, p.state ?? '')) {
+        schools.add(`${p.org}|${p.state ?? ''}`)
+      }
+    }
+    return schools
+  }, [hsPlayers])
+
+  const timeEstimateAll = Math.round(schoolsWithSlugs * 3)
+  const timeEstimateT1T2 = Math.round(t1t2Schools.size * 3)
+
+  const timeRemaining = hsProgress
+    ? Math.round((hsProgress.total - hsProgress.completed) * 3)
+    : null
+
+  return (
+    <div className="rounded-xl border border-accent-orange/30 bg-surface p-5">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold text-accent-orange">High School Players</h2>
+          <span className="rounded-full bg-accent-orange/15 px-2 py-0.5 text-[10px] font-medium text-accent-orange">
+            {hsPlayers.length} players
+          </span>
+          {hsFetchedAt && (
+            <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+              Date.now() - hsFetchedAt > 24 * 60 * 60 * 1000
+                ? 'bg-accent-orange/10 text-accent-orange'
+                : 'bg-accent-green/10 text-accent-green'
+            }`}>
+              loaded {formatTimeAgo(hsFetchedAt)}
+            </span>
+          )}
+          {isHsSeason(new Date().toISOString().slice(0, 10)) && (
+            <span className="rounded-full bg-accent-orange/15 px-2 py-0.5 text-[10px] font-medium text-accent-orange">
+              Season Active (Feb 14 – May 15)
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {t1t2PlayerOrgs.length > 0 && t1t2PlayerOrgs.length < allPlayerOrgs.length && t1t2Schools.size > 0 && (
+            <button
+              onClick={() => fetchHsSchedules(t1t2PlayerOrgs, { merge: true })}
+              disabled={hsLoading}
+              className="rounded-lg bg-accent-orange px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
+              title={`~${timeEstimateT1T2}s for ${t1t2Schools.size} schools`}
+            >
+              {hsLoading ? 'Loading...' : `Load T1 & T2`}
+            </button>
+          )}
+          {schoolsWithSlugs > 0 && (
+            <button
+              onClick={() => fetchHsSchedules(allPlayerOrgs)}
+              disabled={hsLoading}
+              className="rounded-lg bg-accent-orange px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
+              title={`~${timeEstimateAll}s for ${schoolsWithSlugs} schools`}
+            >
+              {hsLoading ? 'Loading...' : hsGames.length > 0 ? 'Refresh All' : `Load All (~${timeEstimateAll}s)`}
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="mb-3 text-xs text-text-dim">
+        Your high school players and their schools. Load schedules from MaxPreps to get real game dates — or load a specific school below.
+        Without real data, the trip planner uses estimated home game days (Tue/Thu).
+      </p>
+
+      {hsProgress && (
+        <div className="mb-3">
+          <div className="mb-1 text-xs text-text-dim">
+            Loading schedules: {hsProgress.completed}/{hsProgress.total} schools
+            {timeRemaining !== null && timeRemaining > 0 && (
+              <span className="ml-1 text-text-dim/70">(~{timeRemaining}s remaining)</span>
+            )}
+          </div>
+          <div className="h-1.5 rounded-full bg-gray-800">
+            <div
+              className="h-full rounded-full bg-accent-orange transition-all"
+              style={{ width: `${(hsProgress.completed / hsProgress.total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {hsError && (
+        <p className="mb-3 text-sm text-accent-red">{hsError}</p>
+      )}
+
+      {hsGames.length > 0 && (
+        <p className="mb-3 text-sm text-accent-green">
+          Loaded {hsGames.length} home games from MaxPreps
+        </p>
+      )}
+
+      {hsFailedSchools.length > 0 && (
+        <div className="mb-3 rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-2">
+          <p className="text-xs text-accent-red">
+            Failed to load schedules for: {hsFailedSchools.join(', ')}
+          </p>
+        </div>
+      )}
+
+      {/* School-grouped player list */}
+      <div className="space-y-2">
+        {[...schoolGroups.entries()].map(([key, { org, state, players }]) => {
+          const slug = resolveMaxPrepsSlug(org, state)
+          const schoolHasSchedule = players.some((p) =>
+            hsGames.some((g) => g.playerNames.includes(p.playerName)),
+          )
+          const schoolPlayerOrgs = players.map((p) => ({ playerName: p.playerName, org: p.org, state: p.state ?? '' }))
+
+          return (
+            <div key={key} className="rounded-lg border border-border/30 bg-gray-950/30 px-3 py-2">
+              {/* School header */}
+              <div className="mb-1 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-text">{org}</span>
+                  {state && (
+                    <span className="text-[10px] text-text-dim">{state}</span>
+                  )}
+                  {schoolHasSchedule && (
+                    <span className="rounded bg-accent-blue/15 px-1 py-0.5 text-[10px] font-medium text-accent-blue">loaded</span>
+                  )}
+                  {!slug && (
+                    <span className="rounded bg-gray-700 px-1 py-0.5 text-[10px] font-medium text-text-dim">no MaxPreps slug</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {!schoolHasSchedule && !hsLoading && slug && (
+                    <button
+                      onClick={() => fetchHsSchedules(schoolPlayerOrgs, { merge: true })}
+                      className="rounded bg-accent-orange/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-orange hover:bg-accent-orange/25 transition-colors"
+                    >
+                      Load
+                    </button>
+                  )}
+                  {slug && (
+                    <a
+                      href={`https://www.maxpreps.com/${slug}/baseball/schedule/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-text transition-colors"
+                      title="View on MaxPreps"
+                    >
+                      MP
+                    </a>
+                  )}
+                </div>
+              </div>
+              {/* Players in this school */}
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                {players.map((player) => (
+                  <span key={player.playerName} className="text-xs text-text-dim">
+                    {player.playerName}
+                    <span className="ml-1 text-[10px] text-text-dim/50">T{player.tier}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Instructions for missing slugs */}
+      {[...schoolGroups.values()].some(({ org, state }) => !resolveMaxPrepsSlug(org, state)) && (
+        <div className="mt-3 rounded-lg border border-border/30 bg-gray-950/30 px-3 py-2">
+          <p className="text-[11px] text-text-dim">
+            <span className="font-medium text-accent-orange">Missing slugs?</span> To add a MaxPreps slug:
+            go to maxpreps.com, find the school's baseball schedule page, and copy the URL slug
+            (e.g., <code className="text-[10px]">tx/carrollton/hebron-hawks</code>).
+            Add it to <code className="text-[10px]">src/data/maxprepsSlugs.ts</code>.
+          </p>
+        </div>
+      )}
+
+      {hsGames.length === 0 && (
+        <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
+          <p className="text-[11px] text-accent-orange">
+            Without real schedules loaded, HS games are estimated based on typical home game days (Tue/Thu).
+            Add MaxPreps slugs and load real schedules for actual dates.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

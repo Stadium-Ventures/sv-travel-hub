@@ -66,6 +66,7 @@ export interface FlyInVisit {
   source: ScheduleSource
   isHome: boolean
   sourceUrl?: string
+  confidence?: VisitConfidence
 }
 
 export interface NearMiss {

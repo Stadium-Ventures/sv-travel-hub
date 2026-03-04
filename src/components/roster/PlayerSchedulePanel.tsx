@@ -32,6 +32,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
   const player = players.find((p) => p.playerName === playerName)
   const proGames = useScheduleStore((s) => s.proGames)
   const ncaaGames = useScheduleStore((s) => s.ncaaGames)
+  const hsGamesReal = useScheduleStore((s) => s.hsGames)
   const tripPlan = useTripStore((s) => s.tripPlan)
   const tripStatuses = useTripStore((s) => s.tripStatuses)
   const startDate = useTripStore((s) => s.startDate)
@@ -80,12 +81,18 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
       }
 
       if (player.level === 'HS') {
-        const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
-        for (const [key, v] of Object.entries(venueState)) {
-          if (v.source === 'hs-geocoded') hsVenues.set(key.replace(/^hs-/, ''), { name: v.name, coords: v.coords })
+        // Use real MaxPreps games if available
+        const realHs = hsGamesReal.filter((g) => g.playerNames.includes(playerName))
+        games.push(...realHs)
+        // Fall back to synthetic if no real games
+        if (realHs.length === 0) {
+          const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
+          for (const [key, v] of Object.entries(venueState)) {
+            if (v.source === 'hs-geocoded') hsVenues.set(key.replace(/^hs-/, ''), { name: v.name, coords: v.coords })
+          }
+          const hsEvents = generateHsEvents([player], startDate, endDate, hsVenues)
+          games.push(...hsEvents.filter((g) => g.playerNames.includes(playerName)))
         }
-        const hsEvents = generateHsEvents([player], startDate, endDate, hsVenues)
-        games.push(...hsEvents.filter((g) => g.playerNames.includes(playerName)))
       }
     }
 
@@ -101,7 +108,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
     // Only show upcoming (from today forward)
     const today = new Date().toISOString().split('T')[0]!
     return unique.filter((g) => g.date >= today)
-  }, [playerName, player, players, proGames, ncaaGames, venueState, startDate, endDate])
+  }, [playerName, player, players, proGames, ncaaGames, hsGamesReal, venueState, startDate, endDate])
 
   // Find which trips include this player
   const tripAssignments = useMemo(() => {
@@ -212,6 +219,24 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
               Upcoming Games
               <span className="ml-2 text-xs font-normal text-text-dim">{allGames.length} events</span>
             </h3>
+
+            {/* Natural language data source summary */}
+            {allGames.length > 0 && (() => {
+              const sourceParts: string[] = []
+              const mlbCount = allGames.filter((g) => g.source === 'mlb-api').length
+              const d1Count = allGames.filter((g) => g.source === 'ncaa-lookup' && g.confidence === 'high').length
+              const mpCount = allGames.filter((g) => g.source === 'hs-lookup' && g.confidence === 'high').length
+              const estCount = allGames.filter((g) => g.confidence && g.confidence !== 'high').length
+              if (mlbCount > 0) sourceParts.push(`confirmed MLB schedule`)
+              if (d1Count > 0) sourceParts.push(`D1Baseball (${d1Count} games)`)
+              if (mpCount > 0) sourceParts.push(`MaxPreps (${mpCount} games)`)
+              const summary = sourceParts.length > 0 ? `Data sources: ${sourceParts.join(', ')}.` : ''
+              const estNote = estCount > 0 ? ` ${estCount} event${estCount !== 1 ? 's are' : ' is'} estimated — verify before traveling.` : ''
+              return (summary || estNote) ? (
+                <p className="mb-2 text-[11px] text-text-dim">{summary}{estNote}</p>
+              ) : null
+            })()}
+
             {allGames.length === 0 ? (
               <p className="text-xs text-text-dim">No upcoming games found in the selected date range.</p>
             ) : (
@@ -219,6 +244,14 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                 {allGames.slice(0, 30).map((g) => {
                   const sourceLabel = SOURCE_LABELS[g.source] ?? 'Unknown'
                   const isPostponed = g.gameStatus === 'Postponed' || g.gameStatus === 'Suspended'
+                  const confidenceLabel = g.source === 'mlb-api' ? 'Confirmed'
+                    : g.source === 'ncaa-lookup' && g.confidence === 'high' ? 'D1Baseball'
+                    : g.source === 'hs-lookup' && g.confidence === 'high' ? 'MaxPreps'
+                    : g.confidence === 'medium' ? 'Likely'
+                    : 'Estimated'
+                  const confidenceColor = confidenceLabel === 'Estimated' ? 'text-accent-orange'
+                    : confidenceLabel === 'Likely' ? 'text-yellow-400'
+                    : 'text-accent-green'
                   return (
                     <div key={g.id} className={`rounded-lg border px-3 py-2 text-sm ${
                       isPostponed
@@ -235,6 +268,9 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                           }`}>
                             {sourceLabel}
                           </span>
+                          <span className={`text-[10px] font-medium ${confidenceColor}`}>
+                            {confidenceLabel}
+                          </span>
                           {isPostponed && (
                             <span className="rounded bg-accent-red/15 px-1.5 py-0.5 text-[10px] font-bold text-accent-red">
                               {g.gameStatus}
@@ -244,7 +280,20 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                       </div>
                       <p className="mt-0.5 text-xs text-text-dim">
                         {g.homeTeam} vs {g.awayTeam} @ {g.venue.name}
+                        {g.sourceUrl && (
+                          <a
+                            href={g.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-1.5 text-text-dim/60 hover:text-accent-blue transition-colors"
+                          >
+                            Verify ↗
+                          </a>
+                        )}
                       </p>
+                      {g.confidenceNote && (
+                        <p className="mt-0.5 text-[10px] italic text-text-dim/60">{g.confidenceNote}</p>
+                      )}
                     </div>
                   )
                 })}

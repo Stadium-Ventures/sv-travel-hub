@@ -5,13 +5,13 @@ import type { Coordinates } from '../types/roster'
 import { fetchWithTimeout } from './fetchWithTimeout'
 
 // CORS proxies with fallback — if the primary goes down, try alternatives
-interface CorsProxy {
+export interface CorsProxy {
   url: string
   // How to extract HTML from the response
   extract: (res: Response) => Promise<string>
 }
 
-const CORS_PROXIES: CorsProxy[] = [
+export const CORS_PROXIES: CorsProxy[] = [
   {
     url: 'https://api.allorigins.win/get?url=',
     extract: async (res) => {
@@ -118,7 +118,7 @@ function parseScheduleHtml(html: string): D1Game[] {
 }
 
 // Fetch URL through CORS proxies with fallback
-async function fetchWithCorsProxy(targetUrl: string): Promise<string> {
+export async function fetchWithCorsProxy(targetUrl: string): Promise<string> {
   const errors: string[] = []
 
   for (const proxy of CORS_PROXIES) {
@@ -188,19 +188,17 @@ export async function fetchAllD1Schedules(
   const schedules = new Map<string, D1Schedule>()
   const failedSchools: string[] = []
 
-  for (let i = 0; i < unique.length; i++) {
-    onProgress?.(i, unique.length)
-    const schedule = await fetchD1Schedule(unique[i]!)
-    if (schedule) schedules.set(unique[i]!, schedule)
-    else failedSchools.push(unique[i]!)
-
-    // Rate limit: 500ms between requests to be polite
-    if (i < unique.length - 1) {
-      await new Promise((r) => setTimeout(r, 500))
+  // Fetch 3 at a time — CORS proxy latency (~1-3s) provides natural rate limiting
+  const concurrency = 3
+  for (let i = 0; i < unique.length; i += concurrency) {
+    const batch = unique.slice(i, i + concurrency)
+    const results = await Promise.all(batch.map((name) => fetchD1Schedule(name)))
+    for (let j = 0; j < batch.length; j++) {
+      if (results[j]) schedules.set(batch[j]!, results[j]!)
+      else failedSchools.push(batch[j]!)
     }
+    onProgress?.(Math.min(i + concurrency, unique.length), unique.length)
   }
-
-  onProgress?.(unique.length, unique.length)
   return { schedules, failedSchools }
 }
 

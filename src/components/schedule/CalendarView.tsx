@@ -11,6 +11,7 @@ export default function CalendarView() {
   const players = useRosterStore((s) => s.players)
   const proGames = useScheduleStore((s) => s.proGames)
   const ncaaGames = useScheduleStore((s) => s.ncaaGames)
+  const hsGamesReal = useScheduleStore((s) => s.hsGames)
   const customMlbAliases = useScheduleStore((s) => s.customMlbAliases)
   const customNcaaAliases = useScheduleStore((s) => s.customNcaaAliases)
   const venueState = useVenueStore((s) => s.venues)
@@ -48,19 +49,24 @@ export default function CalendarView() {
     }
 
     if (sourceFilters.hs) {
+      all.push(...hsGamesReal)
+      const hsPlayersWithReal = new Set(hsGamesReal.flatMap((g) => g.playerNames))
       const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
       for (const [key, v] of Object.entries(venueState)) {
         if (v.source === 'hs-geocoded') {
           hsVenues.set(key.replace(/^hs-/, ''), { name: v.name, coords: v.coords })
         }
       }
-      const hsEvents = generateHsEvents(players, `${new Date().getFullYear()}-02-14`, `${new Date().getFullYear()}-05-15`, hsVenues)
-      all.push(...hsEvents)
+      const syntheticHs = generateHsEvents(
+        players.filter((p) => p.level === 'HS' && !hsPlayersWithReal.has(p.playerName)),
+        `${new Date().getFullYear()}-02-14`, `${new Date().getFullYear()}-05-15`, hsVenues,
+      )
+      all.push(...syntheticHs)
     }
 
     all.sort((a, b) => a.date.localeCompare(b.date))
     return all
-  }, [proGames, ncaaGames, players, venueState, sourceFilters, customMlbAliases, customNcaaAliases])
+  }, [proGames, ncaaGames, hsGamesReal, players, venueState, sourceFilters, customMlbAliases, customNcaaAliases])
 
   const hasAnyGames = proGames.length > 0 || ncaaGames.length > 0 || players.some((p) => p.level === 'NCAA' || p.level === 'HS')
 

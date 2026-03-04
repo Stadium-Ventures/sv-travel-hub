@@ -187,7 +187,9 @@ export default function ScheduleCalendar({ games }: Props) {
                 const sourceColor = SOURCE_COLORS[g.source] ?? 'border-border/30 bg-gray-950/30'
                 const sourceLabel = SOURCE_LABELS[g.source] ?? 'Unknown'
                 const confirmLabel = g.source === 'mlb-api' ? 'Confirmed' :
-                  g.confidence === 'high' ? 'D1Baseball' : 'Estimated'
+                  g.source === 'ncaa-lookup' && g.confidence === 'high' ? 'D1Baseball' :
+                  g.source === 'hs-lookup' && g.confidence === 'high' ? 'MaxPreps' :
+                  'Estimated'
                 const confirmColor = confirmLabel === 'Estimated'
                   ? 'text-accent-orange' : 'text-accent-green'
                 return (
@@ -210,7 +212,18 @@ export default function ScheduleCalendar({ games }: Props) {
                               <span className="text-text-dim">{formatTime(g.time)}</span>
                             </>
                           )}
+                          {g.sourceUrl && (
+                            <>
+                              <span className="text-text-dim/40">|</span>
+                              <a href={g.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-text-dim hover:text-accent-blue transition-colors">
+                                Verify ↗
+                              </a>
+                            </>
+                          )}
                         </div>
+                        {g.confidenceNote && (
+                          <p className="mt-0.5 text-[10px] italic text-text-dim/60">{g.confidenceNote}</p>
+                        )}
                         {g.playerNames.length > 0 && (
                           <div className="mt-1.5 flex flex-wrap gap-1">
                             {g.playerNames.map((name) => (
