@@ -966,12 +966,14 @@ export default function TripPlanner() {
                     <span className={`h-2 w-2 rounded-full ${
                       r.status === 'included' ? 'bg-accent-green' :
                       r.status === 'separate-trip' ? 'bg-accent-orange' :
+                      r.status === 'fly-in-only' ? 'bg-accent-blue' :
                       'bg-accent-red'
                     }`} />
                     <span className="font-medium text-text">{r.playerName}</span>
                     <span className="text-xs text-text-dim">
                       {r.status === 'included' && 'Included in Trip #1'}
                       {r.status === 'separate-trip' && 'Separate trip created'}
+                      {r.status === 'fly-in-only' && 'Fly-in only'}
                       {r.status === 'unreachable' && 'Could not be reached'}
                     </span>
                     {r.reason && (
@@ -993,9 +995,22 @@ export default function TripPlanner() {
             <div title={`Percentage of players with visits remaining (${players.filter((p) => p.visitsRemaining > 0).length} total) that appear in at least one generated trip. Does not count players with zero visits remaining.`}>
               <StatCard label="Players Reached" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
             </div>
-            <div title="Players who need visits but have zero game events in the selected date range — check their schedule sources.">
-              <StatCard label="No Games Found" value={tripPlan.unvisitablePlayers.length} accent={tripPlan.unvisitablePlayers.length > 0 ? 'red' : 'green'} />
-            </div>
+            {(() => {
+              const beyondCount = tripPlan.unvisitablePlayers.filter((e) => e.reason.startsWith('Beyond max flight')).length
+              const noGameCount = tripPlan.unvisitablePlayers.length - beyondCount
+              return (
+                <>
+                  {beyondCount > 0 && (
+                    <div title="Players with games beyond the max flight setting — increase the slider to include them.">
+                      <StatCard label="Beyond Flight" value={beyondCount} accent="orange" />
+                    </div>
+                  )}
+                  <div title="Players who need visits but have zero game events in the selected date range.">
+                    <StatCard label="No Games Found" value={noGameCount} accent={noGameCount > 0 ? 'red' : 'green'} />
+                  </div>
+                </>
+              )
+            })()}
           </div>
 
           {/* Analysis summary */}
@@ -1430,31 +1445,64 @@ export default function TripPlanner() {
           )}
 
           {/* Truly unreachable players (no games at all) — with reasons */}
-          {tripPlan.unvisitablePlayers.length > 0 && (
-            <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-5">
-              <h3 className="mb-2 text-sm font-semibold text-accent-red">
-                No Games Found ({tripPlan.unvisitablePlayers.length})
-              </h3>
-              <p className="mb-3 text-xs text-text-dim">
-                No visit opportunities found for these players in the selected date range.
-              </p>
-              <div className="space-y-1.5">
-                {tripPlan.unvisitablePlayers.map((entry) => {
-                  const player = playerMap.get(entry.name)
-                  const tier = player?.tier ?? 4
-                  const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                  return (
-                    <div key={entry.name} className="flex items-center gap-2 text-sm">
-                      <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-                      <span className="font-medium text-accent-red cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
-                      <span className="text-xs text-text-dim">T{tier}</span>
-                      <span className="text-xs text-text-dim/70">— {entry.reason}</span>
+          {(() => {
+            const beyondFlight = tripPlan.unvisitablePlayers.filter((e) => e.reason.startsWith('Beyond max flight'))
+            const noGames = tripPlan.unvisitablePlayers.filter((e) => !e.reason.startsWith('Beyond max flight'))
+            return (
+              <>
+                {beyondFlight.length > 0 && (
+                  <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-5">
+                    <h3 className="mb-2 text-sm font-semibold text-accent-orange">
+                      Beyond Max Flight ({beyondFlight.length})
+                    </h3>
+                    <p className="mb-3 text-xs text-text-dim">
+                      These players have games but they're beyond the {maxFlightHours}h max flight setting. Increase the Max Flight slider to include them.
+                    </p>
+                    <div className="space-y-1.5">
+                      {beyondFlight.map((entry) => {
+                        const player = playerMap.get(entry.name)
+                        const tier = player?.tier ?? 4
+                        const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                        return (
+                          <div key={entry.name} className="flex items-center gap-2 text-sm">
+                            <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+                            <span className="font-medium text-accent-orange cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
+                            <span className="text-xs text-text-dim">T{tier}</span>
+                            <span className="text-xs text-text-dim/70">— {entry.reason}</span>
+                          </div>
+                        )
+                      })}
                     </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
+                  </div>
+                )}
+                {noGames.length > 0 && (
+                  <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-5">
+                    <h3 className="mb-2 text-sm font-semibold text-accent-red">
+                      No Games Found ({noGames.length})
+                    </h3>
+                    <p className="mb-3 text-xs text-text-dim">
+                      No visit opportunities found for these players in the selected date range.
+                    </p>
+                    <div className="space-y-1.5">
+                      {noGames.map((entry) => {
+                        const player = playerMap.get(entry.name)
+                        const tier = player?.tier ?? 4
+                        const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                        return (
+                          <div key={entry.name} className="flex items-center gap-2 text-sm">
+                            <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+                            <span className="font-medium text-accent-red cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
+                            <span className="text-xs text-text-dim">T{tier}</span>
+                            <span className="text-xs text-text-dim/70">— {entry.reason}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )
+          })()}
 
           {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length === 0 && (
             <div className="rounded-xl border border-border bg-surface p-10 text-center">

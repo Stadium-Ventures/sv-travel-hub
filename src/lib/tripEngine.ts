@@ -721,10 +721,14 @@ export async function generateTrips(
               reason: `No trip covers both ${p1} and ${p2} within the drive radius — created separate trips`,
             })
           } else {
+            // Check if the player has any eligible games (would appear as fly-in)
+            const hasGames = eligibleGames.some((g) => g.playerNames.includes(pName))
             priorityResults.push({
               playerName: pName,
-              status: 'unreachable',
-              reason: `No reachable games for ${pName} in the selected date range`,
+              status: hasGames ? 'fly-in-only' : 'unreachable',
+              reason: hasGames
+                ? `${pName} is beyond driving range — check Fly-in Visits section below`
+                : `No reachable games for ${pName} in the selected date range`,
             })
           }
         }
@@ -739,10 +743,14 @@ export async function generateTrips(
         recordTripPlayers(best)
         priorityResults.push({ playerName: pName, status: 'included' })
       } else {
+        // Check if the player has any eligible games (would appear as fly-in)
+        const hasGames = eligibleGames.some((g) => g.playerNames.includes(pName))
         priorityResults.push({
           playerName: pName,
-          status: 'unreachable',
-          reason: `No reachable games for ${pName} in the selected date range`,
+          status: hasGames ? 'fly-in-only' : 'unreachable',
+          reason: hasGames
+            ? `${pName} is beyond driving range — check Fly-in Visits section below`
+            : `No reachable games for ${pName} in the selected date range`,
         })
       }
     }

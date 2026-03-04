@@ -51,7 +51,7 @@ export interface TripCandidate {
 
 export interface PriorityResult {
   playerName: string
-  status: 'included' | 'separate-trip' | 'unreachable'
+  status: 'included' | 'separate-trip' | 'fly-in-only' | 'unreachable'
   reason?: string
 }
 
