@@ -243,6 +243,7 @@ export default function TripPlanner() {
   const generateTrips = useTripStore((s) => s.generateTrips)
   const clearTrips = useTripStore((s) => s.clearTrips)
   const tripStatuses = useTripStore((s) => s.tripStatuses)
+  const setTripStatus = useTripStore((s) => s.setTripStatus)
   const proGames = useScheduleStore((s) => s.proGames)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
@@ -313,13 +314,17 @@ export default function TripPlanner() {
   function computeBestWeeks() {
     if (players.length === 0 || bestWeeksLoading) return
     setBestWeeksLoading(true)
+    // Use full season range (Mar–Sep) so suggestions aren't limited to current date selection
+    const y = new Date().getFullYear()
+    const seasonStart = `${y}-03-01`
+    const seasonEnd = `${y}-09-30`
     // Run in next tick to allow UI to show loading state
     setTimeout(() => {
-      const stEvents = generateSpringTrainingEvents(players, startDate, endDate, customMlbAliases)
+      const stEvents = generateSpringTrainingEvents(players, seasonStart, seasonEnd, customMlbAliases)
       const ncaaPlayersWithReal = new Set(ncaaGames.flatMap((g: { playerNames: string[] }) => g.playerNames))
       const syntheticNcaa = generateNcaaEvents(
         players.filter((p) => p.level === 'NCAA' && !ncaaPlayersWithReal.has(p.playerName)),
-        startDate, endDate,
+        seasonStart, seasonEnd,
         customNcaaAliases,
       )
       const hsPlayersWithReal = new Set(hsGamesReal.flatMap((g: { playerNames: string[] }) => g.playerNames))
@@ -329,10 +334,10 @@ export default function TripPlanner() {
       }
       const syntheticHs = generateHsEvents(
         players.filter((p) => p.level === 'HS' && !hsPlayersWithReal.has(p.playerName)),
-        startDate, endDate, hsVenues,
+        seasonStart, seasonEnd, hsVenues,
       )
       const allGames = [...proGames, ...stEvents, ...ncaaGames, ...syntheticNcaa, ...hsGamesReal, ...syntheticHs]
-      setBestWeeks(analyzeBestWeeks(allGames, players, startDate, endDate, maxDriveMinutes))
+      setBestWeeks(analyzeBestWeeks(allGames, players, seasonStart, seasonEnd, maxDriveMinutes))
       setBestWeeksLoading(false)
     }, 0)
   }
@@ -520,6 +525,38 @@ export default function TripPlanner() {
               Load schedules below to enable trip generation.
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
+              {/* Load All button — fires all pending schedule fetches + geocoding at once */}
+              {(() => {
+                const needsPro = hasProPlayers && (!proFetchedAt || proStale) && Object.keys(playerTeamAssignments).length > 0
+                const needsNcaa = hasNcaaPlayers && (!ncaaFetchedAt || ncaaStale)
+                const needsHs = hasHsPlayers && (!hsFetchedAt || hsStale)
+                const sectionsNeeded = [needsPro, needsNcaa, needsHs].filter(Boolean).length
+                if (sectionsNeeded < 2) return null
+                const proTime = needsPro ? Object.keys(playerTeamAssignments).length * 2 : 0
+                const ncaaTime = needsNcaa ? ncaaAllSchoolCount * 5 : 0
+                const hsGeoTime = needsHs && hsVenueMissing ? hsPlayersCount * 2 : 0
+                const hsSchedTime = needsHs ? hsAllSchoolCount * 5 : 0
+                const totalTime = proTime + ncaaTime + hsGeoTime + hsSchedTime
+                const anyLoading = schedulesLoading || ncaaLoading || hsLoading || !!hsGeocodingProgress
+                return (
+                  <button
+                    onClick={() => {
+                      const y = new Date().getFullYear()
+                      if (needsPro) fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+                      if (needsNcaa) fetchNcaaSchedules(ncaaAllPlayerOrgs)
+                      if (needsHs && hsVenueMissing) {
+                        const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+                        geocodeHsVenues(hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state })))
+                      }
+                      if (needsHs) fetchHsSchedules(hsAllPlayerOrgs)
+                    }}
+                    disabled={anyLoading}
+                    className="rounded-lg bg-white px-3 py-1 text-[11px] font-medium text-gray-900 hover:bg-gray-200 disabled:opacity-50"
+                  >
+                    {anyLoading ? 'Loading...' : `Load All Schedules (~${totalTime}s)`}
+                  </button>
+                )
+              })()}
               {hasProPlayers && (!proFetchedAt || proStale) && (
                 <>
                   {Object.keys(playerTeamAssignments).length === 0 && (
@@ -683,7 +720,7 @@ export default function TripPlanner() {
         {/* Best week suggestions */}
         {bestWeeks.length > 0 ? (
           <div className="mb-4 rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-2">
-            <span className="text-xs font-medium text-accent-blue" title="Ranked by how many Tier 1 and Tier 2 players have drivable games that week">Best weeks: </span>
+            <span className="text-xs font-medium text-accent-blue" title="Ranked by how many Tier 1 and Tier 2 players have games that week (full season, all levels)">Best weeks: </span>
             {bestWeeks.map((w, i) => {
               const s = new Date(w.weekStart + 'T12:00:00Z')
               const e = new Date(w.weekEnd + 'T12:00:00Z')
@@ -1176,9 +1213,15 @@ export default function TripPlanner() {
             if (overlaps.length === 0) return null
             return (
               <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-4">
-                <h3 className="mb-2 text-sm font-semibold text-accent-orange">Trip Date Overlaps — Choose One</h3>
+                <h3 className="mb-1 text-sm font-semibold text-accent-orange">Trip Date Overlaps</h3>
+                <p className="mb-3 text-[11px] text-text-dim">These trips share dates — you can only take one per time slot. Mark the one you want as "Planned" above.</p>
                 <div className="space-y-4">
-                  {overlaps.map((o, i) => (
+                  {overlaps.map((o, i) => {
+                    const tripAKey = getTripKey(tripPlan.trips[o.tripA - 1]!)
+                    const tripBKey = getTripKey(tripPlan.trips[o.tripB - 1]!)
+                    const tripAStatus = tripStatuses[tripAKey]
+                    const tripBStatus = tripStatuses[tripBKey]
+                    return (
                     <div key={i} className="rounded-lg border border-border/30 bg-gray-950/30 p-3">
                       <p className="mb-2 text-xs text-text-dim">
                         <span className="font-medium text-accent-orange">Trips #{o.tripA} and #{o.tripB}</span> overlap on{' '}
@@ -1210,8 +1253,31 @@ export default function TripPlanner() {
                           }) : <p className="text-text-dim/50">None</p>}
                         </div>
                       </div>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          onClick={() => { setTripStatus(tripAKey, 'planned'); setTripStatus(tripBKey, null) }}
+                          className={`rounded-lg px-3 py-1 text-[11px] font-medium transition-colors ${
+                            tripAStatus === 'planned'
+                              ? 'bg-accent-blue text-white'
+                              : 'border border-accent-blue/30 text-accent-blue hover:bg-accent-blue/10'
+                          }`}
+                        >
+                          {tripAStatus === 'planned' ? `✓ Trip #${o.tripA} chosen` : `Choose Trip #${o.tripA}`}
+                        </button>
+                        <button
+                          onClick={() => { setTripStatus(tripBKey, 'planned'); setTripStatus(tripAKey, null) }}
+                          className={`rounded-lg px-3 py-1 text-[11px] font-medium transition-colors ${
+                            tripBStatus === 'planned'
+                              ? 'bg-accent-green text-white'
+                              : 'border border-accent-green/30 text-accent-green hover:bg-accent-green/10'
+                          }`}
+                        >
+                          {tripBStatus === 'planned' ? `✓ Trip #${o.tripB} chosen` : `Choose Trip #${o.tripB}`}
+                        </button>
+                      </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )

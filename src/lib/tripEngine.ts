@@ -427,7 +427,7 @@ export async function generateTrips(
   maxDriveMinutes: number = MAX_DRIVE_MINUTES,
   priorityPlayers: string[] = [],
   urgencyMap?: UrgencyMap,
-  maxFlightHours: number = 8,
+  maxFlightHours: number = 4,
 ): Promise<TripPlan> {
   onProgress?.('Preparing', 'Filtering eligible players...')
 
@@ -969,7 +969,7 @@ export function analyzeBestWeeks(
   players: RosterPlayer[],
   startDate: string,
   endDate: string,
-  maxDriveMinutes: number = MAX_DRIVE_MINUTES,
+  _maxDriveMinutes: number = MAX_DRIVE_MINUTES,
 ): WeekSuggestion[] {
   const playerMap = new Map<string, RosterPlayer>()
   for (const p of players) playerMap.set(p.playerName, p)
@@ -978,7 +978,7 @@ export function analyzeBestWeeks(
     players.filter((p) => p.visitsRemaining > 0).map((p) => p.playerName),
   )
 
-  // Filter to drivable games with eligible players (not cancelled, not Sunday)
+  // Include all games with eligible players (drivable + fly-in) for week analysis
   const eligibleGames = games.filter(
     (g) =>
       isDateAllowed(g.date) &&
@@ -988,8 +988,7 @@ export function analyzeBestWeeks(
       g.gameStatus !== 'Cancelled' &&
       g.gameStatus !== 'Canceled' &&
       g.venue.coords.lat !== 0 &&
-      g.venue.coords.lng !== 0 &&
-      estimateDriveMinutes(HOME_BASE, g.venue.coords) <= maxDriveMinutes,
+      g.venue.coords.lng !== 0,
   )
 
   // Build weeks (Mon-Sat) within the date range
@@ -1036,9 +1035,9 @@ export function analyzeBestWeeks(
     start.setUTCDate(start.getUTCDate() + 7)
   }
 
-  // Sort by totalScore descending, return top 3
+  // Sort by totalScore descending, return top 5
   weeks.sort((a, b) => b.totalScore - a.totalScore)
-  return weeks.slice(0, 3)
+  return weeks.slice(0, 5)
 }
 
 export { HOME_BASE, MAX_DRIVE_MINUTES }
