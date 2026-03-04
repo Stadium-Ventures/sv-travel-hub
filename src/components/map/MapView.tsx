@@ -6,6 +6,7 @@ import { useTripStore } from '../../store/tripStore'
 import { HOME_BASE } from '../../lib/tripEngine'
 import { resolveMLBTeamId, resolveNcaaName } from '../../data/aliases'
 import { isSpringTraining } from '../../data/springTraining'
+import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 
 // Build a mapping from venue key → player names at that venue
 function useVenuePlayerMap() {
@@ -70,16 +71,59 @@ function useVenuePlayerMap() {
   }, [players, proGames])
 }
 
+// B3: CSS for pulsing ring animation
+const PULSE_CSS_ID = 'sv-map-pulse-css'
+function injectPulseCSS() {
+  if (document.getElementById(PULSE_CSS_ID)) return
+  const style = document.createElement('style')
+  style.id = PULSE_CSS_ID
+  style.textContent = `
+    @keyframes sv-pulse-ring {
+      0% { transform: scale(1); opacity: 0.7; }
+      70% { transform: scale(2.2); opacity: 0; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+    .sv-pulse-ring {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 14px; height: 14px;
+      margin-top: -7px; margin-left: -7px;
+      border-radius: 50%;
+      border: 2px solid white;
+      animation: sv-pulse-ring 2s ease-out infinite;
+      pointer-events: none;
+    }
+    .sv-venue-count-badge {
+      position: absolute;
+      top: -6px; right: -8px;
+      min-width: 14px; height: 14px;
+      border-radius: 7px;
+      background: #60a5fa;
+      color: white;
+      font-size: 9px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 3px;
+      pointer-events: none;
+    }
+  `
+  document.head.appendChild(style)
+}
+
+// B1: Build interactive popup HTML with action buttons
 function buildPopupHtml(
   venueName: string,
   source: string,
   playerList: Array<{ name: string; tier: number; level: string }> | undefined,
   orgLabel?: string,
+  priorityPlayers?: string[],
 ): string {
   const tierColors: Record<number, string> = {
     1: '#ef4444', 2: '#f97316', 3: '#eab308', 4: '#6b7280',
   }
-  let html = `<div style="font-family:system-ui;min-width:160px">`
+  let html = `<div style="font-family:system-ui;min-width:180px;max-width:280px">`
   if (orgLabel && orgLabel !== venueName) {
     html += `<div style="font-weight:600;font-size:13px;margin-bottom:2px">${orgLabel}</div>`
     html += `<div style="font-size:11px;color:#aaa;margin-bottom:4px">${venueName}</div>`
@@ -92,10 +136,20 @@ function buildPopupHtml(
     const sorted = [...playerList].sort((a, b) => a.tier - b.tier)
     for (const p of sorted) {
       const color = tierColors[p.tier] ?? '#6b7280'
-      html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;font-size:12px">`
+      const isPriority = priorityPlayers?.includes(p.name)
+      html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:12px">`
       html += `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0" title="Tier ${p.tier}"></span>`
-      html += `<span>${p.name}</span>`
-      html += `<span style="color:#888;font-size:10px;margin-left:auto">T${p.tier}</span>`
+      if (isPriority) {
+        html += `<span style="color:#fbbf24;font-size:10px;flex-shrink:0" title="Priority player">&#9733;</span>`
+      }
+      html += `<span style="flex:1;min-width:0">${p.name}</span>`
+      html += `<span style="color:#888;font-size:10px">T${p.tier}</span>`
+      html += `</div>`
+      // Action buttons row
+      html += `<div style="display:flex;gap:4px;margin-left:14px;margin-bottom:6px">`
+      html += `<button data-action="priority" data-player="${p.name}" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;font-size:10px;padding:2px 6px;border-radius:4px;cursor:pointer">${isPriority ? '&#9733; Priority' : 'Set Priority'}</button>`
+      html += `<button data-action="schedule" data-player="${p.name}" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;font-size:10px;padding:2px 6px;border-radius:4px;cursor:pointer">Schedule</button>`
+      html += `<button data-action="visited" data-player="${p.name}" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;font-size:10px;padding:2px 6px;border-radius:4px;cursor:pointer">Visited</button>`
       html += `</div>`
     }
   } else {
@@ -104,6 +158,58 @@ function buildPopupHtml(
 
   html += `</div>`
   return html
+}
+
+// B2: Build a set of venue keys that have games in date range
+function useDateFilteredVenueKeys(filterStart: string, filterEnd: string) {
+  const proGames = useScheduleStore((s) => s.proGames)
+  const ncaaGames = useScheduleStore((s) => s.ncaaGames)
+  const hsGames = useScheduleStore((s) => s.hsGames)
+  const venues = useVenueStore((s) => s.venues)
+
+  return useMemo(() => {
+    if (!filterStart && !filterEnd) return null // no filter active
+
+    const keys = new Set<string>()
+
+    // Pro games → match by venue coordinate proximity to venue entries
+    for (const game of proGames) {
+      if (filterStart && game.date < filterStart) continue
+      if (filterEnd && game.date > filterEnd) continue
+      const key = `pro-${game.venue.name.toLowerCase().replace(/\s+/g, '-')}`
+      keys.add(key)
+    }
+
+    // NCAA games
+    for (const game of ncaaGames) {
+      if (filterStart && game.date < filterStart) continue
+      if (filterEnd && game.date > filterEnd) continue
+      // Match by coordinate proximity to any ncaa venue
+      for (const [vk, v] of Object.entries(venues)) {
+        if (!vk.startsWith('ncaa-')) continue
+        const dist = Math.abs(v.coords.lat - game.venue.coords.lat) + Math.abs(v.coords.lng - game.venue.coords.lng)
+        if (dist < 0.05) { keys.add(vk); break }
+      }
+    }
+
+    // HS games
+    for (const game of hsGames) {
+      if (filterStart && game.date < filterStart) continue
+      if (filterEnd && game.date > filterEnd) continue
+      for (const [vk, v] of Object.entries(venues)) {
+        if (!vk.startsWith('hs-')) continue
+        const dist = Math.abs(v.coords.lat - game.venue.coords.lat) + Math.abs(v.coords.lng - game.venue.coords.lng)
+        if (dist < 0.05) { keys.add(vk); break }
+      }
+    }
+
+    // ST venues always pass (no date-specific games in scheduleStore for ST)
+    for (const vk of Object.keys(venues)) {
+      if (vk.startsWith('st-')) keys.add(vk)
+    }
+
+    return keys
+  }, [filterStart, filterEnd, proGames, ncaaGames, hsGames, venues])
 }
 
 export default function MapView() {
@@ -117,6 +223,13 @@ export default function MapView() {
   const [showHs, setShowHs] = useState(true)
   const [showTrips, setShowTrips] = useState(true)
 
+  // B2: Date filter state
+  const [filterStart, setFilterStart] = useState('')
+  const [filterEnd, setFilterEnd] = useState('')
+
+  // B4: Schedule panel state
+  const [schedulePanelPlayer, setSchedulePanelPlayer] = useState<string | null>(null)
+
   const venues = useVenueStore((s) => s.venues)
   const hsGeocodingProgress = useVenueStore((s) => s.hsGeocodingProgress)
   const hsGeocodingError = useVenueStore((s) => s.hsGeocodingError)
@@ -124,6 +237,9 @@ export default function MapView() {
   const tripPlan = useTripStore((s) => s.tripPlan)
   const selectedTripIndex = useTripStore((s) => s.selectedTripIndex)
   const setSelectedTripIndex = useTripStore((s) => s.setSelectedTripIndex)
+  const priorityPlayers = useTripStore((s) => s.priorityPlayers)
+  const startDate = useTripStore((s) => s.startDate)
+  const endDate = useTripStore((s) => s.endDate)
   const players = useRosterStore((s) => s.players)
   const loadNcaaVenues = useVenueStore((s) => s.loadNcaaVenues)
   const loadSpringTrainingVenues = useVenueStore((s) => s.loadSpringTrainingVenues)
@@ -131,6 +247,7 @@ export default function MapView() {
   const geocodeHsVenues = useVenueStore((s) => s.geocodeHsVenues)
 
   const venuePlayerMap = useVenuePlayerMap()
+  const dateFilteredVenueKeys = useDateFilteredVenueKeys(filterStart, filterEnd)
 
   // Venue counts by type — only count venues that have players
   const venueCounts = useMemo(() => {
@@ -189,6 +306,16 @@ export default function MapView() {
     }
   }, [proGames, addProVenue])
 
+  // B4: Listen for CustomEvent from popup action handler
+  useEffect(() => {
+    function handleScheduleEvent(e: Event) {
+      const detail = (e as CustomEvent<{ player: string }>).detail
+      if (detail?.player) setSchedulePanelPlayer(detail.player)
+    }
+    window.addEventListener('map:open-schedule', handleScheduleEvent)
+    return () => window.removeEventListener('map:open-schedule', handleScheduleEvent)
+  }, [])
+
   // Initialize Leaflet
   const mapInitialized = useRef(false)
   useEffect(() => {
@@ -209,6 +336,9 @@ export default function MapView() {
         document.head.appendChild(link)
       }
 
+      // B3: Inject pulse animation CSS
+      injectPulseCSS()
+
       if (cancelled || !mapRef.current) return
 
       const map = L.map(mapRef.current).setView([HOME_BASE.lat, HOME_BASE.lng], 6)
@@ -218,6 +348,41 @@ export default function MapView() {
         maxZoom: 19,
       }).addTo(map)
 
+      // B1: Wire popup action handler once at init
+      map.on('popupopen', (e: import('leaflet').PopupEvent) => {
+        const container = e.popup.getElement()
+        if (!container) return
+
+        container.addEventListener('click', (evt: Event) => {
+          const target = evt.target as HTMLElement
+          const btn = target.closest('button[data-action]') as HTMLElement | null
+          if (!btn) return
+
+          const action = btn.dataset.action
+          const playerName = btn.dataset.player
+          if (!action || !playerName) return
+
+          if (action === 'priority') {
+            const store = useTripStore.getState()
+            const current = store.priorityPlayers
+            if (current.includes(playerName)) {
+              store.setPriorityPlayers(current.filter((n) => n !== playerName))
+            } else {
+              store.setPriorityPlayers([...current.slice(0, 1), playerName])
+            }
+          } else if (action === 'schedule') {
+            window.dispatchEvent(new CustomEvent('map:open-schedule', { detail: { player: playerName } }))
+          } else if (action === 'visited') {
+            const rosterStore = useRosterStore.getState()
+            const player = rosterStore.players.find((p) => p.playerName === playerName)
+            if (player) {
+              const today = new Date().toISOString().slice(0, 10)
+              rosterStore.setVisitOverride(playerName, player.visitsCompleted + 1, today)
+            }
+          }
+        })
+      })
+
       mapInstance.current = map
       setLoaded(true)
     }
@@ -225,6 +390,31 @@ export default function MapView() {
     init()
     return () => { cancelled = true }
   }, [])
+
+  // B3: Build set of priority venue keys
+  const priorityVenueKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const [key, playerList] of venuePlayerMap) {
+      if (playerList.some((p) => priorityPlayers.includes(p.name))) {
+        keys.add(key)
+      }
+    }
+    return keys
+  }, [venuePlayerMap, priorityPlayers])
+
+  // B3: Build set of all-visited venue keys
+  const allVisitedVenueKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const [key, playerList] of venuePlayerMap) {
+      if (playerList.length > 0 && playerList.every((p) => {
+        const player = players.find((pl) => pl.playerName === p.name)
+        return player ? player.visitsRemaining === 0 : false
+      })) {
+        keys.add(key)
+      }
+    }
+    return keys
+  }, [venuePlayerMap, players])
 
   // Update markers when data/filters change
   useEffect(() => {
@@ -268,14 +458,30 @@ export default function MapView() {
       // Skip venues with no players (e.g. ST sites for orgs Kent has no clients in)
       if (!playerList || playerList.length === 0) continue
 
+      // B2: Skip venues that don't match date filter
+      if (dateFilteredVenueKeys && !dateFilteredVenueKeys.has(key)) continue
+
       const color = isPro ? '#60a5fa' : isSt ? '#f472b6' : isNcaa ? '#34d399' : '#fb923c'
       const size = isSt ? 12 : 10
+      const isPriorityVenue = priorityVenueKeys.has(key)
+      const isAllVisited = allVisitedVenueKeys.has(key)
+
+      // B3: Richer marker HTML
+      let markerHtml = `<div style="position:relative;width:${size}px;height:${size}px;${isAllVisited ? 'opacity:0.4;' : ''}">`
+      markerHtml += `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid ${color}44;cursor:pointer"></div>`
+      if (isPriorityVenue) {
+        markerHtml += `<div class="sv-pulse-ring"></div>`
+      }
+      if (playerList.length > 1) {
+        markerHtml += `<div class="sv-venue-count-badge">${playerList.length}</div>`
+      }
+      markerHtml += `</div>`
 
       const icon = L.divIcon({
-        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid ${color}44;cursor:pointer"></div>`,
+        html: markerHtml,
         className: '',
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
+        iconSize: [size + 16, size + 12],
+        iconAnchor: [(size + 16) / 2, (size + 12) / 2],
       })
 
       const sourceLabel = isPro ? 'Pro Venue' : isSt ? 'Spring Training Site' : isNcaa ? 'College Venue' : 'High School'
@@ -291,10 +497,10 @@ export default function MapView() {
         }
       }
 
-      const popup = buildPopupHtml(venue.name, sourceLabel, playerList, orgLabel)
+      const popup = buildPopupHtml(venue.name, sourceLabel, playerList, orgLabel, priorityPlayers)
 
       L.marker([venue.coords.lat, venue.coords.lng], { icon })
-        .bindPopup(popup, { maxWidth: 280 })
+        .bindPopup(popup, { maxWidth: 300 })
         .addTo(map)
     }
 
@@ -360,7 +566,7 @@ export default function MapView() {
         }
       }
     }
-  }, [venues, venuePlayerMap, tripPlan, selectedTripIndex, showPro, showSt, showNcaa, showHs, showTrips, loaded])
+  }, [venues, venuePlayerMap, tripPlan, selectedTripIndex, showPro, showSt, showNcaa, showHs, showTrips, loaded, dateFilteredVenueKeys, priorityVenueKeys, allVisitedVenueKeys, priorityPlayers, players])
 
   return (
     <div className="space-y-4">
@@ -380,6 +586,47 @@ export default function MapView() {
         )}
         {tripPlan && tripPlan.trips.length > 0 && (
           <Toggle label="Trip Routes" color="bg-accent-purple" checked={showTrips} onChange={setShowTrips} />
+        )}
+      </div>
+
+      {/* B2: Date range filter */}
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface p-3">
+        <span className="text-xs font-medium text-text-dim">Date filter:</span>
+        <input
+          type="date"
+          value={filterStart}
+          onChange={(e) => setFilterStart(e.target.value)}
+          className="rounded-lg border border-border bg-gray-950 px-2 py-1 text-xs text-text"
+          placeholder="Start"
+        />
+        <span className="text-text-dim/40">–</span>
+        <input
+          type="date"
+          value={filterEnd}
+          onChange={(e) => setFilterEnd(e.target.value)}
+          className="rounded-lg border border-border bg-gray-950 px-2 py-1 text-xs text-text"
+          placeholder="End"
+        />
+        {startDate && endDate && (
+          <button
+            onClick={() => { setFilterStart(startDate); setFilterEnd(endDate) }}
+            className="rounded-lg bg-accent-blue/10 px-2.5 py-1 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/20 transition-colors"
+          >
+            Use Trip Planner dates
+          </button>
+        )}
+        {(filterStart || filterEnd) && (
+          <button
+            onClick={() => { setFilterStart(''); setFilterEnd('') }}
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
+          >
+            Clear
+          </button>
+        )}
+        {(filterStart || filterEnd) && (
+          <span className="text-[10px] text-text-dim/60">
+            Showing only venues with games in range
+          </span>
         )}
       </div>
 
@@ -433,6 +680,14 @@ export default function MapView() {
       <p className="text-xs text-text-dim">
         {venueCounts.pro + venueCounts.st + venueCounts.ncaa + venueCounts.hs} venues with your players — click any dot to see who's there
       </p>
+
+      {/* B4: Schedule panel from popup */}
+      {schedulePanelPlayer && (
+        <PlayerSchedulePanel
+          playerName={schedulePanelPlayer}
+          onClose={() => setSchedulePanelPlayer(null)}
+        />
+      )}
     </div>
   )
 }

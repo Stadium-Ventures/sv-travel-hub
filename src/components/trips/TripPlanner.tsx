@@ -444,6 +444,7 @@ export default function TripPlanner() {
   const [copyAllError, setCopyAllError] = useState(false)
   const [calAllError, setCalAllError] = useState(false)
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
+  const [showOverlaps, setShowOverlaps] = useState(false)
 
   async function handleCopyAllTrips() {
     if (!tripPlan) return
@@ -1076,15 +1077,18 @@ export default function TripPlanner() {
             ]))]
             // Collect fly-in player names
             const flyInPlayerNames = [...new Set(tripPlan.flyInVisits.flatMap((v) => v.playerNames))]
+            // Unique players across ALL trip types
+            const allTripPlayerNames = [...new Set([...roadTripPlayerNames, ...flyInPlayerNames])]
+            const totalEligible = players.filter((p) => p.visitsRemaining > 0).length
 
             return (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               <StatCard label="Road Trips" value={tripPlan.trips.length} scrollTo="section-road-trips" hoverNames={roadTripPlayerNames} />
-              <div title="Total player-visit appearances across all trips. T1 players can appear in up to 5 trips, T2 in 3, T3 in 2 — matching their visit targets.">
-                <StatCard label="Visits Planned" value={tripPlan.totalVisitsPlanned ?? tripPlan.totalVisitsCovered} accent="blue" scrollTo="section-road-trips" />
+              <div title={`${allTripPlayerNames.length} of your ${totalEligible} players appear in at least one trip option.`}>
+                <StatCard label="Players in Trips" value={allTripPlayerNames.length} accent="blue" scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
               </div>
               <StatCard label="Fly-in Visits" value={tripPlan.flyInVisits.length} scrollTo="section-fly-in" hoverNames={flyInPlayerNames} />
-              <div title={`Percentage of players with visits remaining (${players.filter((p) => p.visitsRemaining > 0).length} total) that appear in at least one generated trip. Does not count players with zero visits remaining.`}>
+              <div title={`Percentage of players with visits remaining (${totalEligible} total) that appear in at least one generated trip. Does not count players with zero visits remaining.`}>
                 <StatCard label="Players Reached" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
               </div>
               {beyondPlayers.length > 0 && (
@@ -1313,8 +1317,18 @@ export default function TripPlanner() {
             if (overlaps.length === 0) return null
             return (
               <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-4">
-                <h3 className="mb-1 text-sm font-semibold text-accent-orange">Trip Date Overlaps</h3>
-                <p className="mb-3 text-[11px] text-text-dim">These trips share dates — you can only take one per time slot. Choosing marks it as "Planned" so you can filter by status above.</p>
+                <div
+                  className="flex cursor-pointer items-center justify-between"
+                  onClick={() => setShowOverlaps(!showOverlaps)}
+                >
+                  <h3 className="text-sm font-semibold text-accent-orange">
+                    <span className={`mr-1.5 inline-block text-text-dim transition-transform ${showOverlaps ? 'rotate-90' : ''}`}>&#9654;</span>
+                    {overlaps.length} date overlap{overlaps.length !== 1 ? 's' : ''} between trips
+                  </h3>
+                </div>
+                {showOverlaps && (
+                <>
+                <p className="mt-2 mb-3 text-[11px] text-text-dim">These trips share dates — you can only take one per time slot. Choosing marks it as "Planned" so you can filter by status above.</p>
                 <div className="space-y-4">
                   {overlaps.map((o, i) => {
                     const tripAKey = getTripKey(tripPlan.trips[o.tripA - 1]!)
@@ -1379,6 +1393,8 @@ export default function TripPlanner() {
                     )
                   })}
                 </div>
+                </>
+                )}
               </div>
             )
           })()}
@@ -1590,7 +1606,10 @@ function FlyInCard({
   const t1Names = visit.playerNames.filter((n) => playerMap.get(n)?.tier === 1)
   const t2Names = visit.playerNames.filter((n) => playerMap.get(n)?.tier === 2)
   const isPriority = visit.playerNames.some((n) => priorityPlayers.includes(n))
-  let summary = `Fly-in to visit ${visit.playerNames.length} player${visit.playerNames.length !== 1 ? 's' : ''} at ${orgLabel || visit.venue.name}. ~${visit.estimatedTravelHours}h travel (${milesDisplay} mi). ${visit.dates.length} date${visit.dates.length !== 1 ? 's' : ''} available.`
+  const dateRangeLabel = firstDate && lastDate && firstDate !== lastDate
+    ? `${formatDate(firstDate)}–${formatDate(lastDate)}`
+    : firstDate ? formatDate(firstDate) : ''
+  let summary = `Fly to ${visit.venue.name} to see ${visit.playerNames.length} player${visit.playerNames.length !== 1 ? 's' : ''} — ${visit.isHome ? 'home game' : `the ${orgLabel || 'team'} ha${visit.playerNames.length !== 1 ? 've' : 's'} an away series there`}. ~${visit.estimatedTravelHours}h travel (${milesDisplay} mi). ${visit.dates.length} date${visit.dates.length !== 1 ? 's' : ''} available${dateRangeLabel ? ` ${dateRangeLabel}` : ''}.`
   if (t1Names.length > 0) summary += ` Top priority: ${t1Names.join(', ')}.`
   if (t2Names.length > 0) summary += ` Also seeing: ${t2Names.join(', ')}.`
 
@@ -1649,7 +1668,10 @@ function FlyInCard({
               Fly-in #{index}
             </h3>
             {breakdown && (
-              <span className="rounded-lg bg-purple-500/10 px-2 py-0.5 text-xs font-bold text-purple-400">
+              <span
+                className="rounded-lg bg-purple-500/10 px-2 py-0.5 text-xs font-bold text-purple-400"
+                title="Score for this single venue — not comparable to multi-stop road trips"
+              >
                 {breakdown.finalScore} pts
               </span>
             )}
@@ -1667,9 +1689,12 @@ function FlyInCard({
             </button>
           </div>
           <p className="mt-0.5 text-sm text-text-dim">
-            {orgLabel && orgLabel !== visit.venue.name ? (
-              <>{orgLabel} <span className="text-text-dim/60">— {visit.venue.name}</span></>
-            ) : visit.venue.name}
+            {visit.venue.name}
+            {orgLabel && orgLabel !== visit.venue.name && (
+              <span className="ml-2 rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-400/80">
+                {visit.isHome ? `${orgLabel} home` : `${orgLabel} away`}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
@@ -1743,9 +1768,14 @@ function FlyInCard({
               <span className="inline-block h-2 w-2 rounded-full bg-purple-400" />
               <span className="text-text-dim">Orlando</span>
               <span className="text-text-dim/40">&rarr;</span>
-              <span className="text-text-dim">{orgLabel || visit.venue.name}</span>
+              <span className="text-text">{visit.venue.name}</span>
               <span className="text-text-dim/60">(~{visit.estimatedTravelHours}h · {milesDisplay} mi)</span>
             </div>
+            {orgLabel && orgLabel !== visit.venue.name && (
+              <p className="mt-0.5 text-text-dim/60">
+                {visit.isHome ? `${orgLabel} home game` : `${orgLabel} away game`}
+              </p>
+            )}
             <p className="mt-1 text-text-dim/60">
               Includes flight + 1h airport overhead + ground transport
             </p>
