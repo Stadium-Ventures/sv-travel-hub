@@ -745,7 +745,7 @@ export default function MapView() {
                     disabled={autoAssignLoading}
                     className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
                   >
-                    {autoAssignLoading ? 'Scanning...' : '1. Auto-Assign Players'}
+                    {autoAssignLoading ? 'Scanning...' : '1. Find Players on Rosters'}
                   </button>
                 )}
                 <button
@@ -781,7 +781,7 @@ export default function MapView() {
                     disabled={!!hsGeocodingProgress}
                     className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
                   >
-                    {hsGeocodingProgress ? `Geocoding... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}` : `1. Geocode HS Schools`}
+                    {hsGeocodingProgress ? `Mapping... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}` : `1. Map HS School Locations`}
                   </button>
                 )}
                 {hsSchoolCount > 0 && (
@@ -844,7 +844,7 @@ export default function MapView() {
       {/* HS geocoding error */}
       {hasHsPlayers && venueCounts.hs === 0 && !hsGeocodingProgress && hsGeocodingError && (
         <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5 text-[11px] text-accent-orange">
-          Couldn't locate high school addresses: {hsGeocodingError}. Try refreshing the page.
+          Couldn't find locations for some high schools. Check that school names and states are correct. ({hsGeocodingError})
         </div>
       )}
 
@@ -863,7 +863,12 @@ export default function MapView() {
 
       {/* Venue summary */}
       <p className="text-xs text-text-dim">
-        {venueCounts.pro + venueCounts.st + venueCounts.ncaa + venueCounts.hs} venues with your players — click any dot to see who's there
+        {(() => {
+          const total = venueCounts.pro + venueCounts.st + venueCounts.ncaa + venueCounts.hs
+          return total === 0
+            ? "No venues to show yet. Load game schedules above to see where your players are."
+            : `${total} venues with your players — click any dot to see who's there`
+        })()}
       </p>
 
       {/* B4: Schedule panel from popup */}

@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { GameEvent } from '../../types/schedule'
+import Term from '../ui/Term'
 
 interface Props {
   games: GameEvent[]
@@ -243,7 +244,11 @@ export default function ScheduleCalendar({ games }: Props) {
                           {sourceLabel}
                         </span>
                         <span className={`text-[10px] font-medium ${confirmColor}`}>
-                          {confirmLabel}
+                          {confirmLabel === 'Estimated' ? (
+                            <Term tip="This game date is generated from typical season patterns, not an official schedule. Confirm before traveling.">
+                              Estimated
+                            </Term>
+                          ) : confirmLabel}
                         </span>
                         {g.gameStatus && g.gameStatus !== 'Final' && g.gameStatus !== 'Scheduled' && (
                           <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
@@ -269,10 +274,10 @@ export default function ScheduleCalendar({ games }: Props) {
       {/* Legend */}
       <div className="mt-3 flex gap-4 text-xs text-text-dim">
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-accent-red/40" /> Sunday (blackout)
+          <span className="h-2 w-2 rounded-full bg-accent-red/40" /> <Term tip="Sundays are typically travel/rest days — games on Sundays are skipped in trip planning.">Sunday (blackout)</Term>
         </span>
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-accent-blue/40" /> Tuesday (anchor)
+          <span className="h-2 w-2 rounded-full bg-accent-blue/40" /> <Term tip="Tuesdays are best for visiting MiLB position players — they're most accessible on off days.">Tuesday (anchor)</Term>
         </span>
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-accent-blue" /> Pro

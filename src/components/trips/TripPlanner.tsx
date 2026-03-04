@@ -15,7 +15,7 @@ import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import { getTripKey } from '../../store/tripStore'
 import type { TripStatus } from '../../store/tripStore'
 import type { RosterPlayer } from '../../types/roster'
-import { formatDate, formatDriveTime, formatTimeAgo, TIER_DOT_COLORS } from '../../lib/formatters'
+import { formatDate, formatDriveTime, formatTimeAgo, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
@@ -542,14 +542,14 @@ export default function TripPlanner() {
               ? proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
               : 'bg-gray-800 text-text-dim/60'
           }`}>
-            Pro games: {proFetchedAt ? `loaded ${formatTimeAgo(proFetchedAt)}` : 'not loaded yet'}
+            Pro games: {proFetchedAt ? `loaded ${formatTimeAgo(proFetchedAt)}${proStale ? ' — may be outdated' : ''}` : 'not loaded yet'}
           </span>
           <span className={`rounded px-2 py-0.5 ${
             ncaaFetchedAt
               ? ncaaStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
               : 'bg-gray-800 text-text-dim/60'
           }`}>
-            College games: {ncaaFetchedAt ? `loaded ${formatTimeAgo(ncaaFetchedAt)}` : 'not loaded yet'}
+            College games: {ncaaFetchedAt ? `loaded ${formatTimeAgo(ncaaFetchedAt)}${ncaaStale ? ' — may be outdated' : ''}` : 'not loaded yet'}
           </span>
           {hasHsPlayers && (
             <span className={`rounded px-2 py-0.5 ${
@@ -557,7 +557,7 @@ export default function TripPlanner() {
                 ? hsStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
                 : 'bg-gray-800 text-text-dim/60'
             }`}>
-              HS games: {hsFetchedAt ? `loaded ${formatTimeAgo(hsFetchedAt)}` : 'not loaded yet'}
+              HS games: {hsFetchedAt ? `loaded ${formatTimeAgo(hsFetchedAt)}${hsStale ? ' — may be outdated' : ''}` : 'not loaded yet'}
             </span>
           )}
         </div>
@@ -567,11 +567,11 @@ export default function TripPlanner() {
             <p className="text-[11px] text-accent-orange">
               {!proFetchedAt && hasProPlayers && 'Pro game schedules haven\'t been loaded yet. '}
               {proStale && 'Pro game data is more than 24 hours old. '}
-              {!ncaaFetchedAt && hasNcaaPlayers && 'College game schedules haven\'t been loaded yet (using Tue/Fri/Sat estimates). '}
+              {!ncaaFetchedAt && hasNcaaPlayers && 'College game schedules haven\'t been loaded yet (using estimated game days until real schedules are loaded). '}
               {ncaaStale && 'College game data is more than 24 hours old. '}
               {!hsFetchedAt && hasHsPlayers && (hsVenueMissing
-                ? 'HS schools need geocoding + schedule loading. '
-                : 'HS schedules haven\'t been loaded yet (using Tue/Thu estimates). ')}
+                ? 'HS school locations haven\'t been mapped yet. '
+                : 'HS schedules haven\'t been loaded yet (using estimated game days until real schedules are loaded). ')}
               {hsStale && 'HS game data is more than 24 hours old. '}
               Load schedules below to enable trip generation.
             </p>
@@ -616,7 +616,7 @@ export default function TripPlanner() {
                       disabled={autoAssignLoading}
                       className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
                     >
-                      {autoAssignLoading ? 'Scanning rosters...' : '1. Auto-Assign Players'}
+                      {autoAssignLoading ? 'Scanning rosters...' : '1. Find Players on Rosters'}
                     </button>
                   )}
                   <button
@@ -664,8 +664,8 @@ export default function TripPlanner() {
                       className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
                     >
                       {hsGeocodingProgress
-                        ? `Geocoding... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
-                        : `1. Geocode ${hsPlayersCount} HS Schools (~${hsPlayersCount * 2}s)`}
+                        ? `Mapping... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
+                        : `1. Map ${hsPlayersCount} HS School Locations (~${hsPlayersCount * 2}s)`}
                     </button>
                   )}
                   {hsT1T2SchoolCount > 0 && hsT1T2SchoolCount < hsAllSchoolCount && (
@@ -734,8 +734,8 @@ export default function TripPlanner() {
                 className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
               >
                 {hsGeocodingProgress
-                  ? `Geocoding... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
-                  : `Geocode ${hsPlayersCount} HS Schools (~${hsPlayersCount * 2}s)`}
+                  ? `Mapping... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
+                  : `Map ${hsPlayersCount} HS School Locations (~${hsPlayersCount * 2}s)`}
               </button>
             </div>
           </div>
@@ -1176,7 +1176,7 @@ export default function TripPlanner() {
                     </span>
                   </h3>
                   <p className="text-[10px] text-text-dim/60">
-                    Score = T1 (5pts) + T2 (3pts) + T3 (1pt) per visit remaining · Thu anchor +20%
+                    Higher score = more priority players on good visit days. Tier 1 = 5pts, Tier 2 = 3pts, Tier 3 = 1pt. Tuesdays get +20% bonus.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

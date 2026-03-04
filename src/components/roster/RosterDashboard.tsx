@@ -5,6 +5,7 @@ import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { formatTimeAgo } from '../../lib/formatters'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
+import Term from '../ui/Term'
 
 type SortField = 'playerName' | 'tier' | 'visitsRemaining' | 'org' | 'loveScore'
 type SortDir = 'asc' | 'desc'
@@ -248,7 +249,7 @@ export default function RosterDashboard() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
                 </svg>
               )}
-              Roster Moves
+              Check for Trades
               {rosterMovesCheckedAt && (
                 <span className="text-[9px] text-text-dim/50">{formatTimeAgo(new Date(rosterMovesCheckedAt).getTime())}</span>
               )}
@@ -300,7 +301,7 @@ export default function RosterDashboard() {
             ))}
           </div>
           <p className="mt-2 text-[11px] text-text-dim/60">
-            Update the Google Sheet to reflect permanent changes, then click Refresh.
+            Update the Google Sheet to reflect permanent changes, then click Refresh. Trades and promotions can affect trip plans — re-generate trips after updating.
           </p>
         </div>
       )}
@@ -354,7 +355,7 @@ export default function RosterDashboard() {
                     <th className="px-4 py-2.5">Target</th>
                     {hasHeartbeat && (
                       <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('loveScore')}>
-                        Love{sortIndicator('loveScore')}
+                        <Term tip="Love Score from SV Heartbeat — a composite of call frequency, text frequency, in-person visits, and recency. 60+ = healthy, 30–59 = needs work, below 30 = at risk.">Love</Term>{sortIndicator('loveScore')}
                       </th>
                     )}
                     <th className="px-4 py-2.5">Agent</th>
@@ -466,7 +467,7 @@ function ClientHealthPanel({
             <p className="text-[9px] text-text-dim/50">60+ green · 30+ yellow · &lt;30 red</p>
           </div>
           <div title="Players who haven't had an in-person visit within their tier's threshold: T1 = 60 days, T2 = 120 days, T3 = 180 days.">
-            <p className="text-[10px] font-medium text-text-dim">In-Person Overdue</p>
+            <p className="text-[10px] font-medium text-text-dim"><Term tip="Players who haven't had an in-person visit within their tier's threshold: Tier 1 = every 60 days, Tier 2 = every 120 days, Tier 3 = every 180 days.">In-Person Overdue</Term></p>
             <p className={`text-lg font-bold ${stats.overdue > 0 ? 'text-accent-red' : 'text-accent-green'}`}>
               {stats.overdue}
             </p>
@@ -533,7 +534,7 @@ function BehindPaceAlerts({ players }: { players: RosterPlayer[] }) {
             {behindT1.length} Tier 1 player{behindT1.length !== 1 ? 's' : ''} behind pace
           </h3>
           <p className="mb-2 text-xs text-text-dim">
-            Need &gt;1.5 visits/month to hit targets by Sept 30 ({Math.round(monthsLeft)} months left)
+            Need &gt;1.5 visits/month to hit targets by Sept 30 ({Math.round(monthsLeft)} months left). Consider prioritizing these players in your next trip.
           </p>
           <div className="space-y-1">
             {behindT1.map((p) => (
@@ -551,7 +552,7 @@ function BehindPaceAlerts({ players }: { players: RosterPlayer[] }) {
             {behindT2.length} Tier 2 player{behindT2.length !== 1 ? 's' : ''} behind pace
           </h3>
           <p className="mb-2 text-xs text-text-dim">
-            Need &gt;1.5 visits/month to hit targets by Sept 30 ({Math.round(monthsLeft)} months left)
+            Need &gt;1.5 visits/month to hit targets by Sept 30 ({Math.round(monthsLeft)} months left). Consider prioritizing these players in your next trip.
           </p>
           <div className="space-y-1">
             {behindT2.map((p) => (

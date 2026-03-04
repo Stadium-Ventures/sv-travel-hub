@@ -297,7 +297,7 @@ export default function ScheduleView() {
                 disabled={autoAssignLoading}
                 className="rounded-lg bg-accent-green px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
               >
-                {autoAssignLoading ? 'Scanning rosters...' : 'Auto-Assign'}
+                {autoAssignLoading ? 'Scanning rosters...' : 'Find on Rosters'}
               </button>
             )}
           </div>
@@ -309,7 +309,7 @@ export default function ScheduleView() {
               <span>Auto-assign failed: {autoAssignResult.error}. Try again or assign players manually.</span>
             ) : (
               <>
-                {autoAssignResult.assigned > 0 && `Auto-assigned ${autoAssignResult.assigned} player${autoAssignResult.assigned !== 1 ? 's' : ''} from MLB rosters. `}
+                {autoAssignResult.assigned > 0 && `Found ${autoAssignResult.assigned} player${autoAssignResult.assigned !== 1 ? 's' : ''} on MLB rosters. `}
                 {autoAssignResult.notFound.length > 0 && (
                   <span className="text-text-dim">
                     Not found on any roster: {autoAssignResult.notFound.join(', ')}
@@ -1008,7 +1008,7 @@ function HsSection({
       </div>
       <p className="mb-3 text-xs text-text-dim">
         Your high school players and their schools. Load schedules from MaxPreps to get real game dates — or load a specific school below.
-        Without real data, the trip planner uses estimated home game days (Tue/Thu).
+        Without real data, the trip planner uses estimated game days until real schedules are loaded.
       </p>
 
       {hsProgress && (
@@ -1122,7 +1122,7 @@ function HsSection({
       {hsGames.length === 0 && (
         <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
           <p className="text-[11px] text-accent-orange">
-            Without real schedules loaded, HS games are estimated based on typical home game days (Tue/Thu).
+            Without real schedules loaded, HS games use estimated game days until real schedules are loaded.
             Add MaxPreps slugs and load real schedules for actual dates.
           </p>
         </div>

@@ -4,7 +4,7 @@ import { useTripStore, getTripKey } from '../../store/tripStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
 import { generateTripIcs, downloadIcs } from '../../lib/icsExport'
 import { haversineKm, HOME_BASE } from '../../lib/tripEngine'
-import { formatDate, formatDriveTime, TIER_DOT_COLORS } from '../../lib/formatters'
+import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 import type { TripStatus } from '../../store/tripStore'
 import type { RosterPlayer } from '../../types/roster'
 
@@ -353,6 +353,32 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
     summary += ` Also seeing: ${t2Names.join(', ')}.`
   }
 
+  // Build "why this trip" explanation from scoreBreakdown + trip context
+  const whyParts: string[] = []
+  if (breakdown) {
+    if (breakdown.tier1Count > 0 && t1Names.length > 0) {
+      whyParts.push(`Ranked high because it includes ${t1Names.join(' and ')} (must-see)`)
+    }
+    if (breakdown.tuesdayBonus) {
+      whyParts.push('Tuesday anchor gives a 20% scoring boost — best day for MiLB position players')
+    }
+    if (breakdown.pitcherMatchBonus > 0) {
+      const pitcherNames = trip.anchorGame.probablePitcherNames?.filter((n) => allPlayers.has(n))
+      if (pitcherNames && pitcherNames.length > 0) {
+        whyParts.push(`Includes a probable start for ${pitcherNames.join(', ')}`)
+      } else {
+        whyParts.push('Includes a probable pitcher start')
+      }
+    }
+  }
+  if (stops.length > 2) {
+    whyParts.push(`Covers ${stops.length} venues in one loop`)
+  }
+  if (computedTotalDrive < 180) {
+    whyParts.push(`Short drive — ${formatDriveTime(computedTotalDrive)} total`)
+  }
+  const whySentence = whyParts.length > 0 ? whyParts.join('. ') + '.' : ''
+
   // Track which players have been marked as visited (persists across collapse/expand)
   const [markedPlayers, setMarkedPlayers] = useState<Set<string>>(new Set())
 
@@ -460,11 +486,11 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
           </div>
           {(tierCounts.t1 > 0 || tierCounts.t2 > 0 || tierCounts.t3 > 0) && (
             <div className="flex items-center gap-1 rounded-lg bg-gray-950/60 px-2 py-1 text-[11px] font-medium">
-              {tierCounts.t1 > 0 && <span className="text-accent-red">{tierCounts.t1}×T1</span>}
+              {tierCounts.t1 > 0 && <span className="text-accent-red">{tierCounts.t1}× {TIER_LABELS[1]}</span>}
               {tierCounts.t1 > 0 && (tierCounts.t2 > 0 || tierCounts.t3 > 0) && <span className="text-text-dim/30">·</span>}
-              {tierCounts.t2 > 0 && <span className="text-accent-orange">{tierCounts.t2}×T2</span>}
+              {tierCounts.t2 > 0 && <span className="text-accent-orange">{tierCounts.t2}× {TIER_LABELS[2]}</span>}
               {tierCounts.t2 > 0 && tierCounts.t3 > 0 && <span className="text-text-dim/30">·</span>}
-              {tierCounts.t3 > 0 && <span className="text-yellow-400">{tierCounts.t3}×T3</span>}
+              {tierCounts.t3 > 0 && <span className="text-yellow-400">{tierCounts.t3}× {TIER_LABELS[3]}</span>}
             </div>
           )}
           <div className="hidden rounded-lg bg-gray-950/60 px-2.5 py-1 sm:block">
@@ -483,7 +509,10 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
       {expanded && (<div className="mt-4">
 
       {/* Natural language summary */}
-      <p className="mb-3 text-sm text-text-dim">{summary}</p>
+      <p className="mb-1 text-sm text-text-dim">{summary}</p>
+      {whySentence && (
+        <p className="mb-3 text-sm italic text-text-dim/70">{whySentence}</p>
+      )}
 
       {/* Score breakdown toggle */}
       {breakdown && (
@@ -537,6 +566,50 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
           Total drive: ~{formatDriveTime(computedTotalDrive)} <span className="text-text-dim/40">(estimates only)</span>
         </p>
       </div>
+
+      {/* Day-by-day itinerary */}
+      {trip.suggestedDays.length > 0 && (
+        <div className="mb-4 rounded-lg border border-border/30 bg-gray-950/30 px-3 py-2 text-sm text-text-dim">
+          {trip.suggestedDays.map((day, dayIdx) => {
+            const dayDate = new Date(day + 'T12:00:00Z')
+            const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayDate.getUTCDay()]
+            const monthDay = formatDate(day)
+            // Find stops relevant to this day (match by date, or distribute sequentially)
+            const dayStops = stops.filter((s) => s.dates.includes(day))
+            const parts: string[] = []
+            if (dayIdx === 0 && trip.driveFromHomeMinutes > 0) {
+              const firstStopName = (dayStops[0] || stops[0])?.orgLabel || (dayStops[0] || stops[0])?.venueName || 'venue'
+              parts.push(`Drive ${formatDriveTime(trip.driveFromHomeMinutes)} to ${firstStopName}`)
+            }
+            for (const s of dayStops) {
+              const playerNames = s.players
+              const label = s.orgLabel || s.venueName
+              if (playerNames.length === 1) {
+                const isPitcher = trip.anchorGame.probablePitcherNames?.includes(playerNames[0]!)
+                parts.push(`see ${playerNames[0]}${isPitcher ? ' pitch' : ''} at ${label}`)
+              } else {
+                parts.push(`see ${playerNames.length} players at ${label}`)
+              }
+              if (!s.isAnchor && s.driveFromPrev > 0) {
+                parts[parts.length - 1] = `${formatDriveTime(s.driveFromPrev)} to ${label} — ${parts[parts.length - 1]!.replace(` at ${label}`, '')}`
+              }
+            }
+            if (dayIdx === trip.suggestedDays.length - 1 && routeSegments.length > 0) {
+              const returnSeg = routeSegments[routeSegments.length - 1]
+              if (returnSeg && returnSeg.to === 'Orlando') {
+                parts.push(`drive home ~${formatDriveTime(returnSeg.minutes)}`)
+              }
+            }
+            if (parts.length === 0 && dayStops.length === 0) return null
+            return (
+              <p key={day} className="leading-relaxed">
+                <span className="font-medium text-text">Day {dayIdx + 1} ({dayName} {monthDay}):</span>{' '}
+                {parts.join(' — ')}.
+              </p>
+            )
+          })}
+        </div>
+      )}
 
       {/* Venue stops */}
       <div className="space-y-2">

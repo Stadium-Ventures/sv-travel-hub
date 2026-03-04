@@ -11,8 +11,8 @@ const TABS: { id: TabId; label: string; heading: string; description: string }[]
   },
   {
     id: 'schedule',
-    label: 'Data Setup',
-    heading: 'Data Setup',
+    label: 'Player Setup',
+    heading: 'Player Setup',
     description: 'Connect each player to their current team so we can look up where and when they play. Once connected, the app pulls their game schedules automatically.',
   },
   {

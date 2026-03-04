@@ -23,6 +23,13 @@ export function formatTimeAgo(ts: number): string {
   return `${days}d ago`
 }
 
+export const TIER_LABELS: Record<number, string> = {
+  1: 'Must-see',
+  2: 'High priority',
+  3: 'Standard',
+  4: 'No visits',
+}
+
 export const TIER_DOT_COLORS: Record<number, string> = {
   1: 'bg-accent-red',
   2: 'bg-accent-orange',
