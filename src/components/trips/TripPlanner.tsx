@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
@@ -15,7 +15,7 @@ import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import { getTripKey } from '../../store/tripStore'
 import type { TripStatus } from '../../store/tripStore'
 import type { RosterPlayer } from '../../types/roster'
-import { formatDriveTime, formatTimeAgo, TIER_DOT_COLORS } from '../../lib/formatters'
+import { formatDate, formatDriveTime, formatTimeAgo, TIER_DOT_COLORS } from '../../lib/formatters'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
@@ -477,177 +477,37 @@ export default function TripPlanner() {
     })
 
     return (
-      <div>
-        <h3 className="mb-2 text-sm font-semibold text-purple-400">
-          Fly-in Visits
-          <span className="ml-2 text-xs font-normal text-text-dim">
-            Beyond driving range — requires flight
-          </span>
-        </h3>
-        <p className="mb-3 text-xs text-text-dim">
-          These players have games outside driving radius. Estimated travel includes flight + airport + rental car.
-        </p>
-        <div className="space-y-2">
-          {sortedVisits.map((visit, i) => {
-            const firstPlayer = players.find((p) => visit.playerNames.includes(p.playerName))
-            let orgLabel = ''
-            if (visit.source === 'hs-lookup' && firstPlayer) orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
-            else if (visit.source === 'ncaa-lookup' && firstPlayer) orgLabel = firstPlayer.org
-            else if (visit.source === 'mlb-api' && firstPlayer) orgLabel = firstPlayer.org
-
-            const coordKey = `${visit.venue.coords.lat.toFixed(4)},${visit.venue.coords.lng.toFixed(4)}`
-            const flyInKey = `flyin-${coordKey}`
-            const flyInStatus = tripStatuses[flyInKey] as TripStatus | undefined
-
-            const formatFlyInDate = (d: string) => {
-              const dt = new Date(d + 'T12:00:00Z')
-              const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]
-              const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()]
-              return `${dayName} ${monthName} ${dt.getUTCDate()}`
-            }
-
-            const milesDisplay = Math.round(visit.distanceKm * 0.621).toLocaleString()
-            const firstDate = visit.dates[0] ? new Date(visit.dates[0] + 'T12:00:00Z') : null
-            const lastDate = visit.dates[visit.dates.length - 1] ? new Date(visit.dates[visit.dates.length - 1]! + 'T12:00:00Z') : null
-            const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-            const dateRangeLabel = firstDate && lastDate
-              ? `${monthNames[firstDate.getUTCMonth()]} ${firstDate.getUTCDate()}–${monthNames[lastDate.getUTCMonth()]} ${lastDate.getUTCDate()}`
-              : ''
-            const summaryText = `Fly-in to visit ${visit.playerNames.length} player${visit.playerNames.length !== 1 ? 's' : ''} at ${visit.venue.name}. ~${visit.estimatedTravelHours}h travel (${milesDisplay} mi). ${visit.dates.length} date${visit.dates.length !== 1 ? 's' : ''} available ${dateRangeLabel}.`
-
-            const handleCopyFlyIn = async () => {
-              const playerDescs = visit.playerNames.map((name) => {
-                const p = playerMap.get(name)
-                return p ? `${name} (T${p.tier})` : name
-              })
-              let text = `Fly-in Visit — ${orgLabel || visit.venue.name}\n`
-              text += `Venue: ${visit.venue.name}\n`
-              text += `Players: ${playerDescs.join(', ')}\n`
-              text += `Travel: ~${visit.estimatedTravelHours}h (${milesDisplay} mi)\n`
-              text += `Available dates: ${visit.dates.map(formatFlyInDate).join(', ')}\n`
-              try {
-                await navigator.clipboard.writeText(text)
-                setCopiedFlyIn(flyInKey)
-                setTimeout(() => setCopiedFlyIn(null), 2000)
-              } catch { /* ignore */ }
-            }
-
-            return (
-              <div key={i} className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {orgLabel && orgLabel !== visit.venue.name ? (
-                        <>
-                          <span className="text-sm font-medium text-text">{orgLabel}</span>
-                          <span className="text-xs text-text-dim">— {visit.venue.name}</span>
-                        </>
-                      ) : (
-                        <span className="text-sm font-medium text-text">{visit.venue.name}</span>
-                      )}
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                        visit.source === 'mlb-api'
-                          ? visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400'
-                          : (visit.source === 'hs-lookup' && visit.confidence === 'high')
-                            ? 'bg-accent-green/15 text-accent-green'
-                            : (visit.source === 'ncaa-lookup' && visit.confidence === 'high')
-                              ? 'bg-accent-green/15 text-accent-green'
-                              : 'bg-accent-orange/15 text-accent-orange'
-                      }`}>
-                        {visit.source === 'mlb-api'
-                          ? (visit.isHome ? 'Home Game' : 'Away Game')
-                          : visit.source === 'hs-lookup' && visit.confidence === 'high'
-                            ? 'Home Game (MaxPreps)'
-                            : visit.source === 'ncaa-lookup' && visit.confidence === 'high'
-                              ? 'School Visit (D1Baseball)'
-                              : 'School Visit (est.)'}
-                      </span>
-                      {visit.sourceUrl && (
-                        <a
-                          href={visit.sourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rounded px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-purple-400 transition-colors"
-                          title="Verify this game on the source schedule"
-                        >
-                          {`Verify \u2197`}
-                        </a>
-                      )}
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      {visit.playerNames.map((name) => {
-                        const player = playerMap.get(name)
-                        const tier = player?.tier ?? 4
-                        const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                        return (
-                          <span
-                            key={name}
-                            className="inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text cursor-pointer hover:bg-accent-blue/10"
-                            onClick={() => setSelectedPlayer(name)}
-                          >
-                            <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} title={`Tier ${tier}`} />
-                            {name}
-                            <span className="text-text-dim/60">T{tier}</span>
-                          </span>
-                        )
-                      })}
-                    </div>
-                    <div className="mt-2 text-[11px] text-text-dim">
-                      {visit.dates.slice(0, 5).map(formatFlyInDate).join(', ')}
-                      {visit.dates.length > 5 && ` +${visit.dates.length - 5} more`}
-                    </div>
-                    <p className="mt-1 text-[11px] text-text-dim/70">{summaryText}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={handleCopyFlyIn}
-                        className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
-                      >
-                        {copiedFlyIn === flyInKey ? 'Copied!' : 'Copy'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (!flyInStatus) setTripStatus(flyInKey, 'planned')
-                          else if (flyInStatus === 'planned') setTripStatus(flyInKey, 'completed')
-                          else setTripStatus(flyInKey, null)
-                        }}
-                        className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                          flyInStatus === 'planned'
-                            ? 'bg-accent-blue/20 text-accent-blue'
-                            : flyInStatus === 'completed'
-                              ? 'bg-accent-green/20 text-accent-green'
-                              : 'bg-gray-800 text-text-dim hover:text-text hover:bg-gray-700'
-                        }`}
-                      >
-                        {flyInStatus === 'planned' ? 'Planned' : flyInStatus === 'completed' ? 'Completed' : 'Mark Status'}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    {visit.visitValue > 0 && (
-                      <>
-                        <p className="text-lg font-bold text-purple-400">{visit.visitValue}</p>
-                        {visit.scoreBreakdown && (
-                          <p className="text-[10px] text-text-dim">
-                            {[
-                              visit.scoreBreakdown.tier1Count > 0 && `${visit.scoreBreakdown.tier1Count}×T1`,
-                              visit.scoreBreakdown.tier2Count > 0 && `${visit.scoreBreakdown.tier2Count}×T2`,
-                              visit.scoreBreakdown.tier3Count > 0 && `${visit.scoreBreakdown.tier3Count}×T3`,
-                            ].filter(Boolean).join(' · ')}
-                          </p>
-                        )}
-                      </>
-                    )}
-                    <p className="text-sm font-medium text-purple-400">
-                      ~{visit.estimatedTravelHours}h travel
-                    </p>
-                    <p className="text-[11px] text-text-dim">
-                      {milesDisplay} mi
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+      <div id="section-fly-in">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-purple-400">
+              Fly-in Visits
+              <span className="ml-2 text-xs font-normal text-text-dim">
+                Beyond driving range — requires flight
+              </span>
+            </h3>
+            <p className="text-[10px] text-text-dim/60">
+              Estimated travel = flight + 1h airport + ground transport
+            </p>
+          </div>
+        </div>
+        <div className="space-y-4">
+          {sortedVisits.map((visit, i) => (
+            <FlyInCard
+              key={i}
+              visit={visit}
+              index={i + 1}
+              players={players}
+              playerMap={playerMap}
+              priorityPlayers={priorityPlayers}
+              tripStatuses={tripStatuses}
+              setTripStatus={setTripStatus}
+              copiedFlyIn={copiedFlyIn}
+              setCopiedFlyIn={setCopiedFlyIn}
+              onPlayerClick={setSelectedPlayer}
+              defaultExpanded={i === 0}
+            />
+          ))}
         </div>
       </div>
     )
@@ -1206,32 +1066,34 @@ export default function TripPlanner() {
           )}
 
           {/* Coverage stats */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-            <StatCard label="Road Trips" value={tripPlan.trips.length} />
-            <div title="Total player-visit appearances across all trips. T1 players can appear in up to 5 trips, T2 in 3, T3 in 2 — matching their visit targets.">
-              <StatCard label="Visits Planned" value={tripPlan.totalVisitsPlanned ?? tripPlan.totalVisitsCovered} accent="blue" />
+          {(() => {
+            const beyondPlayers = tripPlan.unvisitablePlayers.filter((e) => e.reason.startsWith('Beyond max flight'))
+            const noGamePlayers = tripPlan.unvisitablePlayers.filter((e) => !e.reason.startsWith('Beyond max flight'))
+            // Collect all player names that appear in road trips
+            const roadTripPlayerNames = [...new Set(tripPlan.trips.flatMap((t) => [
+              ...t.anchorGame.playerNames,
+              ...t.nearbyGames.flatMap((g) => g.playerNames),
+            ]))]
+            // Collect fly-in player names
+            const flyInPlayerNames = [...new Set(tripPlan.flyInVisits.flatMap((v) => v.playerNames))]
+
+            return (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+              <StatCard label="Road Trips" value={tripPlan.trips.length} scrollTo="section-road-trips" hoverNames={roadTripPlayerNames} />
+              <div title="Total player-visit appearances across all trips. T1 players can appear in up to 5 trips, T2 in 3, T3 in 2 — matching their visit targets.">
+                <StatCard label="Visits Planned" value={tripPlan.totalVisitsPlanned ?? tripPlan.totalVisitsCovered} accent="blue" scrollTo="section-road-trips" />
+              </div>
+              <StatCard label="Fly-in Visits" value={tripPlan.flyInVisits.length} scrollTo="section-fly-in" hoverNames={flyInPlayerNames} />
+              <div title={`Percentage of players with visits remaining (${players.filter((p) => p.visitsRemaining > 0).length} total) that appear in at least one generated trip. Does not count players with zero visits remaining.`}>
+                <StatCard label="Players Reached" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
+              </div>
+              {beyondPlayers.length > 0 && (
+                <StatCard label="Beyond Flight" value={beyondPlayers.length} accent="orange" scrollTo="section-beyond-flight" hoverNames={beyondPlayers.map((e) => e.name)} />
+              )}
+              <StatCard label="No Games Found" value={noGamePlayers.length} accent={noGamePlayers.length > 0 ? 'red' : 'green'} scrollTo="section-no-games" hoverNames={noGamePlayers.map((e) => e.name)} />
             </div>
-            <StatCard label="Fly-in Visits" value={tripPlan.flyInVisits.length} />
-            <div title={`Percentage of players with visits remaining (${players.filter((p) => p.visitsRemaining > 0).length} total) that appear in at least one generated trip. Does not count players with zero visits remaining.`}>
-              <StatCard label="Players Reached" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
-            </div>
-            {(() => {
-              const beyondCount = tripPlan.unvisitablePlayers.filter((e) => e.reason.startsWith('Beyond max flight')).length
-              const noGameCount = tripPlan.unvisitablePlayers.length - beyondCount
-              return (
-                <>
-                  {beyondCount > 0 && (
-                    <div title="Players with games beyond the max flight setting — increase the slider to include them.">
-                      <StatCard label="Beyond Flight" value={beyondCount} accent="orange" />
-                    </div>
-                  )}
-                  <div title="Players who need visits but have zero game events in the selected date range.">
-                    <StatCard label="No Games Found" value={noGameCount} accent={noGameCount > 0 ? 'red' : 'green'} />
-                  </div>
-                </>
-              )
-            })()}
-          </div>
+            )
+          })()}
 
           {/* Analysis summary */}
           <div className="rounded-lg bg-gray-950/40 px-3 py-2 text-[11px] text-text-dim">
@@ -1300,7 +1162,7 @@ export default function TripPlanner() {
             const filteredTrips = indexedTrips.map(({ trip }) => trip)
 
             return (
-            <div>
+            <div id="section-road-trips">
               <div className="mb-3 flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-text">
@@ -1561,7 +1423,7 @@ export default function TripPlanner() {
             return (
               <>
                 {beyondFlight.length > 0 && (
-                  <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-5">
+                  <div id="section-beyond-flight" className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-5">
                     <h3 className="mb-2 text-sm font-semibold text-accent-orange">
                       Beyond Max Flight ({beyondFlight.length})
                     </h3>
@@ -1586,7 +1448,7 @@ export default function TripPlanner() {
                   </div>
                 )}
                 {noGames.length > 0 && (
-                  <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-5">
+                  <div id="section-no-games" className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-5">
                     <h3 className="mb-2 text-sm font-semibold text-accent-red">
                       No Games Found ({noGames.length})
                     </h3>
@@ -1634,7 +1496,14 @@ export default function TripPlanner() {
   )
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
+function StatCard({ label, value, accent, scrollTo, hoverNames }: {
+  label: string
+  value: string | number
+  accent?: string
+  scrollTo?: string
+  hoverNames?: string[]
+}) {
+  const [showHover, setShowHover] = useState(false)
   const accentColor =
     accent === 'green' ? 'text-accent-green' :
     accent === 'blue' ? 'text-accent-blue' :
@@ -1642,10 +1511,326 @@ function StatCard({ label, value, accent }: { label: string; value: string | num
     accent === 'red' ? 'text-accent-red' :
     'text-text'
 
+  const isClickable = !!scrollTo
   return (
-    <div className="rounded-xl border border-border bg-surface p-4">
+    <div
+      className={`relative rounded-xl border border-border bg-surface p-4 ${isClickable ? 'cursor-pointer hover:border-border/80 hover:bg-surface/80 transition-colors' : ''}`}
+      onClick={scrollTo ? () => document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) : undefined}
+      onMouseEnter={hoverNames && hoverNames.length > 0 ? () => setShowHover(true) : undefined}
+      onMouseLeave={() => setShowHover(false)}
+    >
       <p className="text-xs font-medium text-text-dim">{label}</p>
       <p className={`mt-1 text-2xl font-bold ${accentColor}`}>{value}</p>
+      {showHover && hoverNames && hoverNames.length > 0 && (
+        <div className="absolute left-0 top-full z-30 mt-1 max-h-48 w-64 overflow-y-auto rounded-lg border border-border bg-gray-950 p-2 shadow-lg">
+          <p className="mb-1 text-[10px] font-medium text-text-dim">{label} ({hoverNames.length})</p>
+          <p className="text-[11px] text-text leading-relaxed">{hoverNames.join(', ')}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FlyInCard({
+  visit, index, players, playerMap, priorityPlayers, tripStatuses, setTripStatus,
+  copiedFlyIn, setCopiedFlyIn, onPlayerClick, defaultExpanded,
+}: {
+  visit: import('../../types/schedule').FlyInVisit
+  index: number
+  players: RosterPlayer[]
+  playerMap: Map<string, RosterPlayer>
+  priorityPlayers: string[]
+  tripStatuses: Record<string, TripStatus>
+  setTripStatus: (key: string, status: TripStatus | null) => void
+  copiedFlyIn: string | null
+  setCopiedFlyIn: (key: string | null) => void
+  onPlayerClick: (name: string) => void
+  defaultExpanded?: boolean
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false)
+  const [showScoreDetail, setShowScoreDetail] = useState(false)
+
+  // Derive org label
+  const firstPlayer = players.find((p) => visit.playerNames.includes(p.playerName))
+  let orgLabel = ''
+  if (visit.source === 'hs-lookup' && firstPlayer) orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
+  else if (visit.source === 'ncaa-lookup' && firstPlayer) orgLabel = firstPlayer.org
+  else if (visit.source === 'mlb-api' && firstPlayer) orgLabel = firstPlayer.org
+
+  const coordKey = `${visit.venue.coords.lat.toFixed(4)},${visit.venue.coords.lng.toFixed(4)}`
+  const flyInKey = `flyin-${coordKey}`
+  const currentStatus = tripStatuses[flyInKey] as TripStatus | undefined
+
+  function cycleStatus(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!currentStatus) setTripStatus(flyInKey, 'planned')
+    else if (currentStatus === 'planned') setTripStatus(flyInKey, 'completed')
+    else setTripStatus(flyInKey, null)
+  }
+
+  const milesDisplay = Math.round(visit.distanceKm * 0.621).toLocaleString()
+
+  // Tier counts
+  const tierCounts = { t1: 0, t2: 0, t3: 0 }
+  for (const name of visit.playerNames) {
+    const tier = playerMap.get(name)?.tier
+    if (tier === 1) tierCounts.t1++
+    else if (tier === 2) tierCounts.t2++
+    else if (tier === 3) tierCounts.t3++
+  }
+
+  // Date formatting
+  const firstDate = visit.dates[0]
+  const lastDate = visit.dates[visit.dates.length - 1]
+  const dateLabel = firstDate && lastDate && firstDate !== lastDate
+    ? `${formatDate(firstDate)} – ${formatDate(lastDate)}`
+    : firstDate ? formatDate(firstDate) : ''
+
+  // Natural language summary
+  const t1Names = visit.playerNames.filter((n) => playerMap.get(n)?.tier === 1)
+  const t2Names = visit.playerNames.filter((n) => playerMap.get(n)?.tier === 2)
+  const isPriority = visit.playerNames.some((n) => priorityPlayers.includes(n))
+  let summary = `Fly-in to visit ${visit.playerNames.length} player${visit.playerNames.length !== 1 ? 's' : ''} at ${orgLabel || visit.venue.name}. ~${visit.estimatedTravelHours}h travel (${milesDisplay} mi). ${visit.dates.length} date${visit.dates.length !== 1 ? 's' : ''} available.`
+  if (t1Names.length > 0) summary += ` Top priority: ${t1Names.join(', ')}.`
+  if (t2Names.length > 0) summary += ` Also seeing: ${t2Names.join(', ')}.`
+
+  const breakdown = visit.scoreBreakdown
+
+  // Copy handler
+  async function handleCopy(e: React.MouseEvent) {
+    e.stopPropagation()
+    const playerDescs = visit.playerNames.map((name) => {
+      const p = playerMap.get(name)
+      return p ? `${name} (T${p.tier})` : name
+    })
+    let text = `Fly-in #${index} — ${orgLabel || visit.venue.name}\n`
+    text += `Venue: ${visit.venue.name}\n`
+    text += `Players: ${playerDescs.join(', ')}\n`
+    text += `Travel: ~${visit.estimatedTravelHours}h (${milesDisplay} mi)\n`
+    text += `Available dates: ${visit.dates.map(formatDate).join(', ')}\n`
+    if (breakdown) {
+      const parts: string[] = []
+      if (breakdown.tier1Count > 0) parts.push(`${breakdown.tier1Count}x T1`)
+      if (breakdown.tier2Count > 0) parts.push(`${breakdown.tier2Count}x T2`)
+      if (breakdown.tier3Count > 0) parts.push(`${breakdown.tier3Count}x T3`)
+      text += `Score: ${breakdown.finalScore} pts (${parts.join(' + ')})\n`
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedFlyIn(flyInKey)
+      setTimeout(() => setCopiedFlyIn(null), 2000)
+    } catch { /* ignore */ }
+  }
+
+  // Source badge
+  const sourceBadge = visit.source === 'mlb-api'
+    ? { label: visit.isHome ? 'Home Game' : 'Away Game', color: visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400' }
+    : (visit.source === 'hs-lookup' && visit.confidence === 'high')
+      ? { label: 'Home Game (MaxPreps)', color: 'bg-accent-green/15 text-accent-green' }
+      : (visit.source === 'ncaa-lookup' && visit.confidence === 'high')
+        ? { label: 'School Visit (D1Baseball)', color: 'bg-accent-green/15 text-accent-green' }
+        : { label: 'School Visit (est.)', color: 'bg-accent-orange/15 text-accent-orange' }
+
+  return (
+    <div className={`rounded-xl border bg-surface p-5 ${isPriority ? 'border-purple-500/40' : 'border-border'}`}>
+      {/* Header — clickable to expand/collapse */}
+      <div
+        className="flex cursor-pointer items-start justify-between gap-4"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded) } }}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className={`text-text-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
+            <h3 className="text-base font-semibold text-text">
+              Fly-in #{index}
+            </h3>
+            {breakdown && (
+              <span className="rounded-lg bg-purple-500/10 px-2 py-0.5 text-xs font-bold text-purple-400">
+                {breakdown.finalScore} pts
+              </span>
+            )}
+            <button
+              onClick={cycleStatus}
+              className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                currentStatus === 'planned'
+                  ? 'bg-accent-blue/15 text-accent-blue border border-accent-blue/30'
+                  : currentStatus === 'completed'
+                    ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
+                    : 'bg-gray-800 text-text-dim/50 border border-border/30 hover:text-text-dim'
+              }`}
+            >
+              {currentStatus === 'planned' ? 'Planned' : currentStatus === 'completed' ? 'Completed' : 'Mark Status'}
+            </button>
+          </div>
+          <p className="mt-0.5 text-sm text-text-dim">
+            {orgLabel && orgLabel !== visit.venue.name ? (
+              <>{orgLabel} <span className="text-text-dim/60">— {visit.venue.name}</span></>
+            ) : visit.venue.name}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
+          <button
+            onClick={handleCopy}
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors hidden sm:block"
+          >
+            {copiedFlyIn === flyInKey ? 'Copied!' : 'Copy'}
+          </button>
+          <div className="rounded-lg bg-purple-500/10 px-2.5 py-1">
+            <span className="text-sm font-bold text-purple-400">{visit.playerNames.length}</span>
+            <span className="ml-1 text-[11px] text-purple-400/70">
+              player{visit.playerNames.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          {(tierCounts.t1 > 0 || tierCounts.t2 > 0 || tierCounts.t3 > 0) && (
+            <div className="flex items-center gap-1 rounded-lg bg-gray-950/60 px-2 py-1 text-[11px] font-medium">
+              {tierCounts.t1 > 0 && <span className="text-accent-red">{tierCounts.t1}×T1</span>}
+              {tierCounts.t1 > 0 && (tierCounts.t2 > 0 || tierCounts.t3 > 0) && <span className="text-text-dim/30">·</span>}
+              {tierCounts.t2 > 0 && <span className="text-accent-orange">{tierCounts.t2}×T2</span>}
+              {tierCounts.t2 > 0 && tierCounts.t3 > 0 && <span className="text-text-dim/30">·</span>}
+              {tierCounts.t3 > 0 && <span className="text-yellow-400">{tierCounts.t3}×T3</span>}
+            </div>
+          )}
+          <div className="rounded-lg bg-gray-950/60 px-2.5 py-1">
+            <span className="text-[11px] text-text-dim">~{visit.estimatedTravelHours}h</span>
+          </div>
+          <div className="hidden rounded-lg bg-gray-950/60 px-2.5 py-1 sm:block">
+            <span className="text-[11px] text-text-dim">{milesDisplay} mi</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded content */}
+      {expanded && (
+        <div className="mt-4">
+          {/* Summary */}
+          <p className="mb-3 text-sm text-text-dim">{summary}</p>
+
+          {/* Score breakdown toggle */}
+          {breakdown && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowScoreDetail(!showScoreDetail) }}
+              className="mb-2 rounded-lg bg-purple-500/10 px-2 py-0.5 text-xs font-bold text-purple-400 hover:bg-purple-500/20 transition-colors"
+            >
+              {showScoreDetail ? 'Hide Score Detail' : 'Show Score Detail'}
+            </button>
+          )}
+          {showScoreDetail && breakdown && (
+            <div className="mb-4 rounded-lg border border-purple-500/20 bg-purple-500/5 px-3 py-2 text-xs">
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {breakdown.tier1Count > 0 && (
+                  <span className="text-text">{breakdown.tier1Count}x Tier 1 <span className="text-text-dim">({breakdown.tier1Points}pts)</span></span>
+                )}
+                {breakdown.tier2Count > 0 && (
+                  <span className="text-text">{breakdown.tier2Count}x Tier 2 <span className="text-text-dim">({breakdown.tier2Points}pts)</span></span>
+                )}
+                {breakdown.tier3Count > 0 && (
+                  <span className="text-text">{breakdown.tier3Count}x Tier 3 <span className="text-text-dim">({breakdown.tier3Points}pts)</span></span>
+                )}
+              </div>
+              <p className="mt-1 text-text-dim">
+                Total: {breakdown.finalScore} pts — higher score = more high-priority players
+              </p>
+            </div>
+          )}
+
+          {/* Travel info */}
+          <div className="mb-4 rounded-lg bg-gray-950/40 px-3 py-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-2 w-2 rounded-full bg-purple-400" />
+              <span className="text-text-dim">Orlando</span>
+              <span className="text-text-dim/40">&rarr;</span>
+              <span className="text-text-dim">{orgLabel || visit.venue.name}</span>
+              <span className="text-text-dim/60">(~{visit.estimatedTravelHours}h · {milesDisplay} mi)</span>
+            </div>
+            <p className="mt-1 text-text-dim/60">
+              Includes flight + 1h airport overhead + ground transport
+            </p>
+          </div>
+
+          {/* Venue card */}
+          <div className="mb-4 rounded-lg border border-purple-500/20 bg-purple-500/5 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {orgLabel && orgLabel !== visit.venue.name ? (
+                <>
+                  <span className="text-sm font-medium text-text">{orgLabel}</span>
+                  <span className="text-xs text-text-dim">— {visit.venue.name}</span>
+                </>
+              ) : (
+                <span className="text-sm font-medium text-text">{visit.venue.name}</span>
+              )}
+              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${sourceBadge.color}`}>
+                {sourceBadge.label}
+              </span>
+              {visit.sourceUrl && (
+                <a href={visit.sourceUrl} target="_blank" rel="noopener noreferrer" className="rounded px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-purple-400 transition-colors">
+                  Verify ↗
+                </a>
+              )}
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {visit.playerNames.map((name) => {
+                const player = playerMap.get(name)
+                const tier = player?.tier ?? 4
+                const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                return (
+                  <span
+                    key={name}
+                    className="inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text cursor-pointer hover:bg-accent-blue/10"
+                    onClick={(e) => { e.stopPropagation(); onPlayerClick(name) }}
+                  >
+                    <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} title={`Tier ${tier}`} />
+                    {name}
+                    <span className="text-text-dim/60">T{tier}</span>
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Available dates */}
+          <div className="mb-3">
+            <p className="mb-1 text-xs font-medium text-text-dim">Available Dates ({visit.dates.length})</p>
+            <p className="text-sm text-text-dim">{dateLabel}</p>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {visit.dates.map((d) => {
+                const dt = new Date(d + 'T12:00:00Z')
+                const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]!
+                const isTue = dayName === 'Tue'
+                return (
+                  <span key={d} className={`rounded px-1.5 py-0.5 text-[11px] ${isTue ? 'bg-accent-blue/15 text-accent-blue font-medium' : 'bg-gray-800 text-text-dim'}`}>
+                    {formatDate(d)}
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Mobile copy button */}
+          <div className="flex gap-2 sm:hidden">
+            <button
+              onClick={handleCopy}
+              className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text"
+            >
+              {copiedFlyIn === flyInKey ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+
+          {/* Player list */}
+          <div className="mt-3 border-t border-border/30 pt-3">
+            <p className="text-xs text-text-dim">
+              <span className="font-medium text-text">{visit.playerNames.length} players:</span>{' '}
+              {visit.playerNames.map((name) => {
+                const p = playerMap.get(name)
+                return p ? `${name} (T${p.tier})` : name
+              }).join(', ')}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
