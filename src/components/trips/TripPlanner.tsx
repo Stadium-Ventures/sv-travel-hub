@@ -960,27 +960,57 @@ export default function TripPlanner() {
           {tripPlan.priorityResults && tripPlan.priorityResults.length > 0 && (
             <div className="rounded-xl border border-accent-blue/30 bg-accent-blue/5 p-4">
               <h3 className="mb-2 text-sm font-semibold text-accent-blue">Priority Player Results</h3>
-              <div className="space-y-1.5">
-                {tripPlan.priorityResults.map((r) => (
-                  <div key={r.playerName} className="flex items-center gap-2 text-sm">
-                    <span className={`h-2 w-2 rounded-full ${
-                      r.status === 'included' ? 'bg-accent-green' :
-                      r.status === 'separate-trip' ? 'bg-accent-orange' :
-                      r.status === 'fly-in-only' ? 'bg-accent-blue' :
-                      'bg-accent-red'
-                    }`} />
-                    <span className="font-medium text-text">{r.playerName}</span>
-                    <span className="text-xs text-text-dim">
-                      {r.status === 'included' && 'Included in Trip #1'}
-                      {r.status === 'separate-trip' && 'Separate trip created'}
-                      {r.status === 'fly-in-only' && 'Fly-in only'}
-                      {r.status === 'unreachable' && 'Could not be reached'}
-                    </span>
-                    {r.reason && (
-                      <span className="text-[11px] text-accent-orange">— {r.reason}</span>
-                    )}
-                  </div>
-                ))}
+              <div className="space-y-3">
+                {tripPlan.priorityResults.map((r) => {
+                  // Find best fly-in visit for fly-in-only priority players
+                  const bestFlyIn = r.status === 'fly-in-only'
+                    ? tripPlan.flyInVisits.find((v) => v.playerNames.includes(r.playerName))
+                    : null
+                  return (
+                    <div key={r.playerName}>
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className={`h-2 w-2 rounded-full ${
+                          r.status === 'included' ? 'bg-accent-green' :
+                          r.status === 'separate-trip' ? 'bg-accent-orange' :
+                          r.status === 'fly-in-only' ? 'bg-accent-blue' :
+                          'bg-accent-red'
+                        }`} />
+                        <span className="font-medium text-text">{r.playerName}</span>
+                        <span className="text-xs text-text-dim">
+                          {r.status === 'included' && 'Included in Trip #1'}
+                          {r.status === 'separate-trip' && 'Separate trip created'}
+                          {r.status === 'fly-in-only' && 'Fly-in required'}
+                          {r.status === 'unreachable' && 'Could not be reached'}
+                        </span>
+                        {r.status === 'unreachable' && r.reason && (
+                          <span className="text-[11px] text-accent-orange">— {r.reason}</span>
+                        )}
+                      </div>
+                      {bestFlyIn && (
+                        <div className="ml-4 mt-1.5 rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-2">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="font-medium text-accent-blue">Best fly-in:</span>
+                            <span className="text-text">{bestFlyIn.venue.name}</span>
+                            <span className="text-text-dim">~{bestFlyIn.estimatedTravelHours}h travel</span>
+                            <span className="text-text-dim">{bestFlyIn.distanceKm} mi</span>
+                          </div>
+                          <div className="mt-1 text-[11px] text-text-dim">
+                            {bestFlyIn.dates.slice(0, 5).map((d) => {
+                              const dt = new Date(d + 'T12:00:00Z')
+                              return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()]} ${dt.getUTCDate()}`
+                            }).join(', ')}
+                            {bestFlyIn.dates.length > 5 && ` +${bestFlyIn.dates.length - 5} more`}
+                          </div>
+                          {bestFlyIn.sourceUrl && (
+                            <a href={bestFlyIn.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[11px] text-accent-blue hover:underline">
+                              Verify schedule ↗
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1341,7 +1371,13 @@ export default function TripPlanner() {
                 These players have games outside driving radius. Estimated travel includes flight + airport + rental car.
               </p>
               <div className="space-y-2">
-                {tripPlan.flyInVisits.map((visit, i) => {
+                {[...tripPlan.flyInVisits].sort((a, b) => {
+                  // Priority players' fly-in visits sort to the top
+                  const aHasPriority = a.playerNames.some((n) => priorityPlayers.includes(n)) ? 1 : 0
+                  const bHasPriority = b.playerNames.some((n) => priorityPlayers.includes(n)) ? 1 : 0
+                  if (aHasPriority !== bHasPriority) return bHasPriority - aHasPriority
+                  return b.visitValue - a.visitValue
+                }).map((visit, i) => {
                   // Derive org label for fly-in
                   const firstPlayer = players.find((p) => visit.playerNames.includes(p.playerName))
                   let orgLabel = ''
