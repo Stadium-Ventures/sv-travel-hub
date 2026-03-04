@@ -1609,7 +1609,7 @@ function FlyInCard({
   const dateRangeLabel = firstDate && lastDate && firstDate !== lastDate
     ? `${formatDate(firstDate)}–${formatDate(lastDate)}`
     : firstDate ? formatDate(firstDate) : ''
-  let summary = `Fly to ${visit.venue.name} to see ${visit.playerNames.length} player${visit.playerNames.length !== 1 ? 's' : ''} — ${visit.isHome ? 'home game' : `the ${orgLabel || 'team'} ha${visit.playerNames.length !== 1 ? 've' : 's'} an away series there`}. ~${visit.estimatedTravelHours}h travel (${milesDisplay} mi). ${visit.dates.length} date${visit.dates.length !== 1 ? 's' : ''} available${dateRangeLabel ? ` ${dateRangeLabel}` : ''}.`
+  let summary = `Fly to ${visit.venue.name} to see ${visit.playerNames.length} player${visit.playerNames.length !== 1 ? 's' : ''} — ${visit.isHome ? 'home game' : `the ${orgLabel || 'team'} ha${visit.playerNames.length !== 1 ? 've' : 's'} an away series there`}. ~${visit.estimatedTravelHours}h travel (${milesDisplay} mi). ${visit.dates.length} date${visit.dates.length !== 1 ? 's' : ''} available${dateRangeLabel ? ` ${dateRangeLabel}` : ''}. Rental car likely needed.`
   if (t1Names.length > 0) summary += ` Top priority: ${t1Names.join(', ')}.`
   if (t2Names.length > 0) summary += ` Also seeing: ${t2Names.join(', ')}.`
 
@@ -1777,7 +1777,7 @@ function FlyInCard({
               </p>
             )}
             <p className="mt-1 text-text-dim/60">
-              Includes flight + 1h airport overhead + ground transport
+              Includes flight + 1h airport overhead + ground transport · rental car likely needed
             </p>
           </div>
 
