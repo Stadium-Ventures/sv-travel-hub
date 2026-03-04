@@ -3,7 +3,9 @@ import { useVenueStore } from '../../store/venueStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useTripStore } from '../../store/tripStore'
-import { HOME_BASE } from '../../lib/tripEngine'
+import { HOME_BASE, haversineKm, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../../lib/tripEngine'
+import type { GameEvent } from '../../types/schedule'
+import type { Coordinates } from '../../types/roster'
 import { resolveMLBTeamId, resolveNcaaName } from '../../data/aliases'
 import { resolveMaxPrepsSlug } from '../../lib/maxpreps'
 import { isSpringTraining } from '../../data/springTraining'
@@ -149,7 +151,7 @@ function buildPopupHtml(
       html += `</div>`
       // Action buttons row
       html += `<div style="display:flex;gap:4px;margin-left:14px;margin-bottom:6px">`
-      html += `<button data-action="priority" data-player="${p.name}" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;font-size:10px;padding:2px 6px;border-radius:4px;cursor:pointer">${isPriority ? '&#9733; Priority' : 'Set Priority'}</button>`
+      html += `<button data-action="priority" data-player="${p.name}" title="Priority players are visited first when generating trips (max 2)" style="background:#1e293b;border:1px solid #334155;color:${isPriority ? '#fbbf24' : '#94a3b8'};font-size:10px;padding:2px 6px;border-radius:4px;cursor:pointer">${isPriority ? '&#9733; Priority' : 'Set Priority'}</button>`
       html += `<button data-action="schedule" data-player="${p.name}" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;font-size:10px;padding:2px 6px;border-radius:4px;cursor:pointer">Schedule</button>`
       html += `<button data-action="visited" data-player="${p.name}" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;font-size:10px;padding:2px 6px;border-radius:4px;cursor:pointer">Visited</button>`
       html += `</div>`
@@ -232,10 +234,24 @@ export default function MapView() {
   // B4: Schedule panel state
   const [schedulePanelPlayer, setSchedulePanelPlayer] = useState<string | null>(null)
 
+  // Toast state
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Explore mode state
+  const [exploreMode, setExploreMode] = useState(false)
+  const [explorePin, setExplorePin] = useState<{ lat: number; lng: number } | null>(null)
+  const [exploreDate, setExploreDate] = useState(new Date().toISOString().slice(0, 10))
+  const [exploreRadius, setExploreRadius] = useState(3)
+  const explorePinMarker = useRef<import('leaflet').Marker | null>(null)
+  const exploreCircle = useRef<import('leaflet').Circle | null>(null)
+
   const venues = useVenueStore((s) => s.venues)
   const hsGeocodingProgress = useVenueStore((s) => s.hsGeocodingProgress)
   const hsGeocodingError = useVenueStore((s) => s.hsGeocodingError)
   const proGames = useScheduleStore((s) => s.proGames)
+  const ncaaGames = useScheduleStore((s) => s.ncaaGames)
+  const hsGames = useScheduleStore((s) => s.hsGames)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
   const hsFetchedAt = useScheduleStore((s) => s.hsFetchedAt)
@@ -371,6 +387,39 @@ export default function MapView() {
     return () => window.removeEventListener('map:open-schedule', handleScheduleEvent)
   }, [])
 
+  // Toast event listener
+  useEffect(() => {
+    function handleToast(e: Event) {
+      const detail = (e as CustomEvent<{ message: string }>).detail
+      if (!detail?.message) return
+      setToastMessage(detail.message)
+      if (toastTimer.current) clearTimeout(toastTimer.current)
+      toastTimer.current = setTimeout(() => setToastMessage(null), 3000)
+    }
+    window.addEventListener('map:toast', handleToast)
+    return () => {
+      window.removeEventListener('map:toast', handleToast)
+      if (toastTimer.current) clearTimeout(toastTimer.current)
+    }
+  }, [])
+
+  // Explore pin event listener
+  useEffect(() => {
+    function handleExplorePin(e: Event) {
+      const detail = (e as CustomEvent<{ lat: number; lng: number }>).detail
+      if (detail) setExplorePin({ lat: detail.lat, lng: detail.lng })
+    }
+    window.addEventListener('map:explore-pin', handleExplorePin)
+    return () => window.removeEventListener('map:explore-pin', handleExplorePin)
+  }, [])
+
+  // Sync exploreMode to data attribute for map click handler
+  useEffect(() => {
+    if (mapRef.current) {
+      mapRef.current.dataset.exploreMode = exploreMode ? 'true' : 'false'
+    }
+  }, [exploreMode])
+
   // Initialize Leaflet
   const mapInitialized = useRef(false)
   useEffect(() => {
@@ -420,13 +469,21 @@ export default function MapView() {
           if (action === 'priority') {
             const store = useTripStore.getState()
             const current = store.priorityPlayers
-            if (current.includes(playerName)) {
+            const removing = current.includes(playerName)
+            if (removing) {
               store.setPriorityPlayers(current.filter((n) => n !== playerName))
             } else {
               store.setPriorityPlayers([...current.slice(0, 1), playerName])
             }
+            map.closePopup()
+            window.dispatchEvent(new CustomEvent('map:toast', {
+              detail: { message: removing
+                ? `${playerName} removed from priority`
+                : `${playerName} set as priority — trip planner will optimize around them` },
+            }))
           } else if (action === 'schedule') {
             window.dispatchEvent(new CustomEvent('map:open-schedule', { detail: { player: playerName } }))
+            map.closePopup()
           } else if (action === 'visited') {
             const rosterStore = useRosterStore.getState()
             const player = rosterStore.players.find((p) => p.playerName === playerName)
@@ -436,6 +493,14 @@ export default function MapView() {
             }
           }
         })
+      })
+
+      // Explore mode: click-to-pin handler
+      map.on('click', (e: import('leaflet').LeafletMouseEvent) => {
+        if (mapRef.current?.dataset.exploreMode !== 'true') return
+        window.dispatchEvent(new CustomEvent('map:explore-pin', {
+          detail: { lat: e.latlng.lat, lng: e.latlng.lng },
+        }))
       })
 
       mapInstance.current = map
@@ -471,6 +536,124 @@ export default function MapView() {
     return keys
   }, [venuePlayerMap, players])
 
+  // Explore: gather all games (real + synthetic) for the explore date
+  const allExploreGames = useMemo(() => {
+    if (!exploreMode) return [] as GameEvent[]
+    const date = exploreDate
+
+    const realGames: GameEvent[] = []
+    for (const g of proGames) { if (g.date === date) realGames.push(g) }
+    for (const g of ncaaGames) { if (g.date === date) realGames.push(g) }
+    for (const g of hsGames) { if (g.date === date) realGames.push(g) }
+
+    const playersWithGames = new Set<string>()
+    for (const g of realGames) {
+      for (const name of g.playerNames) playersWithGames.add(name)
+    }
+
+    // Synthetic ST events for pro players
+    const stEvents = generateSpringTrainingEvents(players.filter(p => p.level === 'Pro'), date, date)
+
+    // Synthetic NCAA events for players without real games
+    const ncaaSynthetic = generateNcaaEvents(
+      players.filter(p => p.level === 'NCAA' && !playersWithGames.has(p.playerName)), date, date,
+    )
+
+    // Synthetic HS events for players without real games
+    const hsVenueMap = new Map<string, { name: string; coords: Coordinates }>()
+    for (const [key, v] of Object.entries(venues)) {
+      if (!key.startsWith('hs-')) continue
+      hsVenueMap.set(key.slice(3), { name: v.name, coords: v.coords })
+    }
+    const hsSynthetic = generateHsEvents(
+      players.filter(p => p.level === 'HS' && !playersWithGames.has(p.playerName)), date, date, hsVenueMap,
+    )
+
+    return [...realGames, ...stEvents, ...ncaaSynthetic, ...hsSynthetic]
+  }, [exploreMode, exploreDate, proGames, ncaaGames, hsGames, players, venues])
+
+  // Explore: filter games within radius of pin
+  const exploreResults = useMemo(() => {
+    if (!exploreMode || !explorePin) return []
+
+    const radiusKm = exploreRadius * 90 / 1.3
+    const pinCoords: Coordinates = { lat: explorePin.lat, lng: explorePin.lng }
+
+    const nearby: Array<{ game: GameEvent; distKm: number }> = []
+    for (const game of allExploreGames) {
+      if (game.date !== exploreDate) continue
+      const dist = haversineKm(pinCoords, game.venue.coords)
+      if (dist <= radiusKm) nearby.push({ game, distKm: dist })
+    }
+
+    // Group by venue (dedup by coordinate key)
+    const venueGroups = new Map<string, {
+      venueName: string; coords: Coordinates; distKm: number
+      players: Array<{ name: string; tier: number }>; bestTier: number
+    }>()
+
+    for (const { game, distKm } of nearby) {
+      const coordKey = `${game.venue.coords.lat.toFixed(3)},${game.venue.coords.lng.toFixed(3)}`
+      const existing = venueGroups.get(coordKey)
+      if (existing) {
+        for (const name of game.playerNames) {
+          if (!existing.players.some(p => p.name === name)) {
+            const player = players.find(p => p.playerName === name)
+            const tier = player?.tier ?? 4
+            existing.players.push({ name, tier })
+            if (tier < existing.bestTier) existing.bestTier = tier
+          }
+        }
+      } else {
+        const entries = game.playerNames.map(name => {
+          const player = players.find(p => p.playerName === name)
+          return { name, tier: player?.tier ?? 4 }
+        })
+        venueGroups.set(coordKey, {
+          venueName: game.venue.name, coords: game.venue.coords, distKm,
+          players: entries, bestTier: Math.min(...entries.map(p => p.tier)),
+        })
+      }
+    }
+
+    return Array.from(venueGroups.values()).sort((a, b) => {
+      if (a.bestTier !== b.bestTier) return a.bestTier - b.bestTier
+      return a.distKm - b.distKm
+    })
+  }, [exploreMode, explorePin, exploreDate, exploreRadius, allExploreGames, players])
+
+  // Explore: manage pin marker + radius circle
+  useEffect(() => {
+    const L = leafletRef.current
+    const map = mapInstance.current
+    if (!L || !map) return
+
+    // Clean up previous explore layers
+    if (explorePinMarker.current) { map.removeLayer(explorePinMarker.current); explorePinMarker.current = null }
+    if (exploreCircle.current) { map.removeLayer(exploreCircle.current); exploreCircle.current = null }
+
+    if (!exploreMode || !explorePin) return
+
+    const pinIcon = L.divIcon({
+      html: '<div style="font-size:24px;text-align:center;line-height:1">&#x1F4CD;</div>',
+      className: '',
+      iconSize: [24, 24],
+      iconAnchor: [12, 24],
+    })
+    explorePinMarker.current = L.marker([explorePin.lat, explorePin.lng], { icon: pinIcon }).addTo(map)
+
+    const radiusKm = exploreRadius * 90 / 1.3
+    exploreCircle.current = L.circle([explorePin.lat, explorePin.lng], {
+      radius: radiusKm * 1000,
+      color: '#3b82f6',
+      weight: 2,
+      dashArray: '8 4',
+      fillOpacity: 0.05,
+    }).addTo(map)
+
+    map.fitBounds(exploreCircle.current.getBounds(), { padding: [30, 30] })
+  }, [exploreMode, explorePin, exploreRadius])
+
   // Update markers when data/filters change
   useEffect(() => {
     const L = leafletRef.current
@@ -478,8 +661,9 @@ export default function MapView() {
 
     const map = mapInstance.current
 
-    // Clear existing markers
+    // Clear existing markers (skip explore layers)
     map.eachLayer((layer) => {
+      if (layer === explorePinMarker.current || layer === exploreCircle.current) return
       if (layer instanceof L.Marker || layer instanceof L.Polyline || layer instanceof L.Circle) {
         map.removeLayer(layer)
       }
@@ -642,6 +826,19 @@ export default function MapView() {
         {tripPlan && tripPlan.trips.length > 0 && (
           <Toggle label="Trip Routes" color="bg-accent-purple" checked={showTrips} onChange={setShowTrips} />
         )}
+        <button
+          onClick={() => {
+            setExploreMode(!exploreMode)
+            if (exploreMode) setExplorePin(null)
+          }}
+          className={`ml-auto rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
+            exploreMode
+              ? 'bg-accent-blue text-white'
+              : 'bg-gray-800 text-text-dim hover:text-text'
+          }`}
+        >
+          {exploreMode ? 'Exit Explore' : 'Who Can I See?'}
+        </button>
       </div>
 
       {/* Map legend — collapsible */}
@@ -882,8 +1079,13 @@ export default function MapView() {
       )}
 
       {/* Map container */}
-      <div className="overflow-hidden rounded-xl border border-border">
-        <div ref={mapRef} className="h-[600px] w-full bg-gray-900" />
+      <div className="relative overflow-hidden rounded-xl border border-border">
+        <div ref={mapRef} className={`h-[600px] w-full bg-gray-900 ${exploreMode ? 'cursor-crosshair' : ''}`} />
+        {toastMessage && (
+          <div className="absolute top-4 left-1/2 z-[1000] -translate-x-1/2 rounded-lg border border-border bg-gray-900/95 px-4 py-2 text-sm text-text shadow-lg">
+            {toastMessage}
+          </div>
+        )}
       </div>
 
       {/* Geocoding progress */}
@@ -903,6 +1105,82 @@ export default function MapView() {
             : `${total} venues with your players — click any dot to see who's there`
         })()}
       </p>
+
+      {/* Explore panel */}
+      {exploreMode && (
+        <div className="rounded-xl border border-accent-blue/30 bg-surface p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-accent-blue">Who Can I See?</span>
+            {explorePin && (
+              <button
+                onClick={() => setExplorePin(null)}
+                className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
+              >
+                Clear Pin
+              </button>
+            )}
+          </div>
+          {!explorePin ? (
+            <p className="text-sm text-text-dim">Click anywhere on the map to drop a pin and see which players you can visit nearby.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="text-xs text-text-dim">
+                  Date:
+                  <input
+                    type="date"
+                    value={exploreDate}
+                    onChange={(e) => setExploreDate(e.target.value)}
+                    className="ml-2 rounded-lg border border-border bg-gray-950 px-2 py-1 text-xs text-text"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs text-text-dim">
+                  Radius: {exploreRadius}h drive
+                  <input
+                    type="range"
+                    min={1}
+                    max={5}
+                    step={0.5}
+                    value={exploreRadius}
+                    onChange={(e) => setExploreRadius(parseFloat(e.target.value))}
+                    className="w-24"
+                  />
+                </label>
+              </div>
+              {exploreResults.length === 0 ? (
+                <p className="text-xs text-text-dim">No players found within {exploreRadius}h of this location on {exploreDate}.</p>
+              ) : (
+                <>
+                  <p className="text-[11px] text-text-dim">{exploreResults.length} venue{exploreResults.length !== 1 ? 's' : ''} with players in range</p>
+                  <div className="max-h-[300px] space-y-2 overflow-y-auto">
+                    {exploreResults.map((venue, i) => {
+                      const tierColors: Record<number, string> = { 1: '#ef4444', 2: '#f97316', 3: '#eab308', 4: '#6b7280' }
+                      return (
+                        <div key={i} className="rounded-lg border border-border/50 bg-gray-900/50 p-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-text">{venue.venueName}</span>
+                            <span className="text-[10px] text-text-dim">
+                              {venue.distKm < 10 ? venue.distKm.toFixed(1) : Math.round(venue.distKm)} km · ~{(venue.distKm * 1.3 / 90).toFixed(1)}h drive
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {[...venue.players].sort((a, b) => a.tier - b.tier).map((p) => (
+                              <span key={p.name} className="inline-flex items-center gap-1 rounded bg-gray-800 px-1.5 py-0.5 text-[11px] text-text-dim">
+                                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: tierColors[p.tier] ?? '#6b7280' }} />
+                                {p.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* B4: Schedule panel from popup */}
       {schedulePanelPlayer && (
