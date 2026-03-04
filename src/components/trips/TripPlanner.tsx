@@ -551,7 +551,7 @@ export default function TripPlanner() {
                       disabled={ncaaLoading}
                       className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
                     >
-                      {ncaaLoading ? 'Loading...' : `Load College T1&T2 (~${ncaaT1T2SchoolCount * 3}s)`}
+                      {ncaaLoading ? 'Loading...' : `Load College T1&T2 (~${ncaaT1T2SchoolCount * 5}s)`}
                     </button>
                   )}
                   <button
@@ -559,7 +559,7 @@ export default function TripPlanner() {
                     disabled={ncaaLoading}
                     className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
                   >
-                    {ncaaLoading ? 'Loading...' : `${!ncaaFetchedAt ? '' : 'Re'}load All College (~${ncaaAllSchoolCount * 3}s)`}
+                    {ncaaLoading ? 'Loading...' : `${!ncaaFetchedAt ? '' : 'Re'}load All College (~${ncaaAllSchoolCount * 5}s)`}
                   </button>
                 </>
               )}
@@ -577,7 +577,7 @@ export default function TripPlanner() {
                     >
                       {hsGeocodingProgress
                         ? `Geocoding... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
-                        : `1. Geocode ${hsPlayersCount} HS Schools`}
+                        : `1. Geocode ${hsPlayersCount} HS Schools (~${hsPlayersCount * 2}s)`}
                     </button>
                   )}
                   {hsT1T2SchoolCount > 0 && hsT1T2SchoolCount < hsAllSchoolCount && (
@@ -586,7 +586,7 @@ export default function TripPlanner() {
                       disabled={hsLoading}
                       className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
                     >
-                      {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}Load HS T1&T2 (~${hsT1T2SchoolCount * 3}s)`}
+                      {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}Load HS T1&T2 (~${hsT1T2SchoolCount * 5}s)`}
                     </button>
                   )}
                   {hsAllSchoolCount > 0 && (
@@ -595,7 +595,7 @@ export default function TripPlanner() {
                       disabled={hsLoading}
                       className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
                     >
-                      {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}${!hsFetchedAt ? '' : 'Re'}load All HS (~${hsAllSchoolCount * 3}s)`}
+                      {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}${!hsFetchedAt ? '' : 'Re'}load All HS (~${hsAllSchoolCount * 5}s)`}
                     </button>
                   )}
                   {hsGeocodingFailedSchools.length > 0 && (
@@ -616,12 +616,12 @@ export default function TripPlanner() {
                 )}
                 {ncaaProgress && (
                   <div className="text-[10px] text-text-dim">
-                    College: {ncaaProgress.completed}/{ncaaProgress.total} schools (~{Math.max(0, (ncaaProgress.total - ncaaProgress.completed) * 3)}s remaining)
+                    College: {ncaaProgress.completed}/{ncaaProgress.total} schools (~{Math.max(0, (ncaaProgress.total - ncaaProgress.completed) * 5)}s remaining)
                   </div>
                 )}
                 {hsProgress && (
                   <div className="text-[10px] text-text-dim">
-                    HS: {hsProgress.completed}/{hsProgress.total} schools (~{Math.max(0, (hsProgress.total - hsProgress.completed) * 3)}s remaining)
+                    HS: {hsProgress.completed}/{hsProgress.total} schools (~{Math.max(0, (hsProgress.total - hsProgress.completed) * 5)}s remaining)
                   </div>
                 )}
               </div>
@@ -647,7 +647,7 @@ export default function TripPlanner() {
               >
                 {hsGeocodingProgress
                   ? `Geocoding... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
-                  : `Geocode ${hsPlayersCount} HS Schools`}
+                  : `Geocode ${hsPlayersCount} HS Schools (~${hsPlayersCount * 2}s)`}
               </button>
             </div>
           </div>
