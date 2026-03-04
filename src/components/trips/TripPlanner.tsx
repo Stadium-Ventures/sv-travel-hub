@@ -513,7 +513,9 @@ export default function TripPlanner() {
               {proStale && 'Pro game data is more than 24 hours old. '}
               {!ncaaFetchedAt && hasNcaaPlayers && 'College game schedules haven\'t been loaded yet (using Tue/Fri/Sat estimates). '}
               {ncaaStale && 'College game data is more than 24 hours old. '}
-              {!hsFetchedAt && hasHsPlayers && 'HS schedules haven\'t been loaded yet (using Tue/Thu estimates). '}
+              {!hsFetchedAt && hasHsPlayers && (hsVenueMissing
+                ? 'HS schools need geocoding + schedule loading. '
+                : 'HS schedules haven\'t been loaded yet (using Tue/Thu estimates). ')}
               {hsStale && 'HS game data is more than 24 hours old. '}
               Load schedules below to enable trip generation.
             </p>
@@ -563,13 +565,28 @@ export default function TripPlanner() {
               )}
               {hasHsPlayers && (!hsFetchedAt || hsStale) && (
                 <>
+                  {hsVenueMissing && (
+                    <button
+                      onClick={() => {
+                        const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+                        const schools = hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
+                        geocodeHsVenues(schools)
+                      }}
+                      disabled={!!hsGeocodingProgress}
+                      className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
+                    >
+                      {hsGeocodingProgress
+                        ? `Geocoding... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
+                        : `1. Geocode ${hsPlayersCount} HS Schools`}
+                    </button>
+                  )}
                   {hsT1T2SchoolCount > 0 && hsT1T2SchoolCount < hsAllSchoolCount && (
                     <button
                       onClick={() => fetchHsSchedules(hsT1T2PlayerOrgs, { merge: true })}
                       disabled={hsLoading}
                       className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
                     >
-                      {hsLoading ? 'Loading...' : `Load HS T1&T2 (~${hsT1T2SchoolCount * 3}s)`}
+                      {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}Load HS T1&T2 (~${hsT1T2SchoolCount * 3}s)`}
                     </button>
                   )}
                   {hsAllSchoolCount > 0 && (
@@ -578,8 +595,13 @@ export default function TripPlanner() {
                       disabled={hsLoading}
                       className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
                     >
-                      {hsLoading ? 'Loading...' : `${!hsFetchedAt ? '' : 'Re'}load All HS (~${hsAllSchoolCount * 3}s)`}
+                      {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}${!hsFetchedAt ? '' : 'Re'}load All HS (~${hsAllSchoolCount * 3}s)`}
                     </button>
+                  )}
+                  {hsGeocodingFailedSchools.length > 0 && (
+                    <span className="text-[10px] text-accent-red">
+                      {hsGeocodingFailedSchools.length} geocode failed
+                    </span>
                   )}
                 </>
               )}
@@ -607,13 +629,13 @@ export default function TripPlanner() {
           </div>
         )}
 
-        {hsVenueMissing && (
+        {hsVenueMissing && !showFreshnessWarning && (
           <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
             <p className="text-[11px] text-accent-orange">
               {hsPlayersCount} high school player{hsPlayersCount !== 1 ? 's' : ''} found but their school locations haven't been mapped yet.
               Without locations, HS players won't appear in trip results.
             </p>
-            <div className="mt-1.5 flex items-center gap-2">
+            <div className="mt-1.5">
               <button
                 onClick={() => {
                   const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
@@ -627,11 +649,6 @@ export default function TripPlanner() {
                   ? `Geocoding... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
                   : `Geocode ${hsPlayersCount} HS Schools`}
               </button>
-              {hsGeocodingFailedSchools.length > 0 && (
-                <span className="text-[10px] text-accent-red">
-                  {hsGeocodingFailedSchools.length} failed
-                </span>
-              )}
             </div>
           </div>
         )}
