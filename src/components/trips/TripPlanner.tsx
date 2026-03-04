@@ -1099,15 +1099,60 @@ export default function TripPlanner() {
             )
           })()}
 
-          {/* Analysis summary */}
-          <div className="rounded-lg bg-gray-950/40 px-3 py-2 text-[11px] text-text-dim">
-            Analyzed {tripPlan.analyzedEventCount} game events for {players.filter((p) => p.visitsRemaining > 0).length} players in the selected date range.
-            {tripPlan.skippedPlayers.length > 0 && (
-              <span className="ml-1">
-                {tripPlan.skippedPlayers.length} player{tripPlan.skippedPlayers.length !== 1 ? 's' : ''} skipped: {tripPlan.skippedPlayers.map((p) => `${p.name} (${p.reason})`).join(', ')}.
-              </span>
-            )}
-          </div>
+          {/* At-a-glance summary */}
+          {(() => {
+            const totalEligible = players.filter((p) => p.visitsRemaining > 0).length
+            const allNames = [...new Set([
+              ...tripPlan.trips.flatMap((t) => [...t.anchorGame.playerNames, ...t.nearbyGames.flatMap((g) => g.playerNames)]),
+              ...tripPlan.flyInVisits.flatMap((v) => v.playerNames),
+            ])]
+            const t1Reachable = allNames.filter((n) => playerMap.get(n)?.tier === 1)
+            const unreachableCount = tripPlan.unvisitablePlayers.length
+
+            // Build human-readable sentences
+            const parts: string[] = []
+            parts.push(`You can see ${allNames.length} of your ${totalEligible} players this window`)
+
+            if (t1Reachable.length > 0) {
+              const t1Details: string[] = []
+              for (const name of t1Reachable) {
+                // Find which trip this T1 is in
+                const roadIdx = tripPlan.trips.findIndex((t) =>
+                  t.anchorGame.playerNames.includes(name) || t.nearbyGames.some((g) => g.playerNames.includes(name))
+                )
+                const flyIdx = tripPlan.flyInVisits.findIndex((v) => v.playerNames.includes(name))
+                if (roadIdx >= 0) {
+                  t1Details.push(`${name} is in Trip #${roadIdx + 1}`)
+                } else if (flyIdx >= 0) {
+                  t1Details.push(`${name} requires a fly-in`)
+                } else {
+                  t1Details.push(name)
+                }
+              }
+              parts.push(`${t1Reachable.length > 1 ? 'Must-see players' : 'Must-see player'} reachable — ${t1Details.join(', ')}`)
+            }
+
+            if (unreachableCount > 0) {
+              parts.push(`${unreachableCount} player${unreachableCount !== 1 ? 's' : ''} can't be reached`)
+            }
+
+            return (
+              <div className="rounded-lg bg-gray-950/40 px-3 py-2">
+                <p className="text-sm text-text-dim">{parts.join('. ')}.</p>
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-[10px] text-text-dim/50 hover:text-text-dim/70">Technical details</summary>
+                  <p className="mt-1 text-[11px] text-text-dim/60">
+                    Analyzed {tripPlan.analyzedEventCount} game events for {players.filter((p) => p.visitsRemaining > 0).length} players in the selected date range.
+                    {tripPlan.skippedPlayers.length > 0 && (
+                      <span className="ml-1">
+                        {tripPlan.skippedPlayers.length} player{tripPlan.skippedPlayers.length !== 1 ? 's' : ''} skipped: {tripPlan.skippedPlayers.map((p) => `${p.name} (${p.reason})`).join(', ')}.
+                      </span>
+                    )}
+                  </p>
+                </details>
+              </div>
+            )
+          })()}
 
           {/* Fly-in visits — shown before road trips when priority player is fly-in-only */}
           {priorityIsFlyIn && flyInSection}
@@ -1613,6 +1658,18 @@ function FlyInCard({
   if (t1Names.length > 0) summary += ` Top priority: ${t1Names.join(', ')}.`
   if (t2Names.length > 0) summary += ` Also seeing: ${t2Names.join(', ')}.`
 
+  // Build "why this trip" explanation
+  let flyInWhy = ''
+  if (t1Names.length > 1) {
+    flyInWhy = `Worth the flight — sees ${t1Names.length} must-see players at one venue.`
+  } else if (t1Names.length === 1 && isPriority) {
+    flyInWhy = `Only way to reach ${t1Names[0]} this window.`
+  } else if (t1Names.length === 1) {
+    flyInWhy = `Worth the flight — sees ${t1Names[0]} (must-see) at one venue.`
+  } else if (visit.playerNames.length >= 3) {
+    flyInWhy = `Worth the flight — sees ${visit.playerNames.length} players at one venue.`
+  }
+
   const breakdown = visit.scoreBreakdown
 
   // Copy handler
@@ -1712,11 +1769,11 @@ function FlyInCard({
           </div>
           {(tierCounts.t1 > 0 || tierCounts.t2 > 0 || tierCounts.t3 > 0) && (
             <div className="flex items-center gap-1 rounded-lg bg-gray-950/60 px-2 py-1 text-[11px] font-medium">
-              {tierCounts.t1 > 0 && <span className="text-accent-red">{tierCounts.t1}×T1</span>}
+              {tierCounts.t1 > 0 && <span className="text-accent-red">{tierCounts.t1}× {TIER_LABELS[1]}</span>}
               {tierCounts.t1 > 0 && (tierCounts.t2 > 0 || tierCounts.t3 > 0) && <span className="text-text-dim/30">·</span>}
-              {tierCounts.t2 > 0 && <span className="text-accent-orange">{tierCounts.t2}×T2</span>}
+              {tierCounts.t2 > 0 && <span className="text-accent-orange">{tierCounts.t2}× {TIER_LABELS[2]}</span>}
               {tierCounts.t2 > 0 && tierCounts.t3 > 0 && <span className="text-text-dim/30">·</span>}
-              {tierCounts.t3 > 0 && <span className="text-yellow-400">{tierCounts.t3}×T3</span>}
+              {tierCounts.t3 > 0 && <span className="text-yellow-400">{tierCounts.t3}× {TIER_LABELS[3]}</span>}
             </div>
           )}
           <div className="rounded-lg bg-gray-950/60 px-2.5 py-1">
@@ -1732,7 +1789,10 @@ function FlyInCard({
       {expanded && (
         <div className="mt-4">
           {/* Summary */}
-          <p className="mb-3 text-sm text-text-dim">{summary}</p>
+          <p className="mb-1 text-sm text-text-dim">{summary}</p>
+          {flyInWhy && (
+            <p className="mb-3 text-sm italic text-text-dim/70">{flyInWhy}</p>
+          )}
 
           {/* Score breakdown toggle */}
           {breakdown && (

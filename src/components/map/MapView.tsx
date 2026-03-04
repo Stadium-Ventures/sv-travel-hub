@@ -7,7 +7,7 @@ import { HOME_BASE } from '../../lib/tripEngine'
 import { resolveMLBTeamId, resolveNcaaName } from '../../data/aliases'
 import { resolveMaxPrepsSlug } from '../../lib/maxpreps'
 import { isSpringTraining } from '../../data/springTraining'
-import { formatTimeAgo } from '../../lib/formatters'
+import { formatTimeAgo, TIER_LABELS } from '../../lib/formatters'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 
 // Build a mapping from venue key → player names at that venue
@@ -145,7 +145,7 @@ function buildPopupHtml(
         html += `<span style="color:#fbbf24;font-size:10px;flex-shrink:0" title="Priority player">&#9733;</span>`
       }
       html += `<span style="flex:1;min-width:0">${p.name}</span>`
-      html += `<span style="color:#888;font-size:10px">T${p.tier}</span>`
+      html += `<span style="color:#888;font-size:10px">T${p.tier} · ${TIER_LABELS[p.tier] ?? ''}</span>`
       html += `</div>`
       // Action buttons row
       html += `<div style="display:flex;gap:4px;margin-left:14px;margin-bottom:6px">`
@@ -643,6 +643,39 @@ export default function MapView() {
           <Toggle label="Trip Routes" color="bg-accent-purple" checked={showTrips} onChange={setShowTrips} />
         )}
       </div>
+
+      {/* Map legend — collapsible */}
+      <details className="rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-text-dim hover:text-text">
+          Map Legend — what the markers mean
+        </summary>
+        <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-border/30 px-3 py-2.5 text-[11px] text-text-dim">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#60a5fa]" /> Blue = Pro venue
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#f472b6]" /> Pink = Spring Training
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#34d399]" /> Green = College
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#fb923c]" /> Orange = High School
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-3 w-3 rounded-full border-2 border-white/70" style={{ animation: 'sv-pulse-ring 2s ease-out infinite' }} /> Pulsing ring = priority player
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#60a5fa] text-[8px] font-bold text-white">3</span> Number badge = multiple players
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-500 opacity-40" /> Faded = all visits done
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="text-sm">&#9733;</span> Star = home base (Orlando)
+          </span>
+        </div>
+      </details>
 
       {/* B2: Date range filter */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface p-3">
