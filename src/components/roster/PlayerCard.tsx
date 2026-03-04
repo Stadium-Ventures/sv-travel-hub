@@ -37,7 +37,7 @@ export default function PlayerCard({ player, showHeartbeat }: { player: RosterPl
             {hbUrgency?.inPersonOverdue && (
               <span
                 className="flex h-4 w-4 items-center justify-center rounded-full bg-accent-red/20 text-[9px] text-accent-red"
-                title={`In-person visit overdue (T${player.tier} threshold: ${player.tier === 1 ? '60' : player.tier === 2 ? '120' : '180'} days)`}
+                title={`In-person visit overdue — Tier ${player.tier} should be visited every ${player.tier === 1 ? '60' : player.tier === 2 ? '120' : '180'} days`}
               >
                 !
               </span>
@@ -92,7 +92,7 @@ export default function PlayerCard({ player, showHeartbeat }: { player: RosterPl
               <div className="mt-4 border-t border-border/30 pt-3">
                 <h4 className="mb-2 text-xs font-semibold text-text-dim">Client Engagement (via Heartbeat)</h4>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm sm:grid-cols-4">
-                  <div title="Composite score: call frequency + text frequency + in-person visits + recency of contact. 60+ = healthy, 30-59 = needs work, <30 = at risk.">
+                  <div title="Overall relationship health (0–100). Combines how often you call, text, and visit, plus recency. 60+ = healthy, 30–59 = needs attention, under 30 = at risk.">
                     <span className="text-xs text-text-dim">Love Score: </span>
                     <span className={`font-semibold ${
                       hbData.loveScore >= 60 ? 'text-accent-green' :
@@ -101,12 +101,12 @@ export default function PlayerCard({ player, showHeartbeat }: { player: RosterPl
                     }`}>{hbData.loveScore}</span>
                     <span className="text-xs text-text-dim">/100</span>
                   </div>
-                  <div title="Red = no contact in 2x threshold. Yellow = overdue but not critical. Green = all contact current.">
+                  <div title="Red = significantly overdue for contact. Yellow = getting close to overdue. Green = contact is current.">
                     <span className="text-xs text-text-dim">Status: </span>
                     <StatusDot status={hbData.status} />
                   </div>
                   {hbData.daysSinceInPerson !== null && (
-                    <div title={`Overdue thresholds: T1 = 60 days, T2 = 120 days, T3 = 180 days.${hbUrgency?.inPersonOverdue ? ' This player is past their threshold.' : ''}`}>
+                    <div title={`How long since the last in-person visit. Tier 1 = every 60 days, Tier 2 = every 120, Tier 3 = every 180.${hbUrgency?.inPersonOverdue ? ' This player is past their threshold.' : ''}`}>
                       <span className="text-xs text-text-dim">Last In-Person: </span>
                       <span className={`text-text ${hbUrgency?.inPersonOverdue ? 'font-semibold text-accent-red' : ''}`}>
                         {hbData.daysSinceInPerson}d ago
@@ -136,7 +136,7 @@ export default function PlayerCard({ player, showHeartbeat }: { player: RosterPl
                   </div>
                 </div>
                 {hbUrgency && hbUrgency.visitUrgencyScore > 0 && (
-                  <p className="mt-2 text-[11px] text-text-dim" title="0-100 scale based on days overdue and tier. 50+ = high urgency (1.5x trip scoring boost), 25-49 = moderate (1.25x boost), <25 = low (no boost).">
+                  <p className="mt-2 text-[11px] text-text-dim" title="How urgently this player needs a visit (0–100). High urgency players get ranked higher in trip suggestions.">
                     Visit urgency score: <span className="font-semibold text-text">{hbUrgency.visitUrgencyScore}</span>
                     {hbUrgency.visitUrgencyScore >= 50 && (
                       <span className="ml-1 text-accent-red"> — high urgency, prioritize this visit</span>

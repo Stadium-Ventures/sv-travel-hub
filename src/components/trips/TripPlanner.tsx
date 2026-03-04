@@ -531,9 +531,21 @@ export default function TripPlanner() {
       {/* Controls */}
       <div className="rounded-xl border border-border bg-surface p-5">
         <h2 className="mb-3 text-base font-semibold text-text">Trip Planner</h2>
-        <p className="mb-4 text-xs text-text-dim">
-          Builds road trips from Orlando, grouping nearby players together. Trips are scored by how many high-priority players you'd visit. Tuesdays get a bonus because MiLB position players are most accessible. Starting pitchers get a boost when they're probable starters. Sundays are skipped since they're typically travel/rest days. Max 3-day trips.
+        <p className="mb-2 text-xs text-text-dim">
+          Builds road trips from Orlando, grouping nearby players together. Trips are ranked by how many high-priority players you'd visit.
         </p>
+        <details className="mb-4">
+          <summary className="cursor-pointer text-[11px] text-text-dim/60 hover:text-text-dim">How scoring works</summary>
+          <ul className="mt-1.5 ml-4 list-disc space-y-0.5 text-[11px] text-text-dim">
+            <li><strong>Must-see (Tier 1)</strong> = 5 pts per visit remaining</li>
+            <li><strong>High priority (Tier 2)</strong> = 3 pts per visit remaining</li>
+            <li><strong>Standard (Tier 3)</strong> = 1 pt per visit remaining</li>
+            <li><strong>Tuesday bonus</strong> — +20% because MiLB position players are most accessible on Tuesdays</li>
+            <li><strong>Pitcher start bonus</strong> — extra points when a starting pitcher you follow is scheduled to pitch</li>
+            <li><strong>Sundays skipped</strong> — typically travel/rest days</li>
+            <li><strong>Max 3-day trips</strong></li>
+          </ul>
+        </details>
 
         {/* Data freshness indicators */}
         <div className="mb-4 flex flex-wrap gap-2 text-[11px]">
@@ -688,7 +700,7 @@ export default function TripPlanner() {
                   )}
                   {hsGeocodingFailedSchools.length > 0 && (
                     <span className="text-[10px] text-accent-red">
-                      {hsGeocodingFailedSchools.length} geocode failed
+                      {hsGeocodingFailedSchools.length} school location(s) not found
                     </span>
                   )}
                 </>
@@ -771,7 +783,7 @@ export default function TripPlanner() {
         {/* Best week suggestions */}
         {bestWeeks.length > 0 ? (
           <div className="mb-4 rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-2">
-            <span className="text-xs font-medium text-accent-blue" title="Ranked by how many Tier 1 and Tier 2 players have games that week (full season, all levels)">Best weeks: </span>
+            <span className="text-xs font-medium text-accent-blue" title="Weeks with the most must-see and high priority players who have games">Best weeks: </span>
             {bestWeeks.map((w, i) => {
               const s = new Date(w.weekStart + 'T12:00:00Z')
               const e = new Date(w.weekEnd + 'T12:00:00Z')
@@ -893,7 +905,7 @@ export default function TripPlanner() {
               onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
               className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
             />
-            <p className="mt-0.5 text-[9px] text-text-dim/50" title="Drive times are rough estimates based on straight-line distance with a 30% detour factor at ~55 mph average. Actual times vary with traffic and route.">
+            <p className="mt-0.5 text-[9px] text-text-dim/50" title="Drive times are rough estimates — actual times depend on traffic and route">
               {maxDriveMinutes <= 150 ? 'Covers central FL' : maxDriveMinutes <= 210 ? 'Reaches Tampa, Jacksonville, Port St. Lucie' : maxDriveMinutes <= 270 ? 'Reaches Tallahassee, South FL' : 'Reaches most of FL + southern GA'}
               {' · estimates only'}
             </p>
@@ -911,7 +923,7 @@ export default function TripPlanner() {
               onChange={(e) => setMaxFlightHours(parseFloat(e.target.value))}
               className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
             />
-            <p className="mt-0.5 text-[9px] text-text-dim/50" title="Total travel time including airport overhead and flight. Filters fly-in visit options beyond this threshold.">
+            <p className="mt-0.5 text-[9px] text-text-dim/50" title="Total travel time including airport time and flight. Options beyond this limit won't be shown.">
               {maxFlightHours <= 4 ? 'Southeast US only' : maxFlightHours <= 6 ? 'Reaches Midwest, Northeast' : maxFlightHours <= 8 ? 'Most domestic destinations' : maxFlightHours <= 10 ? 'Coast-to-coast + Hawaii' : 'All domestic + nearby international'}
             </p>
           </div>
@@ -935,7 +947,7 @@ export default function TripPlanner() {
           )}
         </div>
         {heartbeatUrgencyActive && (
-          <p className="text-[10px] text-accent-blue" title="Players with high visit urgency from SV Heartbeat get a scoring boost so they appear in higher-ranked trips.">
+          <p className="text-[10px] text-accent-blue" title="Players overdue for visits (from Heartbeat data) get ranked higher in trip results">
             Heartbeat urgency data active — overdue clients get boosted in trip scoring
           </p>
         )}
@@ -1088,7 +1100,7 @@ export default function TripPlanner() {
                 <StatCard label="Players in Trips" value={allTripPlayerNames.length} accent="blue" scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
               </div>
               <StatCard label="Fly-in Visits" value={tripPlan.flyInVisits.length} scrollTo="section-fly-in" hoverNames={flyInPlayerNames} />
-              <div title={`Percentage of players with visits remaining (${totalEligible} total) that appear in at least one generated trip. Does not count players with zero visits remaining.`}>
+              <div title={`What percentage of players who still need visits appear in at least one trip`}>
                 <StatCard label="Players Reached" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
               </div>
               {beyondPlayers.length > 0 && (
@@ -1254,7 +1266,7 @@ export default function TripPlanner() {
               <div className="sticky top-0 z-10 -mx-5 mb-3 rounded-b-lg bg-surface px-5 pb-2 pt-2 border-b border-border/30">
               <div className="flex flex-wrap items-center gap-2">
                 {/* Sort */}
-                <span className="text-[11px] text-text-dim" title="Score = tier weight × visits remaining per player. T1=5pts, T2=3pts, T3=1pt. Tuesday anchor +20%. Pitcher match +50%.">Sort:</span>
+                <span className="text-[11px] text-text-dim" title="Score = Must-see 5pts, High priority 3pts, Standard 1pt per visit remaining. Tuesday +20%. Pitcher start bonus.">Sort:</span>
                 {([
                   { key: 'score', label: 'Score' },
                   { key: 'players', label: 'Players' },
@@ -1296,7 +1308,7 @@ export default function TripPlanner() {
                   className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
                     filterConfirmedOnly ? 'bg-accent-green/20 text-accent-green' : 'bg-gray-800/50 text-text-dim hover:text-text'
                   }`}
-                  title="Only show trips where the main stop has a confirmed game from an official schedule"
+                  title="Only show trips where the main game is confirmed (not estimated)"
                 >
                   Confirmed Main Stop
                 </button>

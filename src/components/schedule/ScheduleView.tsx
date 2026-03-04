@@ -315,7 +315,7 @@ export default function ScheduleView() {
                     Not found on any roster: {autoAssignResult.notFound.join(', ')}
                   </span>
                 )}
-                {autoAssignResult.assigned === 0 && autoAssignResult.notFound.length === 0 && 'All Pro players already assigned.'}
+                {autoAssignResult.assigned === 0 && autoAssignResult.notFound.length === 0 && 'All Pro players already connected.'}
               </>
             )}
           </div>

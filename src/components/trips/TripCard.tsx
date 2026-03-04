@@ -430,7 +430,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             {breakdown && (
               <span
                 className="rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue"
-                title="Trip value score = tier weight × visits remaining per player. T1=5pts/visit, T2=3pts/visit, T3=1pt/visit, T4=0. Tuesday anchor gets +20% bonus."
+                title="Trip priority score — higher means more important players. Must-see = 5pts, High priority = 3pts, Standard = 1pt per visit remaining. Tuesday +20%."
               >
                 {breakdown.finalScore} pts
               </span>
@@ -562,7 +562,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             </span>
           ))}
         </div>
-        <p className="mt-1 text-text-dim/60" title="Estimates use straight-line distance with a 30% detour factor at ~55 mph average. Actual times will vary with traffic and route.">
+        <p className="mt-1 text-text-dim/60" title="Drive times are rough estimates — actual times depend on traffic and route">
           Total drive: ~{formatDriveTime(computedTotalDrive)} <span className="text-text-dim/40">(estimates only)</span>
         </p>
       </div>
@@ -674,7 +674,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                       </span>
                     )}
                     {stop.isAnchor && (
-                      <span className="rounded bg-accent-blue/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue" title="The main stop this trip is built around">
+                      <span className="rounded bg-accent-blue/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue" title="The main game this trip is built around — other stops are nearby add-ons">
                         Main Stop
                       </span>
                     )}
@@ -866,7 +866,7 @@ function ConfidenceBadge({ confidence, note }: { confidence: VisitConfidence; no
   const label = confidence === 'medium' ? 'Likely there' : 'Not confirmed'
 
   return (
-    <span className={`mt-0.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${colors}`} title={note || (confidence === 'medium' ? 'Player is likely at this location based on schedule patterns, but not 100% confirmed' : 'This is an estimated schedule — confirm the player will be there before traveling')}>
+    <span className={`mt-0.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${colors}`} title={note || (confidence === 'medium' ? 'Probably here based on typical schedule patterns — double-check before traveling' : 'This game date is estimated, not confirmed — verify before making travel plans')}>
       {label}
       {note && <span className="opacity-70">— {note}</span>}
     </span>

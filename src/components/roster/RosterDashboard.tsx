@@ -240,7 +240,7 @@ export default function RosterDashboard() {
               onClick={checkRosterMoves}
               disabled={rosterMovesLoading}
               className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text disabled:opacity-50"
-              title="Check if any Pro players have been promoted, demoted, or traded in the last 30 days"
+              title="Check if any Pro players have changed teams recently (trades, promotions, demotions)"
             >
               {rosterMovesLoading ? (
                 <span className="h-3 w-3 animate-spin rounded-full border border-text-dim border-t-transparent" />
@@ -454,7 +454,7 @@ function ClientHealthPanel({
 
       {stats && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div title="Composite score based on call frequency, text frequency, in-person visits, and recency of all contact. 60+ = healthy, 30-59 = needs work, below 30 = at risk.">
+          <div title="Overall relationship health (0–100). Combines call, text, and visit frequency plus recency. 60+ = healthy, 30–59 = needs attention, under 30 = at risk.">
             <p className="text-[10px] font-medium text-text-dim">Avg Love Score</p>
             <p className={`text-lg font-bold ${
               stats.avgLove >= 60 ? 'text-accent-green' :
@@ -473,7 +473,7 @@ function ClientHealthPanel({
             </p>
             <p className="text-[9px] text-text-dim/50">T1: 60d · T2: 120d · T3: 180d</p>
           </div>
-          <div title="Red = no contact in over 2x the threshold period. Yellow = contact is overdue but not critical. Green = all contact is current.">
+          <div title="Red = significantly overdue for contact. Yellow = getting close to overdue. Green = contact is current.">
             <p className="text-[10px] font-medium text-text-dim">Needs Attention</p>
             <p className={`text-lg font-bold ${
               stats.redCount > 0 ? 'text-accent-red' :
@@ -488,7 +488,7 @@ function ClientHealthPanel({
               )}
             </p>
           </div>
-          <div title="How many roster players matched to a Heartbeat record by name. Unmatched players won't show love scores.">
+          <div title="How many of your roster players were found in SV Heartbeat. Players not found won't show love scores.">
             <p className="text-[10px] font-medium text-text-dim">Matched Players</p>
             <p className="text-lg font-bold text-text">
               {stats.matchedCount}
