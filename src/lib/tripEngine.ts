@@ -778,13 +778,26 @@ export async function generateTrips(
             })
           } else {
             const hasGames = eligibleGames.some((g) => g.playerNames.includes(pName))
-            priorityResults.push({
-              playerName: pName,
-              status: hasGames ? 'fly-in-only' : 'unreachable',
-              reason: hasGames
-                ? `${pName} is beyond driving range — check Fly-in Visits section below`
-                : `No reachable games for ${pName} in the selected date range`,
-            })
+            if (hasGames) {
+              const playerFlyInGames = eligibleGames.filter(g => g.playerNames.includes(pName) && g.venue.coords.lat !== 0)
+              const minTravelHours = playerFlyInGames.length > 0
+                ? Math.min(...playerFlyInGames.map(g => estimateFlightHours(haversineKm(HOME_BASE, g.venue.coords))))
+                : Infinity
+              const beyondFlight = minTravelHours > maxFlightHours
+              priorityResults.push({
+                playerName: pName,
+                status: 'fly-in-only',
+                reason: beyondFlight
+                  ? `${pName} requires ~${minTravelHours}h travel but max flight is set to ${maxFlightHours}h — increase the Max Flight slider`
+                  : `${pName} is beyond driving range — check Fly-in Visits section below`,
+              })
+            } else {
+              priorityResults.push({
+                playerName: pName,
+                status: 'unreachable',
+                reason: `No reachable games for ${pName} in the selected date range`,
+              })
+            }
           }
         }
       }
@@ -798,13 +811,27 @@ export async function generateTrips(
         priorityResults.push({ playerName: pName, status: 'included' })
       } else {
         const hasGames = eligibleGames.some((g) => g.playerNames.includes(pName))
-        priorityResults.push({
-          playerName: pName,
-          status: hasGames ? 'fly-in-only' : 'unreachable',
-          reason: hasGames
-            ? `${pName} is beyond driving range — check Fly-in Visits section below`
-            : `No reachable games for ${pName} in the selected date range`,
-        })
+        if (hasGames) {
+          // Check if fly-in would be beyond flight cap
+          const playerFlyInGames = eligibleGames.filter(g => g.playerNames.includes(pName) && g.venue.coords.lat !== 0)
+          const minTravelHours = playerFlyInGames.length > 0
+            ? Math.min(...playerFlyInGames.map(g => estimateFlightHours(haversineKm(HOME_BASE, g.venue.coords))))
+            : Infinity
+          const beyondFlight = minTravelHours > maxFlightHours
+          priorityResults.push({
+            playerName: pName,
+            status: 'fly-in-only',
+            reason: beyondFlight
+              ? `${pName} requires ~${minTravelHours}h travel but max flight is set to ${maxFlightHours}h — increase the Max Flight slider to see fly-in options`
+              : `${pName} is beyond driving range — check Fly-in Visits section below`,
+          })
+        } else {
+          priorityResults.push({
+            playerName: pName,
+            status: 'unreachable',
+            reason: `No reachable games for ${pName} in the selected date range`,
+          })
+        }
       }
     }
   }
@@ -1006,13 +1033,16 @@ export async function generateTrips(
   })
 
   // Filter out fly-in visits beyond max flight range
+  // EXCEPTION: Always keep fly-ins that include a priority player — never silently drop them
   const beyondFlightRange: UnvisitablePlayer[] = []
   const filteredFlyIns = flyInVisits.filter((v) => {
     if (v.estimatedTravelHours <= maxFlightHours) return true
-    // Move these players to unreachable
+    // Keep fly-ins for priority players even if beyond max flight
+    const hasPriority = v.playerNames.some(n => prioritySet.has(n))
+    if (hasPriority) return true
+    // Move non-priority players to unreachable
     for (const name of v.playerNames) {
       if (flyInCovered.has(name)) {
-        // Only mark unreachable if this was their only fly-in option
         const otherFlyIn = flyInVisits.some(
           (other) => other !== v && other.estimatedTravelHours <= maxFlightHours && other.playerNames.includes(name),
         )

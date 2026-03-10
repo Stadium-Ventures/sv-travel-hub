@@ -91,7 +91,26 @@ export const useTripStore = create<TripState>()(
     if (get().computing) return
     const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers } = get()
     const players = useRosterStore.getState().players
-    const scheduleState = useScheduleStore.getState()
+    let scheduleState = useScheduleStore.getState()
+
+    // Auto-fetch pro schedules if any Pro players exist but pro games haven't been loaded
+    const hasProPlayers = players.some((p) => p.level === 'Pro' && p.visitsRemaining > 0)
+    if (hasProPlayers && scheduleState.proGames.length === 0 && !scheduleState.schedulesLoading) {
+      // Auto-assign first if no assignments exist
+      if (Object.keys(scheduleState.playerTeamAssignments).length === 0) {
+        set({ computing: true, tripPlan: null, progressStep: 'Auto-assigning players to teams...', progressDetail: '' })
+        await useScheduleStore.getState().autoAssignPlayers()
+        scheduleState = useScheduleStore.getState()
+      }
+      // Fetch pro schedules if assignments now exist
+      if (Object.keys(scheduleState.playerTeamAssignments).length > 0) {
+        set({ computing: true, tripPlan: null, progressStep: 'Loading Pro schedules...', progressDetail: '' })
+        const y = new Date().getFullYear()
+        await useScheduleStore.getState().fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+        scheduleState = useScheduleStore.getState()
+      }
+    }
+
     const scheduledGames = scheduleState.proGames
     const realNcaaGames = scheduleState.ncaaGames
 
