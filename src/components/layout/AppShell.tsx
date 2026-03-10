@@ -27,7 +27,7 @@ const TABS: { id: TabId; label: string; heading: string; description: string }[]
     id: 'trips',
     label: 'Trip Planner',
     heading: 'Trip Planner',
-    description: 'Pick a date range and the app builds optimized road trips from Orlando, grouping nearby players together. You can also export trips to your calendar.',
+    description: 'Pick a date range and the app builds optimized trip options — road trips for nearby players and fly-in visits for those farther away. You can also export trips to your calendar.',
   },
   {
     id: 'map',
