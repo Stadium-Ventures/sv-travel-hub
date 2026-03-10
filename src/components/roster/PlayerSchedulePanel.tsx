@@ -159,6 +159,16 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-dim">
             <span>{player.org}</span>
+            {(() => {
+              const assignment = useScheduleStore.getState().playerTeamAssignments[player.playerName]
+              if (assignment && assignment.teamName !== player.org) {
+                return <>
+                  <span className="text-text-dim/30">&rarr;</span>
+                  <span className="text-accent-blue">{assignment.teamName}</span>
+                </>
+              }
+              return null
+            })()}
             <span className="text-text-dim/30">|</span>
             <span>{player.level}</span>
             <span className="text-text-dim/30">|</span>

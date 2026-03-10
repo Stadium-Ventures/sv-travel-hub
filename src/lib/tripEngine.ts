@@ -864,7 +864,19 @@ export async function generateTrips(
   // --- Greedy selection for remaining trips ---
   // Players can appear in multiple trips until their visit quota is met.
   // Capped at MAX_ROAD_TRIPS to avoid overwhelming results.
-  const remainingCandidates = [...candidates].sort((a, b) => b.visitValue - a.visitValue)
+  // When a priority player is set, ALL road trips must include them.
+  const hasPriorityFilter = priorityPlayers.length > 0
+  const priorityNameSet = new Set(priorityPlayers)
+  const remainingCandidates = [...candidates]
+    .filter((c) => {
+      if (!hasPriorityFilter) return true
+      const tripPlayers = [
+        ...c.anchorGame.playerNames,
+        ...c.nearbyGames.flatMap((g) => g.playerNames),
+      ]
+      return tripPlayers.some((n) => priorityNameSet.has(n))
+    })
+    .sort((a, b) => b.visitValue - a.visitValue)
 
   // Track selected trip date ranges for overlap detection
   function getTripDateRange(trip: TripCandidate): Set<string> {
@@ -1017,7 +1029,40 @@ export async function generateTrips(
     }
   }
 
-  // Convert to FlyInVisit array — each entry is one week at one venue
+  // Merge nearby fly-in venues within the same week (e.g. Whitlock in Boston +
+  // an NCAA player at a nearby school = one multi-player fly-in trip).
+  // Group entries by week, then merge any pair within 2h drive of each other.
+  const weekGroups = new Map<number, Array<{ key: string; entry: typeof flyInWeekMap extends Map<string, infer V> ? V : never }>>()
+  for (const [key, entry] of flyInWeekMap) {
+    const group = weekGroups.get(entry.weekNum) ?? []
+    group.push({ key, entry })
+    weekGroups.set(entry.weekNum, group)
+  }
+
+  for (const [, group] of weekGroups) {
+    if (group.length < 2) continue
+    // Try to merge entries within 120 min drive of each other
+    for (let i = 0; i < group.length; i++) {
+      const a = group[i]!
+      if (!flyInWeekMap.has(a.key)) continue // already merged away
+      for (let j = i + 1; j < group.length; j++) {
+        const b = group[j]!
+        if (!flyInWeekMap.has(b.key)) continue
+        const drive = estimateDriveMinutes(a.entry.venue.coords, b.entry.venue.coords)
+        if (drive <= 120) {
+          // Merge b into a (keep a's venue as primary, add b's players)
+          for (const name of b.entry.players) a.entry.players.add(name)
+          for (const d of b.entry.dates) a.entry.dates.add(d)
+          if ((confidenceRank[b.entry.confidence ?? ''] ?? 0) > (confidenceRank[a.entry.confidence ?? ''] ?? 0)) {
+            a.entry.confidence = b.entry.confidence
+          }
+          flyInWeekMap.delete(b.key)
+        }
+      }
+    }
+  }
+
+  // Convert to FlyInVisit array — each entry is one week at one venue (or merged nearby venues)
   for (const [, entry] of flyInWeekMap) {
     const sortedDates = [...entry.dates].sort()
     // Trim to a 3-day trip window centered on the best day (prefer Tuesday)

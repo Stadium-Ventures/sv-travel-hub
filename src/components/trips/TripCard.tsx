@@ -310,13 +310,6 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
 
   const hasUncertainEvents = stops.some((s) => s.confidence && s.confidence !== 'high')
 
-  const startDate = formatDate(trip.suggestedDays[0]!)
-  const endDate = formatDate(trip.suggestedDays[trip.suggestedDays.length - 1]!)
-  const dayCount = trip.suggestedDays.length
-  const dateLabel = dayCount === 1 ? startDate : `${startDate} – ${endDate}`
-
-  const breakdown = trip.scoreBreakdown
-
   // Compute total drive
   let totalDrive = trip.driveFromHomeMinutes
   for (const s of stops) totalDrive += s.driveFromPrev
@@ -326,11 +319,33 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
     totalDrive += Math.round((haversineKm(lastCoords, HOME_BASE) * 1.3 / 90) * 60)
   }
 
-  // Assign stops to days
-  const dayAssignments = useMemo(
-    () => assignStopsToDays(stops, trip.suggestedDays),
-    [stops, trip.suggestedDays],
-  )
+  // Assign stops to days, then trim leading empty days for short drives (same-day travel OK)
+  const { dayAssignments, displayDays } = useMemo(() => {
+    const assignments = assignStopsToDays(stops, trip.suggestedDays)
+    let days = [...trip.suggestedDays]
+
+    // For drives ≤ 2.5h with evening games, skip empty leading "travel day"
+    // since you can drive same-day in the morning and make it for a night game
+    if (days.length > 1 && trip.driveFromHomeMinutes <= 150) {
+      while (days.length > 1) {
+        const firstDay = days[0]!
+        const firstDayStops = assignments.get(firstDay) ?? []
+        if (firstDayStops.length === 0) {
+          assignments.delete(firstDay)
+          days = days.slice(1)
+        } else break
+      }
+    }
+
+    return { dayAssignments: assignments, displayDays: days }
+  }, [stops, trip.suggestedDays, trip.driveFromHomeMinutes])
+
+  const startDate = formatDate(displayDays[0]!)
+  const endDate = formatDate(displayDays[displayDays.length - 1]!)
+  const dayCount = displayDays.length
+  const dateLabel = dayCount === 1 ? startDate : `${startDate} – ${endDate}`
+
+  const breakdown = trip.scoreBreakdown
 
   // Build concise summary
   const t1Names = [...allPlayers].filter((n) => playerMap.get(n)?.tier === 1)
@@ -423,7 +438,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
         <div className="mt-4 space-y-3">
 
           {/* Day-by-day schedule — the core of the card */}
-          {trip.suggestedDays.map((day, dayIdx) => {
+          {displayDays.map((day, dayIdx) => {
             const dayDate = new Date(day + 'T12:00:00Z')
             const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayDate.getUTCDay()]
             const isTue = dayDate.getUTCDay() === 2
@@ -444,7 +459,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                       Drive from Orlando: ~{formatDriveTime(trip.driveFromHomeMinutes)}
                     </span>
                   )}
-                  {dayIdx === trip.suggestedDays.length - 1 && lastStop && (
+                  {dayIdx === displayDays.length - 1 && lastStop && (
                     <span className="text-[11px] text-text-dim/60 ml-auto">
                       Drive home after
                     </span>
@@ -452,7 +467,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                 </div>
 
                 {dayStops.length === 0 ? (
-                  <p className="text-xs text-text-dim/50 italic">{dayIdx === trip.suggestedDays.length - 1 ? 'Return home' : 'Travel / flex day'}</p>
+                  <p className="text-xs text-text-dim/50 italic">{dayIdx === displayDays.length - 1 ? 'Return home' : 'Travel / flex day'}</p>
                 ) : (
                   <div className="space-y-2">
                     {dayStops.map((stop, stopIdx) => {
