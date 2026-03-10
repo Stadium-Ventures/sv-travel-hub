@@ -447,6 +447,7 @@ export async function generateTrips(
   priorityPlayers: string[] = [],
   urgencyMap?: UrgencyMap,
   maxFlightHours: number = 4,
+  playerTeamAssignments?: Record<string, { teamId: number; sportId: number; teamName: string }>,
 ): Promise<TripPlan> {
   onProgress?.('Preparing', 'Filtering eligible players...')
 
@@ -490,6 +491,9 @@ export async function generateTrips(
       if (!player) return { name, reason: 'Player not found in roster' }
       if (player.level === 'Pro' && !resolveMLBTeamId(player.org)) return { name, reason: 'No recognized org — not in alias table' }
       if (player.level === 'NCAA' && !resolveNcaaName(player.org)) return { name, reason: 'No recognized org — not in alias table' }
+      if (player.level === 'Pro' && playerTeamAssignments && !playerTeamAssignments[name]) {
+        return { name, reason: 'Not assigned to a team — run Auto-assign Affiliates on the Roster tab' }
+      }
       return { name, reason: 'No games in date range' }
     })
     return {
@@ -1133,9 +1137,13 @@ export async function generateTrips(
     // Check if player had ANY games generated
     const playerGames = games.filter((g) => g.playerNames.includes(name))
     if (playerGames.length === 0) {
-      // Check if the date range misses spring training (before ~Mar 31)
-      if (player.level === 'Pro' && startDate > `${startDate.slice(0, 4)}-03-31`) {
-        return { name, reason: 'No games in date range — MiLB schedules may not be published yet. Try including March dates for spring training visits.' }
+      // For Pro players: check if they have a team assignment
+      if (player.level === 'Pro') {
+        const hasAssignment = playerTeamAssignments && playerTeamAssignments[name]
+        if (!hasAssignment) {
+          return { name, reason: 'Not assigned to a team — run Auto-assign Affiliates on the Roster tab' }
+        }
+        return { name, reason: 'No games in date range — try including spring training dates (through March)' }
       }
       return { name, reason: 'No games in date range' }
     }

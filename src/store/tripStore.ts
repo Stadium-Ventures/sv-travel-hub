@@ -219,6 +219,7 @@ export const useTripStore = create<TripState>()(
         priorityPlayers,
         urgencyMap.size > 0 ? urgencyMap : undefined,
         maxFlightHours,
+        scheduleState.playerTeamAssignments,
       )
       // Prune stale tripStatuses — only keep keys that match current trips
       const currentKeys = new Set(plan.trips.map(getTripKey))
