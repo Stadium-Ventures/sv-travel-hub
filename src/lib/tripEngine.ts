@@ -1049,7 +1049,7 @@ export async function generateTrips(
         const b = group[j]!
         if (!flyInWeekMap.has(b.key)) continue
         const drive = estimateDriveMinutes(a.entry.venue.coords, b.entry.venue.coords)
-        if (drive <= 120) {
+        if (drive <= 180) {
           // Merge b into a (keep a's venue as primary, add b's players)
           for (const name of b.entry.players) a.entry.players.add(name)
           for (const d of b.entry.dates) a.entry.dates.add(d)
@@ -1129,9 +1129,14 @@ export async function generateTrips(
     return b.visitValue - a.visitValue
   })
 
+  // When priority player is set, only keep fly-ins that include them
+  const finalDiverseFlyIns = hasPriorityFilter
+    ? diverseFlyIns.filter((v) => v.playerNames.some((n) => priorityNameSet.has(n)))
+    : diverseFlyIns
+
   // Replace flyInVisits with diverse set
   flyInVisits.length = 0
-  flyInVisits.push(...diverseFlyIns)
+  flyInVisits.push(...finalDiverseFlyIns)
 
   // Filter out fly-in visits beyond max flight range
   // EXCEPTION: Always keep fly-ins that include a priority player — never silently drop them
