@@ -602,7 +602,19 @@ export async function generateTrips(
           // Also check that the nearby venue itself is reachable from home
           const nearbyHomeKey = coordKey(g.venue.coords)
           const homeToNearby = homeToVenue.get(nearbyHomeKey) ?? Infinity
-          return homeToNearby <= maxDriveMinutes * 1.5 // allow some slack for multi-stop trips
+          if (homeToNearby > maxDriveMinutes * 1.5) return false
+          // Time conflict check: if both games are on the same day and have known times,
+          // ensure there's enough travel time between them (game ~3h + drive between venues)
+          if (g.date === anchor.date && g.time && anchor.time && g.driveMinutes > 15) {
+            const anchorTime = new Date(anchor.time).getTime()
+            const nearbyTime = new Date(g.time).getTime()
+            if (!isNaN(anchorTime) && !isNaN(nearbyTime)) {
+              const gapMinutes = Math.abs(nearbyTime - anchorTime) / 60000
+              const minGap = 180 + g.driveMinutes // ~3h for a game + travel between venues
+              if (gapMinutes < minGap) return false // Can't physically attend both
+            }
+          }
+          return true
         })
 
       // Collect all unique players visited
@@ -616,7 +628,20 @@ export async function generateTrips(
         }
       }
 
-      const suggestedDays = [...new Set([anchor.date, ...nearbyGames.map((g) => g.date)])].sort()
+      // Build suggested days: only include days with actual games + 1 return travel day if multi-venue
+      const gameDays = [...new Set([anchor.date, ...nearbyGames.map((g) => g.date)])].sort()
+      // If there are multiple venues, add 1 return day (max 3 day trip total)
+      const needsReturnDay = nearbyGames.length > 0 || homeToAnchor > 90 // >1.5h drive merits a return day
+      let suggestedDays = gameDays
+      if (needsReturnDay && gameDays.length < 3) {
+        const lastGameDay = new Date(gameDays[gameDays.length - 1]! + 'T12:00:00Z')
+        const returnDay = new Date(lastGameDay)
+        returnDay.setUTCDate(returnDay.getUTCDate() + 1)
+        const returnStr = returnDay.toISOString().split('T')[0]!
+        if (isDateAllowed(returnStr)) {
+          suggestedDays = [...gameDays, returnStr]
+        }
+      }
 
       // Estimate total driving — sequential chain: home → anchor → stop2 → stop3 → ... → home
       // Sort nearby games by distance from anchor so we visit closest first
@@ -1022,15 +1047,46 @@ export async function generateTrips(
     for (const name of entry.players) flyInCovered.add(name)
   }
 
-  // Sort fly-in visits: priority players first, then by score
-  const prioritySetLower = new Set(priorityPlayers.map(n => n.toLowerCase()))
+  // Deduplicate fly-ins: keep at most 2 entries per player to ensure diversity.
+  // For each player, keep their best fly-in (highest score) and best Tuesday fly-in.
+  // This prevents a priority player from filling all 10 result slots.
+  const playerFlyInCount = new Map<string, number>()
+  const MAX_FLYINS_PER_PLAYER = 2
+  const diverseFlyIns: FlyInVisit[] = []
+
+  // Sort by score first so we pick the best ones per player
   flyInVisits.sort((a, b) => {
+    // Multi-player fly-ins first (more valuable)
+    if (a.playerNames.length !== b.playerNames.length) return b.playerNames.length - a.playerNames.length
+    return b.visitValue - a.visitValue
+  })
+
+  for (const visit of flyInVisits) {
+    // Check if any player in this fly-in still has room
+    const hasRoom = visit.playerNames.some((n) => {
+      return (playerFlyInCount.get(n) ?? 0) < MAX_FLYINS_PER_PLAYER
+    })
+    if (hasRoom) {
+      diverseFlyIns.push(visit)
+      for (const name of visit.playerNames) {
+        playerFlyInCount.set(name, (playerFlyInCount.get(name) ?? 0) + 1)
+      }
+    }
+  }
+
+  // Now sort the diverse list: priority players first, then by score
+  const prioritySetLower = new Set(priorityPlayers.map(n => n.toLowerCase()))
+  diverseFlyIns.sort((a, b) => {
     const aHasPriority = a.playerNames.some(n => prioritySetLower.has(n.toLowerCase()))
     const bHasPriority = b.playerNames.some(n => prioritySetLower.has(n.toLowerCase()))
     if (aHasPriority && !bHasPriority) return -1
     if (!aHasPriority && bHasPriority) return 1
     return b.visitValue - a.visitValue
   })
+
+  // Replace flyInVisits with diverse set
+  flyInVisits.length = 0
+  flyInVisits.push(...diverseFlyIns)
 
   // Filter out fly-in visits beyond max flight range
   // EXCEPTION: Always keep fly-ins that include a priority player — never silently drop them

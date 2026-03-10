@@ -452,7 +452,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                 </div>
 
                 {dayStops.length === 0 ? (
-                  <p className="text-xs text-text-dim/50 italic">Travel day</p>
+                  <p className="text-xs text-text-dim/50 italic">{dayIdx === trip.suggestedDays.length - 1 ? 'Return home' : 'Travel / flex day'}</p>
                 ) : (
                   <div className="space-y-2">
                     {dayStops.map((stop, stopIdx) => {

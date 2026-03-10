@@ -297,62 +297,64 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
-          // Assign MLB-level players directly
+          // Phase 2: ALWAYS check MiLB rosters — a player on the 40-man may be
+          // optioned to the minors and should use the MiLB team's schedule, not MLB.
+          // Hoist milbRosterEntries so Phase 3 can also use them for name matching
+          let milbRosterEntries: typeof mlbRosterEntries = []
+
+          {
+            const allOrgIds = new Set<number>()
+            for (const p of proPlayers) {
+              const orgId = resolveMLBTeamId(p.org, customMlb)
+              if (orgId) allOrgIds.add(orgId)
+            }
+
+            // Get MiLB affiliate teams (exclude sportId=1 since that's MLB level)
+            const teamsToQuery = allAffiliates
+              .filter((a) => allOrgIds.has(a.parentOrgId) && a.sportId !== 1)
+              .map((a) => ({ teamId: a.teamId, sportId: a.sportId, teamName: a.teamName }))
+
+            if (teamsToQuery.length > 0) {
+              milbRosterEntries = await fetchAllRosters(teamsToQuery)
+            }
+          }
+
+          // Build MiLB player lookup
+          const milbPlayerIdToTeam = new Map<number, PlayerTeamAssignment>()
+          for (const entry of milbRosterEntries) {
+            if (entry.playerId > 0) {
+              milbPlayerIdToTeam.set(entry.playerId, {
+                teamId: entry.teamId,
+                sportId: entry.sportId,
+                teamName: entry.teamName,
+              })
+            }
+          }
+
+          // Assign players: prefer MiLB roster (where they're actually playing)
+          // over 40-man roster (where they might just be on the reserve list).
           const remainingPlayers: typeof proPlayers = []
           for (const player of proPlayers) {
-            const match = mlbPlayerIdToTeam.get(player.mlbPlayerId!)
-            if (match) {
-              newAssignments[player.playerName] = match
+            // Check MiLB first — if found, they're playing at that level
+            const milbMatch = milbPlayerIdToTeam.get(player.mlbPlayerId!)
+            if (milbMatch) {
+              newAssignments[player.playerName] = milbMatch
+              assignedCount++
+              continue
+            }
+            // Fall back to MLB roster
+            const mlbMatch = mlbPlayerIdToTeam.get(player.mlbPlayerId!)
+            if (mlbMatch) {
+              newAssignments[player.playerName] = mlbMatch
               assignedCount++
             } else {
               remainingPlayers.push(player)
             }
           }
 
-          // Phase 2: For remaining players, search affiliate rosters (MiLB levels)
-          // Hoist milbRosterEntries so Phase 3 can also use them for name matching
-          let milbRosterEntries: typeof mlbRosterEntries = []
-
-          if (remainingPlayers.length > 0) {
-            const remainingOrgIds = new Set<number>()
-            for (const p of remainingPlayers) {
-              const orgId = resolveMLBTeamId(p.org, customMlb)
-              if (orgId) remainingOrgIds.add(orgId)
-            }
-
-            // Get MiLB affiliate teams only (exclude sportId=1 since we already checked)
-            const teamsToQuery = allAffiliates
-              .filter((a) => remainingOrgIds.has(a.parentOrgId) && a.sportId !== 1)
-              .map((a) => ({ teamId: a.teamId, sportId: a.sportId, teamName: a.teamName }))
-
-            if (teamsToQuery.length > 0) {
-              milbRosterEntries = await fetchAllRosters(teamsToQuery)
-              const playerIdToTeam = new Map<number, PlayerTeamAssignment>()
-              for (const entry of milbRosterEntries) {
-                if (entry.playerId > 0) {
-                  playerIdToTeam.set(entry.playerId, {
-                    teamId: entry.teamId,
-                    sportId: entry.sportId,
-                    teamName: entry.teamName,
-                  })
-                }
-              }
-
-              for (const player of remainingPlayers) {
-                const match = playerIdToTeam.get(player.mlbPlayerId!)
-                if (match) {
-                  newAssignments[player.playerName] = match
-                  assignedCount++
-                } else {
-                  notFoundNames.push(player.playerName)
-                }
-              }
-            } else {
-              // No affiliate teams to query — all remaining are not found
-              for (const player of remainingPlayers) {
-                notFoundNames.push(player.playerName)
-              }
-            }
+          // For remaining players (not found on any roster), mark as not found
+          for (const player of remainingPlayers) {
+            notFoundNames.push(player.playerName)
           }
 
           // Phase 3: Name-based fallback for players without mlbPlayerId
