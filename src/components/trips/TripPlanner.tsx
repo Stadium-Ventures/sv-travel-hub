@@ -30,13 +30,13 @@ const LEVEL_COLORS: Record<string, string> = {
 function PlayerSearchPicker({
   value,
   players,
-  excludeName,
+  excludeNames,
   placeholder,
   onChange,
 }: {
   value: string
   players: RosterPlayer[]
-  excludeName?: string
+  excludeNames?: string[]
   placeholder: string
   onChange: (name: string) => void
 }) {
@@ -58,14 +58,14 @@ function PlayerSearchPicker({
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     return players
-      .filter((p) => p.playerName !== excludeName)
+      .filter((p) => !excludeNames?.includes(p.playerName))
       .filter((p) => !q || p.playerName.toLowerCase().includes(q) || p.org.toLowerCase().includes(q))
       .sort((a, b) => {
         const levelDiff = (LEVEL_ORDER[a.level] ?? 9) - (LEVEL_ORDER[b.level] ?? 9)
         if (levelDiff !== 0) return levelDiff
         return a.playerName.localeCompare(b.playerName)
       })
-  }, [players, excludeName, search])
+  }, [players, excludeNames, search])
 
   // Group by level
   const grouped = useMemo(() => {
@@ -383,7 +383,7 @@ export default function TripPlanner() {
   // Track which steps used synthetic-only data (skipped real schedule loading)
   const step2Synthetic = !schedulesActuallyLoaded && (hasStDates || hasNcaaDates || hasHsDates)
 
-  function handlePriorityChange(slot: 0 | 1, value: string) {
+  function handlePriorityChange(slot: 0 | 1 | 2, value: string) {
     const next = [...priorityPlayers]
     if (value === '') {
       next.splice(slot, 1)
@@ -957,22 +957,29 @@ export default function TripPlanner() {
         {/* Priority players */}
         <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
           <label className="mb-2 block text-xs font-medium text-text-dim">
-            Priority Players <span className="text-text-dim/50">(optional — build first trip around these players)</span>
+            Priority Players <span className="text-text-dim/50">(optional — every trip must include ALL selected players)</span>
           </label>
           <div className="flex flex-wrap items-center gap-3">
             <PlayerSearchPicker
               value={priorityPlayers[0] ?? ''}
               players={eligibleForPriority}
-              excludeName={priorityPlayers[1]}
+              excludeNames={priorityPlayers.filter((_, i) => i !== 0)}
               placeholder="Type to search player 1..."
               onChange={(name) => handlePriorityChange(0, name)}
             />
             <PlayerSearchPicker
               value={priorityPlayers[1] ?? ''}
               players={eligibleForPriority}
-              excludeName={priorityPlayers[0]}
+              excludeNames={priorityPlayers.filter((_, i) => i !== 1)}
               placeholder="Type to search player 2..."
               onChange={(name) => handlePriorityChange(1, name)}
+            />
+            <PlayerSearchPicker
+              value={priorityPlayers[2] ?? ''}
+              players={eligibleForPriority}
+              excludeNames={priorityPlayers.filter((_, i) => i !== 2)}
+              placeholder="Type to search player 3..."
+              onChange={(name) => handlePriorityChange(2, name)}
             />
             {priorityPlayers.length > 0 && (
               <button

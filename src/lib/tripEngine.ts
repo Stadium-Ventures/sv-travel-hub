@@ -770,92 +770,73 @@ export async function generateTrips(
         })
     }
 
-    if (priorityPlayers.length === 2) {
-      const [p1, p2] = priorityPlayers as [string, string]
+    // Try to find a trip that includes ALL priority players
+    const allPriorityCandidates = candidates.filter((c) => {
+      const allNames = new Set([
+        ...c.anchorGame.playerNames,
+        ...c.nearbyGames.flatMap((g) => g.playerNames),
+      ])
+      return priorityPlayers.every((p) => allNames.has(p))
+    })
 
-      // Try to find a trip that includes BOTH priority players
-      const bothCandidates = candidates.filter((c) => {
-        const allNames = new Set([
-          ...c.anchorGame.playerNames,
-          ...c.nearbyGames.flatMap((g) => g.playerNames),
-        ])
-        return allNames.has(p1) && allNames.has(p2)
-      })
+    if (allPriorityCandidates.length > 0) {
+      allPriorityCandidates.sort((a, b) => b.visitValue - a.visitValue)
+      const best = allPriorityCandidates[0]!
+      selectedTrips.push(best)
+      recordTripPlayers(best)
+      for (const pName of priorityPlayers) {
+        priorityResults.push({ playerName: pName, status: 'included' })
+      }
+    } else {
+      // Can't get all priority players in one trip — report each player's status
+      // and suggest expanding range if needed
+      const missingFromDrive: string[] = []
+      const missingFromFlight: string[] = []
 
-      if (bothCandidates.length > 0) {
-        bothCandidates.sort((a, b) => b.visitValue - a.visitValue)
-        const best = bothCandidates[0]!
-        selectedTrips.push(best)
-        recordTripPlayers(best)
-        priorityResults.push({ playerName: p1, status: 'included' })
-        priorityResults.push({ playerName: p2, status: 'included' })
-      } else {
-        for (const pName of [p1, p2]) {
-          const pCandidates = candidatesWithPlayer(pName)
-          if (pCandidates.length > 0) {
-            const best = pCandidates[0]!
-            selectedTrips.push(best)
-            recordTripPlayers(best)
-            priorityResults.push({
-              playerName: pName,
-              status: 'separate-trip',
-              reason: `No trip covers both ${p1} and ${p2} within the drive radius — created separate trips`,
-            })
-          } else {
-            const hasGames = eligibleGames.some((g) => g.playerNames.includes(pName))
-            if (hasGames) {
-              const playerFlyInGames = eligibleGames.filter(g => g.playerNames.includes(pName) && g.venue.coords.lat !== 0)
-              const minTravelHours = playerFlyInGames.length > 0
-                ? Math.min(...playerFlyInGames.map(g => estimateFlightHours(haversineKm(HOME_BASE, g.venue.coords))))
-                : Infinity
-              const beyondFlight = minTravelHours > maxFlightHours
+      for (const pName of priorityPlayers) {
+        const pCandidates = candidatesWithPlayer(pName)
+        if (pCandidates.length > 0) {
+          // This player IS reachable by road but can't be combined with the others
+          const best = pCandidates[0]!
+          selectedTrips.push(best)
+          recordTripPlayers(best)
+          priorityResults.push({
+            playerName: pName,
+            status: 'separate-trip',
+            reason: priorityPlayers.length > 1
+              ? `No single trip covers all priority players within the drive/flight range — ${pName} placed in a separate trip`
+              : undefined,
+          })
+        } else {
+          const hasGames = eligibleGames.some((g) => g.playerNames.includes(pName))
+          if (hasGames) {
+            const playerFlyInGames = eligibleGames.filter(g => g.playerNames.includes(pName) && g.venue.coords.lat !== 0)
+            const minTravelHours = playerFlyInGames.length > 0
+              ? Math.min(...playerFlyInGames.map(g => estimateFlightHours(haversineKm(HOME_BASE, g.venue.coords))))
+              : Infinity
+            const beyondFlight = minTravelHours > maxFlightHours
+            if (beyondFlight) {
+              missingFromFlight.push(pName)
               priorityResults.push({
                 playerName: pName,
                 status: 'fly-in-only',
-                reason: beyondFlight
-                  ? `${pName} requires ~${minTravelHours}h travel but max flight is set to ${maxFlightHours}h — increase the Max Flight slider`
-                  : `${pName} is beyond driving range — check Fly-in Visits section below`,
+                reason: `${pName} requires ~${Math.round(minTravelHours * 10) / 10}h travel but max flight is ${maxFlightHours}h — increase Max Flight to see options`,
               })
             } else {
+              missingFromDrive.push(pName)
               priorityResults.push({
                 playerName: pName,
-                status: 'unreachable',
-                reason: `No reachable games for ${pName} in the selected date range`,
+                status: 'fly-in-only',
+                reason: `${pName} is beyond driving range — check Fly-in Visits below`,
               })
             }
+          } else {
+            priorityResults.push({
+              playerName: pName,
+              status: 'unreachable',
+              reason: `No games for ${pName} in the selected date range — MiLB schedules may not be published yet`,
+            })
           }
-        }
-      }
-    } else if (priorityPlayers.length === 1) {
-      const pName = priorityPlayers[0]!
-      const pCandidates = candidatesWithPlayer(pName)
-      if (pCandidates.length > 0) {
-        const best = pCandidates[0]!
-        selectedTrips.push(best)
-        recordTripPlayers(best)
-        priorityResults.push({ playerName: pName, status: 'included' })
-      } else {
-        const hasGames = eligibleGames.some((g) => g.playerNames.includes(pName))
-        if (hasGames) {
-          // Check if fly-in would be beyond flight cap
-          const playerFlyInGames = eligibleGames.filter(g => g.playerNames.includes(pName) && g.venue.coords.lat !== 0)
-          const minTravelHours = playerFlyInGames.length > 0
-            ? Math.min(...playerFlyInGames.map(g => estimateFlightHours(haversineKm(HOME_BASE, g.venue.coords))))
-            : Infinity
-          const beyondFlight = minTravelHours > maxFlightHours
-          priorityResults.push({
-            playerName: pName,
-            status: 'fly-in-only',
-            reason: beyondFlight
-              ? `${pName} requires ~${minTravelHours}h travel but max flight is set to ${maxFlightHours}h — increase the Max Flight slider to see fly-in options`
-              : `${pName} is beyond driving range — check Fly-in Visits section below`,
-          })
-        } else {
-          priorityResults.push({
-            playerName: pName,
-            status: 'unreachable',
-            reason: `No reachable games for ${pName} in the selected date range`,
-          })
         }
       }
     }
@@ -866,15 +847,15 @@ export async function generateTrips(
   // Capped at MAX_ROAD_TRIPS to avoid overwhelming results.
   // When a priority player is set, ALL road trips must include them.
   const hasPriorityFilter = priorityPlayers.length > 0
-  const priorityNameSet = new Set(priorityPlayers)
   const remainingCandidates = [...candidates]
     .filter((c) => {
       if (!hasPriorityFilter) return true
-      const tripPlayers = [
+      // ALL priority players must be in every road trip
+      const tripPlayers = new Set([
         ...c.anchorGame.playerNames,
         ...c.nearbyGames.flatMap((g) => g.playerNames),
-      ]
-      return tripPlayers.some((n) => priorityNameSet.has(n))
+      ])
+      return priorityPlayers.every((n) => tripPlayers.has(n))
     })
     .sort((a, b) => b.visitValue - a.visitValue)
 
@@ -1096,9 +1077,9 @@ export async function generateTrips(
     return b.visitValue - a.visitValue
   })
 
-  // When priority player is set, only keep fly-ins that include them
+  // When priority players are set, only keep fly-ins that include ALL of them
   const finalDiverseFlyIns = hasPriorityFilter
-    ? diverseFlyIns.filter((v) => v.playerNames.some((n) => priorityNameSet.has(n)))
+    ? diverseFlyIns.filter((v) => priorityPlayers.every((n) => v.playerNames.includes(n)))
     : diverseFlyIns
 
   // Replace flyInVisits with diverse set
