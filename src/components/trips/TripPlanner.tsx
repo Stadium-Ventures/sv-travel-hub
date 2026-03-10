@@ -9,7 +9,7 @@ import { resolveMaxPrepsSlug } from '../../lib/maxpreps'
 import { resolveNcaaName } from '../../data/aliases'
 import { useVenueStore } from '../../store/venueStore'
 import type { Coordinates } from '../../types/roster'
-import TripCard, { generateItineraryText, buildVenueStops } from './TripCard'
+import TripCard, { generateItineraryText, buildVenueStops, MarkVisitedChip } from './TripCard'
 import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import { getTripKey } from '../../store/tripStore'
@@ -444,6 +444,7 @@ export default function TripPlanner() {
   const [copyAllError, setCopyAllError] = useState(false)
   const [calAllError, setCalAllError] = useState(false)
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
+  const [flyInLimit, setFlyInLimit] = useState(5)
   const [showOverlaps, setShowOverlaps] = useState(false)
 
   async function handleCopyAllTrips() {
@@ -476,6 +477,8 @@ export default function TripPlanner() {
       if (aHasPriority !== bHasPriority) return bHasPriority - aHasPriority
       return b.visitValue - a.visitValue
     })
+    const visibleVisits = sortedVisits.slice(0, flyInLimit)
+    const totalCount = sortedVisits.length
 
     return (
       <div id="section-fly-in">
@@ -491,9 +494,24 @@ export default function TripPlanner() {
               Estimated travel = flight + 1h airport + ground transport
             </p>
           </div>
+          {totalCount > 5 && (
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] text-text-dim">
+                Showing {Math.min(flyInLimit, totalCount)} of {totalCount}
+              </label>
+              <input
+                type="range"
+                min={1}
+                max={totalCount}
+                value={Math.min(flyInLimit, totalCount)}
+                onChange={(e) => setFlyInLimit(Number(e.target.value))}
+                className="h-1 w-24 cursor-pointer accent-purple-400"
+              />
+            </div>
+          )}
         </div>
         <div className="space-y-4">
-          {sortedVisits.map((visit, i) => (
+          {visibleVisits.map((visit, i) => (
             <FlyInCard
               key={i}
               visit={visit}
@@ -1620,18 +1638,23 @@ function FlyInCard({
   onPlayerClick: (name: string) => void
   defaultExpanded?: boolean
 }) {
+  const setVisitOverride = useRosterStore((s) => s.setVisitOverride)
   const [expanded, setExpanded] = useState(defaultExpanded ?? false)
   const [showScoreDetail, setShowScoreDetail] = useState(false)
+  const [markedPlayers, setMarkedPlayers] = useState<Set<string>>(new Set())
 
-  // Derive org label
+  // Derive org label — prefer teamLabel from trip engine (accurate per-team grouping)
   const firstPlayer = players.find((p) => visit.playerNames.includes(p.playerName))
-  let orgLabel = ''
-  if (visit.source === 'hs-lookup' && firstPlayer) orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
-  else if (visit.source === 'ncaa-lookup' && firstPlayer) orgLabel = firstPlayer.org
-  else if (visit.source === 'mlb-api' && firstPlayer) orgLabel = firstPlayer.org
+  let orgLabel = visit.teamLabel ?? ''
+  if (!orgLabel) {
+    if (visit.source === 'hs-lookup' && firstPlayer) orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
+    else if (visit.source === 'ncaa-lookup' && firstPlayer) orgLabel = firstPlayer.org
+    else if (visit.source === 'mlb-api' && firstPlayer) orgLabel = firstPlayer.org
+  }
 
   const coordKey = `${visit.venue.coords.lat.toFixed(4)},${visit.venue.coords.lng.toFixed(4)}`
-  const flyInKey = `flyin-${coordKey}`
+  const teamSlug = (visit.teamLabel ?? '').toLowerCase().replace(/\s+/g, '-')
+  const flyInKey = `flyin-${coordKey}${teamSlug ? `-${teamSlug}` : ''}`
   const currentStatus = tripStatuses[flyInKey] as TripStatus | undefined
 
   function cycleStatus(e: React.MouseEvent) {
@@ -1658,15 +1681,15 @@ function FlyInCard({
   const dateLabel = firstDate && lastDate && firstDate !== lastDate
     ? `${formatDate(firstDate)} – ${formatDate(lastDate)}`
     : firstDate ? formatDate(firstDate) : ''
+  const dayCount = visit.dates.length
 
   // Natural language summary
   const t1Names = visit.playerNames.filter((n) => playerMap.get(n)?.tier === 1)
   const t2Names = visit.playerNames.filter((n) => playerMap.get(n)?.tier === 2)
   const isPriority = visit.playerNames.some((n) => priorityPlayers.includes(n))
-  const dateRangeLabel = firstDate && lastDate && firstDate !== lastDate
-    ? `${formatDate(firstDate)}–${formatDate(lastDate)}`
-    : firstDate ? formatDate(firstDate) : ''
-  let summary = `Fly to ${visit.venue.name} to see ${visit.playerNames.length} player${visit.playerNames.length !== 1 ? 's' : ''} — ${visit.isHome ? 'home game' : `the ${orgLabel || 'team'} ha${visit.playerNames.length !== 1 ? 've' : 's'} an away series there`}. ~${visit.estimatedTravelHours}h travel (${milesDisplay} mi). ${visit.dates.length} date${visit.dates.length !== 1 ? 's' : ''} available${dateRangeLabel ? ` ${dateRangeLabel}` : ''}. Rental car likely needed.`
+  let summary = `Fly to ${visit.venue.name} to see ${visit.playerNames.length} player${visit.playerNames.length !== 1 ? 's' : ''}`
+  summary += ` — ${visit.isHome ? `${orgLabel || 'team'} home game` : `${orgLabel || 'team'} away series`}.`
+  summary += ` ~${visit.estimatedTravelHours}h travel (${milesDisplay} mi). Rental car likely needed.`
   if (t1Names.length > 0) summary += ` Top priority: ${t1Names.join(', ')}.`
   if (t2Names.length > 0) summary += ` Also seeing: ${t2Names.join(', ')}.`
 
@@ -1677,7 +1700,7 @@ function FlyInCard({
   } else if (t1Names.length === 1 && isPriority) {
     flyInWhy = `Only way to reach ${t1Names[0]} this window.`
   } else if (t1Names.length === 1) {
-    flyInWhy = `Worth the flight — sees ${t1Names[0]} (must-see) at one venue.`
+    flyInWhy = `Worth the flight — sees ${t1Names[0]} (must-see).`
   } else if (visit.playerNames.length >= 3) {
     flyInWhy = `Worth the flight — sees ${visit.playerNames.length} players at one venue.`
   }
@@ -1739,7 +1762,7 @@ function FlyInCard({
             {breakdown && (
               <span
                 className="rounded-lg bg-purple-500/10 px-2 py-0.5 text-xs font-bold text-purple-400"
-                title="Score for this single venue — not comparable to multi-stop road trips"
+                title="Single-venue score — fly-ins cover 1 venue vs road trips which chain multiple"
               >
                 {breakdown.finalScore} pts
               </span>
@@ -1758,12 +1781,10 @@ function FlyInCard({
             </button>
           </div>
           <p className="mt-0.5 text-sm text-text-dim">
-            {visit.venue.name}
-            {orgLabel && orgLabel !== visit.venue.name && (
-              <span className="ml-2 rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-400/80">
-                {visit.isHome ? `${orgLabel} home` : `${orgLabel} away`}
-              </span>
-            )}
+            {dateLabel}
+            <span className="ml-2 text-xs text-text-dim/60">
+              {dayCount} date{dayCount !== 1 ? 's' : ''} available
+            </span>
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
@@ -1829,7 +1850,7 @@ function FlyInCard({
                 )}
               </div>
               <p className="mt-1 text-text-dim">
-                Total: {breakdown.finalScore} pts — higher score = more high-priority players
+                Total: {breakdown.finalScore} pts — single-venue score (road trips score higher by chaining multiple venues)
               </p>
             </div>
           )}
@@ -1843,14 +1864,31 @@ function FlyInCard({
               <span className="text-text">{visit.venue.name}</span>
               <span className="text-text-dim/60">(~{visit.estimatedTravelHours}h · {milesDisplay} mi)</span>
             </div>
-            {orgLabel && orgLabel !== visit.venue.name && (
-              <p className="mt-0.5 text-text-dim/60">
-                {visit.isHome ? `${orgLabel} home game` : `${orgLabel} away game`}
-              </p>
-            )}
             <p className="mt-1 text-text-dim/60">
               Includes flight + 1h airport overhead + ground transport · rental car likely needed
             </p>
+          </div>
+
+          {/* Day-by-day itinerary */}
+          <div className="mb-4 rounded-lg border border-border/30 bg-gray-950/30 px-3 py-2 text-sm text-text-dim">
+            {visit.dates.map((day, dayIdx) => {
+              const dayDate = new Date(day + 'T12:00:00Z')
+              const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayDate.getUTCDay()]
+              const monthDay = formatDate(day)
+              const isTue = dayDate.getUTCDay() === 2
+              const playerList = visit.playerNames.length <= 3
+                ? visit.playerNames.join(', ')
+                : `${visit.playerNames.length} players`
+              return (
+                <p key={day} className="leading-relaxed">
+                  <span className={`font-medium ${isTue ? 'text-accent-blue' : 'text-text'}`}>
+                    {dayName} {monthDay}{isTue ? ' (best day)' : ''}:
+                  </span>{' '}
+                  Fly to {visit.venue.name} — see {playerList} at {orgLabel || visit.venue.name}
+                  {dayIdx === 0 ? ` — ${visit.isHome ? 'home game' : 'away game'}` : ''}.
+                </p>
+              )
+            })}
           </div>
 
           {/* Venue card */}
@@ -1873,6 +1911,12 @@ function FlyInCard({
                 </a>
               )}
             </div>
+            {/* Confidence badge */}
+            {visit.confidence && visit.confidence !== 'high' && (
+              <p className="mt-1 rounded bg-accent-orange/10 px-1.5 py-0.5 text-[10px] text-accent-orange inline-block">
+                Estimated schedule — verify before booking
+              </p>
+            )}
             <div className="mt-1.5 flex flex-wrap gap-1">
               {visit.playerNames.map((name) => {
                 const player = playerMap.get(name)
@@ -1893,24 +1937,6 @@ function FlyInCard({
             </div>
           </div>
 
-          {/* Available dates */}
-          <div className="mb-3">
-            <p className="mb-1 text-xs font-medium text-text-dim">Available Dates ({visit.dates.length})</p>
-            <p className="text-sm text-text-dim">{dateLabel}</p>
-            <div className="mt-1 flex flex-wrap gap-1">
-              {visit.dates.map((d) => {
-                const dt = new Date(d + 'T12:00:00Z')
-                const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]!
-                const isTue = dayName === 'Tue'
-                return (
-                  <span key={d} className={`rounded px-1.5 py-0.5 text-[11px] ${isTue ? 'bg-accent-blue/15 text-accent-blue font-medium' : 'bg-gray-800 text-text-dim'}`}>
-                    {formatDate(d)}
-                  </span>
-                )
-              })}
-            </div>
-          </div>
-
           {/* Mobile copy button */}
           <div className="flex gap-2 sm:hidden">
             <button
@@ -1919,6 +1945,33 @@ function FlyInCard({
             >
               {copiedFlyIn === flyInKey ? 'Copied!' : 'Copy'}
             </button>
+          </div>
+
+          {/* Mark Visited */}
+          <div className="mt-4 border-t border-border/30 pt-3">
+            <p className="mb-2 text-[11px] font-medium text-text-dim">Mark Visited</p>
+            <div className="flex flex-wrap gap-1.5">
+              {visit.playerNames.map((name) => {
+                const player = playerMap.get(name)
+                if (!player) return null
+                const tier = player.tier
+                const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                return (
+                  <MarkVisitedChip
+                    key={name}
+                    name={name}
+                    tier={tier}
+                    dotColor={dotColor}
+                    marked={markedPlayers.has(name)}
+                    onMark={() => {
+                      const today = new Date().toISOString().split('T')[0]!
+                      setVisitOverride(name, player.visitsCompleted + 1, today)
+                      setMarkedPlayers((prev) => new Set(prev).add(name))
+                    }}
+                  />
+                )
+              })}
+            </div>
           </div>
 
           {/* Player list */}

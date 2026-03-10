@@ -825,7 +825,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
 
 export default React.memo(TripCard)
 
-function MarkVisitedChip({ name, tier, dotColor, marked, onMark }: {
+export function MarkVisitedChip({ name, tier, dotColor, marked, onMark }: {
   name: string
   tier: number
   dotColor: string

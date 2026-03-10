@@ -798,7 +798,8 @@ export async function generateTrips(
   const flyInVisits: FlyInVisit[] = []
   const flyInCovered = new Set<string>()
 
-  // Group remaining eligible games by venue for players not on road trips
+  // Group remaining eligible games by venue + team (not just venue coords).
+  // Different teams visiting the same stadium are separate fly-in options.
   const flyInVenueMap = new Map<string, {
     venue: GameEvent['venue']
     players: Set<string>
@@ -808,6 +809,7 @@ export async function generateTrips(
     distanceKm: number
     sourceUrl?: string
     confidence?: VisitConfidence
+    teamLabel: string // the team whose schedule this game belongs to
   }>()
 
   // Confidence priority for taking highest per venue
@@ -818,7 +820,10 @@ export async function generateTrips(
     const relevantPlayers = game.playerNames.filter((n) => playersNotOnRoadTrips.includes(n))
     if (relevantPlayers.length === 0) continue
 
-    const key = coordKey(game.venue.coords)
+    // Key by venue coords + the team the players belong to (home or away side)
+    // This prevents merging Red Sox players with Nationals players at the same stadium
+    const teamName = game.isHome ? game.homeTeam : game.awayTeam
+    const key = `${coordKey(game.venue.coords)}|${teamName}`
     const existing = flyInVenueMap.get(key)
     if (existing) {
       for (const name of relevantPlayers) existing.players.add(name)
@@ -839,6 +844,7 @@ export async function generateTrips(
         distanceKm: distKm,
         sourceUrl: game.sourceUrl,
         confidence: game.confidence,
+        teamLabel: teamName,
       })
     }
   }
@@ -864,6 +870,7 @@ export async function generateTrips(
       isHome: entry.isHome,
       sourceUrl: entry.sourceUrl,
       confidence: entry.confidence,
+      teamLabel: entry.teamLabel,
     })
 
     for (const name of entry.players) flyInCovered.add(name)

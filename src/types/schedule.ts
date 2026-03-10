@@ -67,6 +67,7 @@ export interface FlyInVisit {
   isHome: boolean
   sourceUrl?: string
   confidence?: VisitConfidence
+  teamLabel?: string // the team whose schedule these games belong to
 }
 
 export interface NearMiss {
