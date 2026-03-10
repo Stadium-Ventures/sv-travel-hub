@@ -888,20 +888,6 @@ export async function generateTrips(
     const best = remainingCandidates[0]!
     if (best.visitValue === 0) break
 
-    // When priority players are set, only select trips that include at least one priority player
-    if (priorityPlayers.length > 0) {
-      const bestPlayers = new Set([
-        ...best.anchorGame.playerNames,
-        ...best.nearbyGames.flatMap((g) => g.playerNames),
-      ])
-      const hasPriority = priorityPlayers.some((n) => bestPlayers.has(n))
-      if (!hasPriority) {
-        // Skip this trip — it doesn't include any priority player
-        remainingCandidates.shift()
-        continue
-      }
-    }
-
     selectedTrips.push(best)
     recordTripPlayers(best)
 
