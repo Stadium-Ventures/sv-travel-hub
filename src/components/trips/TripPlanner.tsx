@@ -1152,8 +1152,14 @@ export default function TripPlanner() {
 
           {/* Priority player status — the most important thing */}
           {priorityPlayers.length > 0 && (() => {
+            // Sort trips same way as card list so trip numbers match
+            const sorted = [...tripPlan.trips].sort((a, b) => {
+              if (sortBy === 'score') return (b.scoreBreakdown?.finalScore ?? b.visitValue) - (a.scoreBreakdown?.finalScore ?? a.visitValue)
+              if (sortBy === 'date') return a.anchorGame.date.localeCompare(b.anchorGame.date)
+              return 0
+            })
             const prioInRoad = priorityPlayers.filter((n) =>
-              tripPlan.trips.some((t) => t.anchorGame.playerNames.includes(n) || t.nearbyGames.some((g) => g.playerNames.includes(n)))
+              sorted.some((t) => t.anchorGame.playerNames.includes(n) || t.nearbyGames.some((g) => g.playerNames.includes(n)))
             )
             const prioInFlyIn = priorityPlayers.filter((n) =>
               !prioInRoad.includes(n) && tripPlan.flyInVisits.some((v) => v.playerNames.includes(n))
@@ -1166,7 +1172,7 @@ export default function TripPlanner() {
                     ? <span className="text-accent-red">Priority player {prioMissing.join(', ')} not found in any trip option</span>
                     : <span className="text-accent-green">
                         {prioInRoad.map((n) => {
-                          const idx = tripPlan.trips.findIndex((t) => t.anchorGame.playerNames.includes(n) || t.nearbyGames.some((g) => g.playerNames.includes(n)))
+                          const idx = sorted.findIndex((t) => t.anchorGame.playerNames.includes(n) || t.nearbyGames.some((g) => g.playerNames.includes(n)))
                           return `${n} → Trip #${idx + 1}`
                         }).join(' · ')}
                         {prioInFlyIn.length > 0 && ` · ${prioInFlyIn.join(', ')} → Fly-in`}
@@ -1219,19 +1225,20 @@ export default function TripPlanner() {
           {/* Road trip cards */}
           {tripPlan.trips.length > 0 && (() => {
             // Tag each trip with its original index before filtering/sorting
-            let indexedTrips = tripPlan.trips.map((t, i) => ({ trip: t, originalIndex: i + 1 }))
+            let trips = [...tripPlan.trips]
 
             if (statusFilter !== 'all') {
-              indexedTrips = indexedTrips.filter(({ trip: t }) => tripStatuses[getTripKey(t)] === statusFilter)
+              trips = trips.filter((t) => tripStatuses[getTripKey(t)] === statusFilter)
             }
 
-            indexedTrips.sort((a, b) => {
-              if (sortBy === 'score') return (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) - (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue)
-              if (sortBy === 'date') return a.trip.anchorGame.date.localeCompare(b.trip.anchorGame.date)
+            trips.sort((a, b) => {
+              if (sortBy === 'score') return (b.scoreBreakdown?.finalScore ?? b.visitValue) - (a.scoreBreakdown?.finalScore ?? a.visitValue)
+              if (sortBy === 'date') return a.anchorGame.date.localeCompare(b.anchorGame.date)
               return 0
             })
 
-            const filteredTrips = indexedTrips.map(({ trip }) => trip)
+            // Number trips sequentially after sorting — #1 is always the best
+            const indexedTrips = trips.map((trip, i) => ({ trip, displayIndex: i + 1 }))
 
             return (
             <div id="section-road-trips">
@@ -1304,10 +1311,10 @@ export default function TripPlanner() {
               </div>
 
               <div className="space-y-4">
-                {indexedTrips.map(({ trip, originalIndex }, i) => (
-                  <TripCard key={`trip-${originalIndex}`} trip={trip} index={originalIndex} playerMap={playerMap} defaultExpanded={i === 0 && statusFilter === 'all'} onPlayerClick={setSelectedPlayer} />
+                {indexedTrips.map(({ trip, displayIndex }, i) => (
+                  <TripCard key={`trip-${getTripKey(trip)}`} trip={trip} index={displayIndex} playerMap={playerMap} defaultExpanded={i === 0 && statusFilter === 'all'} onPlayerClick={setSelectedPlayer} />
                 ))}
-                {filteredTrips.length === 0 && (
+                {trips.length === 0 && (
                   <p className="py-4 text-center text-sm text-text-dim">No trips match the selected filters.</p>
                 )}
               </div>
@@ -1315,37 +1322,37 @@ export default function TripPlanner() {
             )
           })()}
 
-          {/* Overlap warning with comparison */}
+          {/* Overlap warning — uses sorted trip order so numbers match cards above */}
           {tripPlan.trips.length > 1 && (() => {
-            const overlaps: Array<{ tripA: number; tripB: number; dates: string[]; uniqueA: string[]; uniqueB: string[]; shared: string[] }> = []
-            for (let a = 0; a < tripPlan.trips.length; a++) {
-              for (let b = a + 1; b < tripPlan.trips.length; b++) {
-                const daysA = new Set(tripPlan.trips[a]!.suggestedDays)
-                const sharedDates = tripPlan.trips[b]!.suggestedDays.filter((d) => daysA.has(d))
+            // Sort trips the same way as the card list so numbers are consistent
+            const sorted = [...tripPlan.trips].sort((a, b) => {
+              if (sortBy === 'score') return (b.scoreBreakdown?.finalScore ?? b.visitValue) - (a.scoreBreakdown?.finalScore ?? a.visitValue)
+              if (sortBy === 'date') return a.anchorGame.date.localeCompare(b.anchorGame.date)
+              return 0
+            })
+            const overlaps: Array<{ idxA: number; idxB: number; tripA: typeof sorted[0]; tripB: typeof sorted[0]; dates: string[]; uniqueA: string[]; uniqueB: string[]; shared: string[] }> = []
+            for (let a = 0; a < sorted.length; a++) {
+              for (let b = a + 1; b < sorted.length; b++) {
+                const daysA = new Set(sorted[a]!.suggestedDays)
+                const sharedDates = sorted[b]!.suggestedDays.filter((d) => daysA.has(d))
                 if (sharedDates.length > 0) {
-                  // Compare players between the two trips
-                  const playersA = new Set([
-                    ...tripPlan.trips[a]!.anchorGame.playerNames,
-                    ...tripPlan.trips[a]!.nearbyGames.flatMap((g) => g.playerNames),
-                  ])
-                  const playersB = new Set([
-                    ...tripPlan.trips[b]!.anchorGame.playerNames,
-                    ...tripPlan.trips[b]!.nearbyGames.flatMap((g) => g.playerNames),
-                  ])
-                  const shared = [...playersA].filter((n) => playersB.has(n))
-                  const uniqueA = [...playersA].filter((n) => !playersB.has(n))
-                  const uniqueB = [...playersB].filter((n) => !playersA.has(n))
-                  overlaps.push({ tripA: a + 1, tripB: b + 1, dates: sharedDates, uniqueA, uniqueB, shared })
+                  const playersA = new Set([...sorted[a]!.anchorGame.playerNames, ...sorted[a]!.nearbyGames.flatMap((g) => g.playerNames)])
+                  const playersB = new Set([...sorted[b]!.anchorGame.playerNames, ...sorted[b]!.nearbyGames.flatMap((g) => g.playerNames)])
+                  overlaps.push({
+                    idxA: a + 1, idxB: b + 1,
+                    tripA: sorted[a]!, tripB: sorted[b]!,
+                    dates: sharedDates,
+                    uniqueA: [...playersA].filter((n) => !playersB.has(n)),
+                    uniqueB: [...playersB].filter((n) => !playersA.has(n)),
+                    shared: [...playersA].filter((n) => playersB.has(n)),
+                  })
                 }
               }
             }
             if (overlaps.length === 0) return null
             return (
               <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-4">
-                <div
-                  className="flex cursor-pointer items-center justify-between"
-                  onClick={() => setShowOverlaps(!showOverlaps)}
-                >
+                <div className="flex cursor-pointer items-center justify-between" onClick={() => setShowOverlaps(!showOverlaps)}>
                   <h3 className="text-sm font-semibold text-accent-orange">
                     <span className={`mr-1.5 inline-block text-text-dim transition-transform ${showOverlaps ? 'rotate-90' : ''}`}>&#9654;</span>
                     {overlaps.length} date overlap{overlaps.length !== 1 ? 's' : ''} between trips
@@ -1353,17 +1360,17 @@ export default function TripPlanner() {
                 </div>
                 {showOverlaps && (
                 <>
-                <p className="mt-2 mb-3 text-[11px] text-text-dim">These trips share dates — you can only take one per time slot. Choosing marks it as "Planned" so you can filter by status above.</p>
+                <p className="mt-2 mb-3 text-[11px] text-text-dim">These trips share dates — you can only take one per time slot.</p>
                 <div className="space-y-4">
                   {overlaps.map((o, i) => {
-                    const tripAKey = getTripKey(tripPlan.trips[o.tripA - 1]!)
-                    const tripBKey = getTripKey(tripPlan.trips[o.tripB - 1]!)
+                    const tripAKey = getTripKey(o.tripA)
+                    const tripBKey = getTripKey(o.tripB)
                     const tripAStatus = tripStatuses[tripAKey]
                     const tripBStatus = tripStatuses[tripBKey]
                     return (
                     <div key={i} className="rounded-lg border border-border/30 bg-gray-950/30 p-3">
                       <p className="mb-2 text-xs text-text-dim">
-                        <span className="font-medium text-accent-orange">Trips #{o.tripA} and #{o.tripB}</span> overlap on{' '}
+                        <span className="font-medium text-accent-orange">Trips #{o.idxA} and #{o.idxB}</span> overlap on{' '}
                         {o.dates.map((d) => {
                           const dt = new Date(d + 'T12:00:00Z')
                           return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()]} ${dt.getUTCDate()}`
@@ -1371,7 +1378,7 @@ export default function TripPlanner() {
                       </p>
                       <div className="grid grid-cols-3 gap-2 text-[11px]">
                         <div>
-                          <p className="mb-1 font-medium text-accent-blue">Only in #{o.tripA}</p>
+                          <p className="mb-1 font-medium text-accent-blue">Only in #{o.idxA}</p>
                           {o.uniqueA.length > 0 ? o.uniqueA.map((n) => {
                             const p = playerMap.get(n)
                             return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(T${p.tier})` : ''}</p>
@@ -1385,7 +1392,7 @@ export default function TripPlanner() {
                           }) : <p className="text-text-dim/50">None</p>}
                         </div>
                         <div>
-                          <p className="mb-1 font-medium text-accent-green">Only in #{o.tripB}</p>
+                          <p className="mb-1 font-medium text-accent-green">Only in #{o.idxB}</p>
                           {o.uniqueB.length > 0 ? o.uniqueB.map((n) => {
                             const p = playerMap.get(n)
                             return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(T${p.tier})` : ''}</p>
@@ -1396,22 +1403,18 @@ export default function TripPlanner() {
                         <button
                           onClick={() => { setTripStatus(tripAKey, 'planned'); setTripStatus(tripBKey, null) }}
                           className={`rounded-lg px-3 py-1 text-[11px] font-medium transition-colors ${
-                            tripAStatus === 'planned'
-                              ? 'bg-accent-blue text-white'
-                              : 'border border-accent-blue/30 text-accent-blue hover:bg-accent-blue/10'
+                            tripAStatus === 'planned' ? 'bg-accent-blue text-white' : 'border border-accent-blue/30 text-accent-blue hover:bg-accent-blue/10'
                           }`}
                         >
-                          {tripAStatus === 'planned' ? `✓ Trip #${o.tripA} chosen` : `Choose Trip #${o.tripA}`}
+                          {tripAStatus === 'planned' ? `Trip #${o.idxA} chosen` : `Choose Trip #${o.idxA}`}
                         </button>
                         <button
                           onClick={() => { setTripStatus(tripBKey, 'planned'); setTripStatus(tripAKey, null) }}
                           className={`rounded-lg px-3 py-1 text-[11px] font-medium transition-colors ${
-                            tripBStatus === 'planned'
-                              ? 'bg-accent-green text-white'
-                              : 'border border-accent-green/30 text-accent-green hover:bg-accent-green/10'
+                            tripBStatus === 'planned' ? 'bg-accent-green text-white' : 'border border-accent-green/30 text-accent-green hover:bg-accent-green/10'
                           }`}
                         >
-                          {tripBStatus === 'planned' ? `✓ Trip #${o.tripB} chosen` : `Choose Trip #${o.tripB}`}
+                          {tripBStatus === 'planned' ? `Trip #${o.idxB} chosen` : `Choose Trip #${o.idxB}`}
                         </button>
                       </div>
                     </div>
