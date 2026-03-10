@@ -234,6 +234,8 @@ export default function TripPlanner() {
   const tripStatuses = useTripStore((s) => s.tripStatuses)
   const setTripStatus = useTripStore((s) => s.setTripStatus)
   const proGames = useScheduleStore((s) => s.proGames)
+  const ncaaGames = useScheduleStore((s) => s.ncaaGames)
+  const hsGames = useScheduleStore((s) => s.hsGames)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
   const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
@@ -313,11 +315,22 @@ export default function TripPlanner() {
     || (hasHsDates && hasHsPlayers)
   const canGenerate = hasData && players.length > 0 && !computing
 
-  // Data freshness checks
-  const proStale = proFetchedAt && (Date.now() - proFetchedAt > 24 * 60 * 60 * 1000)
-  const ncaaStale = ncaaFetchedAt && (Date.now() - ncaaFetchedAt > 24 * 60 * 60 * 1000)
-  const hsStale = hsFetchedAt && (Date.now() - hsFetchedAt > 24 * 60 * 60 * 1000)
-  const showFreshnessWarning = (hasProPlayers && (proStale || !proFetchedAt)) || (hasNcaaPlayers && (ncaaStale || !ncaaFetchedAt)) || (hasHsPlayers && (hsStale || !hsFetchedAt))
+  // Data freshness checks — timestamps may persist across sessions but games don't.
+  // "Needs loading" = no games in memory (regardless of timestamp).
+  // "Stale" = games loaded but > 24h ago.
+  const SIX_HOURS = 6 * 60 * 60 * 1000
+  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000
+  const proNeedsLoad = hasProPlayers && proGames.length === 0
+  const ncaaNeedsLoad = hasNcaaPlayers && ncaaGames.length === 0
+  const hsNeedsLoad = hasHsPlayers && hsGames.length === 0
+  const proStale = proFetchedAt && proGames.length > 0 && (Date.now() - proFetchedAt > TWENTY_FOUR_HOURS)
+  const ncaaStale = ncaaFetchedAt && ncaaGames.length > 0 && (Date.now() - ncaaFetchedAt > TWENTY_FOUR_HOURS)
+  const hsStale = hsFetchedAt && hsGames.length > 0 && (Date.now() - hsFetchedAt > TWENTY_FOUR_HOURS)
+  // Show if data was fetched recently (persisted timestamp) — user can skip re-fetch
+  const proRecentlyFetched = proFetchedAt && proGames.length === 0 && (Date.now() - proFetchedAt < SIX_HOURS)
+  const ncaaRecentlyFetched = ncaaFetchedAt && ncaaGames.length === 0 && (Date.now() - ncaaFetchedAt < SIX_HOURS)
+  const hsRecentlyFetched = hsFetchedAt && hsGames.length === 0 && (Date.now() - hsFetchedAt < SIX_HOURS)
+  const showFreshnessWarning = proNeedsLoad || ncaaNeedsLoad || hsNeedsLoad || proStale || ncaaStale || hsStale
 
   // Tier-based player orgs for loading buttons
   const customNcaaAliasesRef = useScheduleStore((s) => s.customNcaaAliases)
@@ -511,26 +524,32 @@ export default function TripPlanner() {
         {/* Data freshness indicators */}
         <div className="mb-4 flex flex-wrap gap-2 text-[11px]">
           <span className={`rounded px-2 py-0.5 ${
-            proFetchedAt
+            proGames.length > 0
               ? proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
-              : 'bg-gray-800 text-text-dim/60'
+              : proRecentlyFetched ? 'bg-accent-blue/10 text-accent-blue' : 'bg-gray-800 text-text-dim/60'
           }`}>
-            Pro games: {proFetchedAt ? `loaded ${formatTimeAgo(proFetchedAt)}${proStale ? ' — may be outdated' : ''}` : 'not loaded yet'}
+            Pro games: {proGames.length > 0
+              ? `${proGames.length} loaded ${formatTimeAgo(proFetchedAt!)}${proStale ? ' — may be outdated' : ''}`
+              : proRecentlyFetched ? `fetched ${formatTimeAgo(proFetchedAt!)} — reload to use` : 'not loaded yet'}
           </span>
           <span className={`rounded px-2 py-0.5 ${
-            ncaaFetchedAt
+            ncaaGames.length > 0
               ? ncaaStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
-              : 'bg-gray-800 text-text-dim/60'
+              : ncaaRecentlyFetched ? 'bg-accent-blue/10 text-accent-blue' : 'bg-gray-800 text-text-dim/60'
           }`}>
-            College games: {ncaaFetchedAt ? `loaded ${formatTimeAgo(ncaaFetchedAt)}${ncaaStale ? ' — may be outdated' : ''}` : 'not loaded yet'}
+            College games: {ncaaGames.length > 0
+              ? `${ncaaGames.length} loaded ${formatTimeAgo(ncaaFetchedAt!)}${ncaaStale ? ' — may be outdated' : ''}`
+              : ncaaRecentlyFetched ? `fetched ${formatTimeAgo(ncaaFetchedAt!)} — reload to use` : 'not loaded yet'}
           </span>
           {hasHsPlayers && (
             <span className={`rounded px-2 py-0.5 ${
-              hsFetchedAt
+              hsGames.length > 0
                 ? hsStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
-                : 'bg-gray-800 text-text-dim/60'
+                : hsRecentlyFetched ? 'bg-accent-blue/10 text-accent-blue' : 'bg-gray-800 text-text-dim/60'
             }`}>
-              HS games: {hsFetchedAt ? `loaded ${formatTimeAgo(hsFetchedAt)}${hsStale ? ' — may be outdated' : ''}` : 'not loaded yet'}
+              HS games: {hsGames.length > 0
+                ? `${hsGames.length} loaded ${formatTimeAgo(hsFetchedAt!)}${hsStale ? ' — may be outdated' : ''}`
+                : hsRecentlyFetched ? `fetched ${formatTimeAgo(hsFetchedAt!)} — reload to use` : 'not loaded yet'}
             </span>
           )}
         </div>
@@ -538,22 +557,28 @@ export default function TripPlanner() {
         {showFreshnessWarning && (
           <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
             <p className="text-[11px] text-accent-orange">
-              {!proFetchedAt && hasProPlayers && 'Pro game schedules haven\'t been loaded yet. '}
+              {proNeedsLoad && (proRecentlyFetched
+                ? `Pro schedules were fetched ${formatTimeAgo(proFetchedAt!)} — reload below to use them. `
+                : 'Pro game schedules haven\'t been loaded yet. ')}
               {proStale && 'Pro game data is more than 24 hours old. '}
-              {!ncaaFetchedAt && hasNcaaPlayers && 'College game schedules haven\'t been loaded yet (using estimated game days until real schedules are loaded). '}
+              {ncaaNeedsLoad && (ncaaRecentlyFetched
+                ? `College schedules were fetched ${formatTimeAgo(ncaaFetchedAt!)} — reload below to use them. `
+                : 'College game schedules haven\'t been loaded yet (using estimated game days until real schedules are loaded). ')}
               {ncaaStale && 'College game data is more than 24 hours old. '}
-              {!hsFetchedAt && hasHsPlayers && (hsVenueMissing
-                ? 'HS school locations haven\'t been mapped yet. '
-                : 'HS schedules haven\'t been loaded yet (using estimated game days until real schedules are loaded). ')}
+              {hsNeedsLoad && (hsRecentlyFetched
+                ? `HS schedules were fetched ${formatTimeAgo(hsFetchedAt!)} — reload below to use them. `
+                : hasHsPlayers && (hsVenueMissing
+                  ? 'HS school locations haven\'t been mapped yet. '
+                  : 'HS schedules haven\'t been loaded yet (using estimated game days until real schedules are loaded). '))}
               {hsStale && 'HS game data is more than 24 hours old. '}
               Load schedules below to enable trip generation.
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {/* Load All button — fires all pending schedule fetches + geocoding at once */}
               {(() => {
-                const needsPro = hasProPlayers && (!proFetchedAt || proStale)
-                const needsNcaa = hasNcaaPlayers && (!ncaaFetchedAt || ncaaStale)
-                const needsHs = hasHsPlayers && (!hsFetchedAt || hsStale)
+                const needsPro = proNeedsLoad || !!proStale
+                const needsNcaa = ncaaNeedsLoad || !!ncaaStale
+                const needsHs = hsNeedsLoad || !!hsStale
                 const sectionsNeeded = [needsPro, needsNcaa, needsHs].filter(Boolean).length
                 if (sectionsNeeded === 0) return null
                 const proTime = needsPro ? Math.max(Object.keys(playerTeamAssignments).length, players.filter(p => p.level === 'Pro').length) * 2 : 0
@@ -590,7 +615,7 @@ export default function TripPlanner() {
                   </button>
                 )
               })()}
-              {hasProPlayers && (!proFetchedAt || proStale) && (
+              {(proNeedsLoad || proStale) && (
                 <>
                   {Object.keys(playerTeamAssignments).length === 0 && (
                     <button
@@ -609,11 +634,11 @@ export default function TripPlanner() {
                     disabled={schedulesLoading || Object.keys(playerTeamAssignments).length === 0}
                     className="rounded-lg bg-accent-blue px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
                   >
-                    {schedulesLoading ? 'Loading...' : Object.keys(playerTeamAssignments).length === 0 ? 'Match players to teams first' : `${!proFetchedAt ? '' : 'Re'}load Pro Schedules`}
+                    {schedulesLoading ? 'Loading...' : Object.keys(playerTeamAssignments).length === 0 ? 'Match players to teams first' : `${proGames.length > 0 || proRecentlyFetched ? 'Re' : ''}load Pro Schedules`}
                   </button>
                 </>
               )}
-              {hasNcaaPlayers && (!ncaaFetchedAt || ncaaStale) && (
+              {(ncaaNeedsLoad || ncaaStale) && (
                 <>
                   {ncaaT1T2SchoolCount > 0 && ncaaT1T2SchoolCount < ncaaAllSchoolCount && (
                     <button
@@ -629,11 +654,11 @@ export default function TripPlanner() {
                     disabled={ncaaLoading}
                     className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
                   >
-                    {ncaaLoading ? 'Loading...' : `${!ncaaFetchedAt ? '' : 'Re'}load All College (~${ncaaAllSchoolCount * 5}s)`}
+                    {ncaaLoading ? 'Loading...' : `${ncaaGames.length > 0 || ncaaRecentlyFetched ? 'Re' : ''}load All College (~${ncaaAllSchoolCount * 5}s)`}
                   </button>
                 </>
               )}
-              {hasHsPlayers && (!hsFetchedAt || hsStale) && (
+              {(hsNeedsLoad || hsStale) && (
                 <>
                   {hsVenueMissing && (
                     <button
@@ -665,7 +690,7 @@ export default function TripPlanner() {
                       disabled={hsLoading}
                       className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
                     >
-                      {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}${!hsFetchedAt ? '' : 'Re'}load All HS (~${hsAllSchoolCount * 5}s)`}
+                      {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}${hsGames.length > 0 || hsRecentlyFetched ? 'Re' : ''}load All HS (~${hsAllSchoolCount * 5}s)`}
                     </button>
                   )}
                   {hsGeocodingFailedSchools.length > 0 && (

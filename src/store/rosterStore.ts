@@ -9,6 +9,9 @@ interface VisitOverride {
   lastVisitDate: string | null
 }
 
+export type SortField = 'playerName' | 'tier' | 'visitsRemaining' | 'org' | 'loveScore'
+export type SortDir = 'asc' | 'desc'
+
 interface RosterState {
   players: RosterPlayer[]
   loading: boolean
@@ -16,10 +19,14 @@ interface RosterState {
   lastFetchedAt: string | null
   parseWarnings: string[]
   visitOverrides: Record<string, VisitOverride> // playerName → override
+  sortColumn: SortField
+  sortDirection: SortDir
 
   fetchRoster: () => Promise<void>
   setVisitOverride: (playerName: string, visitsCompleted: number, lastVisitDate: string | null) => void
   clearVisitOverride: (playerName: string) => void
+  setSortColumn: (column: SortField) => void
+  setSortDirection: (dir: SortDir) => void
 }
 
 function applyOverrides(players: RosterPlayer[], overrides: Record<string, VisitOverride>): RosterPlayer[] {
@@ -44,6 +51,8 @@ export const useRosterStore = create<RosterState>()(
       lastFetchedAt: null,
       parseWarnings: [],
       visitOverrides: {},
+      sortColumn: 'tier',
+      sortDirection: 'asc',
 
       fetchRoster: async () => {
         if (get().loading) return
@@ -88,6 +97,9 @@ export const useRosterStore = create<RosterState>()(
         delete overrides[playerName]
         set({ visitOverrides: overrides })
       },
+
+      setSortColumn: (column) => set({ sortColumn: column }),
+      setSortDirection: (dir) => set({ sortDirection: dir }),
     }),
     {
       name: 'sv-travel-roster',
@@ -95,6 +107,8 @@ export const useRosterStore = create<RosterState>()(
         players: state.players,
         lastFetchedAt: state.lastFetchedAt,
         visitOverrides: state.visitOverrides,
+        sortColumn: state.sortColumn,
+        sortDirection: state.sortDirection,
       }),
       merge: (persisted, current) => {
         const p = persisted as any
@@ -103,6 +117,8 @@ export const useRosterStore = create<RosterState>()(
           ...(p ?? {}),
           players: p?.players ?? [],
           visitOverrides: p?.visitOverrides ?? {},
+          sortColumn: p?.sortColumn ?? 'tier',
+          sortDirection: p?.sortDirection ?? 'asc',
         }
       },
     },

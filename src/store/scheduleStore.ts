@@ -331,15 +331,25 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
-          // Detect spring training: before April 1, MiLB rosters are likely empty
+          // Detect spring training: use month check + MiLB roster coverage heuristic.
+          // Even in April, MiLB rosters may not be finalized until opening day.
           const now = new Date()
-          const isSpringTraining = now.getMonth() < 3 // Jan=0, Feb=1, Mar=2 → before April
-          const milbRosterCount = milbRosterEntries.length
+          const monthBasedST = now.getMonth() < 3 // Jan=0, Feb=1, Mar=2 → before April
 
-          // If spring training and MiLB rosters are sparse, fetch last year's rosters
-          // to estimate each player's level, then promote by one level
+          // Check if current MiLB rosters cover our tracked players well
+          const trackedProWithId = proPlayers.filter((p) => p.mlbPlayerId)
+          const milbCoverage = trackedProWithId.length > 0
+            ? trackedProWithId.filter((p) => milbPlayerIdToTeam.has(p.mlbPlayerId!)).length / trackedProWithId.length
+            : 0
+
+          // Use spring training estimation if: before April OR if MiLB coverage is < 50%
+          // (MiLB rosters aren't finalized yet even in early April)
+          const isSpringTraining = monthBasedST || milbCoverage < 0.5
+          // During spring training, ALWAYS fetch last year's rosters to estimate
+          // each player's level, then promote by one level. Current MiLB rosters
+          // are unreliable before April — they may have some entries but not all players.
           let lastYearMilbLookup = new Map<number, PlayerTeamAssignment>()
-          if (isSpringTraining && milbRosterCount < 20) {
+          if (isSpringTraining) {
             const lastYear = now.getFullYear() - 1
             const lastYearTeamsToQuery = allAffiliates
               .filter((a) => [...parentOrgIds].some((orgId) => a.parentOrgId === orgId) && a.sportId !== 1)
@@ -445,6 +455,18 @@ export const useScheduleStore = create<ScheduleState>()(
               const normalizedName = player.playerName.toLowerCase().trim()
               const match = nameToTeam.get(normalizedName)
               if (match) {
+                // During spring training, redirect MLB-level matches to MiLB estimate
+                if (isSpringTraining && match.sportId === 1) {
+                  const orgId = resolveMLBTeamId(player.org, customMlb)
+                  const highA = orgId ? findAffiliateForSport(orgId, 13) : null
+                  if (highA) {
+                    newAssignments[player.playerName] = highA
+                    assignedCount++
+                    const idx = notFoundNames.indexOf(player.playerName)
+                    if (idx >= 0) notFoundNames.splice(idx, 1)
+                    continue
+                  }
+                }
                 newAssignments[player.playerName] = match
                 assignedCount++
                 // Remove from notFoundNames if present
@@ -477,7 +499,7 @@ export const useScheduleStore = create<ScheduleState>()(
           set({
             playerTeamAssignments: newAssignments,
             autoAssignLoading: false,
-            autoAssignResult: { assigned: assignedCount, notFound: notFoundNames, springTrainingEstimate: isSpringTraining && lastYearMilbLookup.size > 0 },
+            autoAssignResult: { assigned: assignedCount, notFound: notFoundNames, springTrainingEstimate: isSpringTraining },
             assignmentLog: [...(get().assignmentLog ?? []), ...changeLog],
           })
 
@@ -688,10 +710,45 @@ export const useScheduleStore = create<ScheduleState>()(
             return t.toTeam.id !== assignedTeamId
           })
 
+          // Auto-correct assignments based on detected moves
+          const updatedAssignments = { ...assignments }
+          const moveLog: AssignmentChange[] = []
+          const moveTimestamp = Date.now()
+
+          for (const move of relevantMoves) {
+            const playerName = playerMlbIds.get(move.player.id)
+            if (!playerName || !move.toTeam) continue
+
+            const oldAssignment = assignments[playerName]
+            if (!oldAssignment) continue
+
+            // Find the destination team in affiliates to get sportId
+            const destAff = allAffiliates.find((a) => a.teamId === move.toTeam!.id)
+            if (destAff) {
+              updatedAssignments[playerName] = {
+                teamId: destAff.teamId,
+                sportId: destAff.sportId,
+                teamName: destAff.teamName,
+              }
+              moveLog.push({
+                playerName,
+                action: 'reassigned',
+                from: oldAssignment.teamName,
+                to: destAff.teamName,
+                timestamp: moveTimestamp,
+              })
+            }
+          }
+
           set({
             rosterMoves: relevantMoves,
             rosterMovesLoading: false,
             rosterMovesCheckedAt: new Date().toISOString(),
+            // Auto-update assignments from detected moves
+            ...(moveLog.length > 0 ? {
+              playerTeamAssignments: updatedAssignments,
+              assignmentLog: [...(get().assignmentLog ?? []), ...moveLog].slice(-50),
+            } : {}),
           })
         } catch (e) {
           const msg = e instanceof Error ? e.message : 'Unknown error'
@@ -896,7 +953,28 @@ export const useScheduleStore = create<ScheduleState>()(
               }
             }
 
-            if (!homeVenue) continue // No geocoded venue for this school
+            if (!homeVenue) {
+              // Add diagnostic warning — these players will fall back to synthetic events
+              const diag = useDiagnosticsStore.getState()
+              diag.addIssue({
+                level: 'warning',
+                source: 'hs',
+                message: `HS venue not geocoded for ${schoolKey.split('|')[0]} — games will use roster coordinates as fallback`,
+                details: `Players: ${playerNames.join(', ')}`,
+              })
+
+              // Fallback: try matching by full key (org|state) or any venue with the school org name
+              const schoolOrg = schoolKey.split('|')[0]?.toLowerCase() ?? ''
+              for (const [vKey, v] of Object.entries(venueState)) {
+                if (v.source === 'hs-geocoded' && vKey.replace(/^hs-/, '').toLowerCase().includes(schoolOrg)) {
+                  homeVenue = { name: v.name, coords: v.coords }
+                  break
+                }
+              }
+              if (!homeVenue) {
+                continue // No venue found — truly unresolvable
+              }
+            }
 
             for (const game of schedule.games) {
               // v1: home games only
@@ -989,9 +1067,11 @@ export const useScheduleStore = create<ScheduleState>()(
         assignmentLog: (state.assignmentLog ?? []).slice(-50), // keep last 50 entries
         rosterMoves: state.rosterMoves,
         rosterMovesCheckedAt: state.rosterMovesCheckedAt,
-        // proGames/ncaaGames/hsGames and their fetchedAt are NOT persisted.
-        // Games are too large, and timestamps are meaningless without the data.
-        // All are re-fetched each session.
+        // Persist fetch timestamps so we can show "Refresh" instead of auto-fetching
+        // when data was fetched recently (< 6 hours ago)
+        proFetchedAt: state.proFetchedAt,
+        ncaaFetchedAt: state.ncaaFetchedAt,
+        hsFetchedAt: state.hsFetchedAt,
       }),
       merge: (persisted, current) => {
         const p = persisted as any
@@ -1006,9 +1086,11 @@ export const useScheduleStore = create<ScheduleState>()(
           proGames: [],  // Always start fresh — re-fetch each session
           ncaaGames: [], // Always start fresh — re-fetch each session
           hsGames: [],   // Always start fresh — re-fetch each session
-          proFetchedAt: null,  // Clear stale timestamps — games aren't persisted
-          ncaaFetchedAt: null, // Clear stale timestamps — games aren't persisted
-          hsFetchedAt: null,   // Clear stale timestamps — games aren't persisted
+          // Preserve fetch timestamps so UI can show "data fetched X hours ago, Refresh?"
+          // instead of silently re-fetching on every page load
+          proFetchedAt: p?.proFetchedAt ?? null,
+          ncaaFetchedAt: p?.ncaaFetchedAt ?? null,
+          hsFetchedAt: p?.hsFetchedAt ?? null,
           rosterMoves: p?.rosterMoves ?? [],
         }
       },

@@ -10,6 +10,7 @@ import { resolveMLBTeamId, resolveNcaaName } from '../../data/aliases'
 import { resolveMaxPrepsSlug } from '../../lib/maxpreps'
 import { isSpringTraining } from '../../data/springTraining'
 import { formatTimeAgo, TIER_LABELS } from '../../lib/formatters'
+import { dispatchMapEvent, addMapEventListener } from '../../lib/mapEvents'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 
 // Build a mapping from venue key → player names at that venue
@@ -379,40 +380,31 @@ export default function MapView() {
     }
   }, [proGames, addProVenue])
 
-  // B4: Listen for CustomEvent from popup action handler
+  // B4: Listen for typed map event from popup action handler
   useEffect(() => {
-    function handleScheduleEvent(e: Event) {
-      const detail = (e as CustomEvent<{ player: string }>).detail
-      if (detail?.player) setSchedulePanelPlayer(detail.player)
-    }
-    window.addEventListener('map:open-schedule', handleScheduleEvent)
-    return () => window.removeEventListener('map:open-schedule', handleScheduleEvent)
+    return addMapEventListener('map:open-schedule', (detail) => {
+      if (detail.player) setSchedulePanelPlayer(detail.player)
+    })
   }, [])
 
   // Toast event listener
   useEffect(() => {
-    function handleToast(e: Event) {
-      const detail = (e as CustomEvent<{ message: string }>).detail
-      if (!detail?.message) return
+    const removeListener = addMapEventListener('map:toast', (detail) => {
       setToastMessage(detail.message)
       if (toastTimer.current) clearTimeout(toastTimer.current)
       toastTimer.current = setTimeout(() => setToastMessage(null), 3000)
-    }
-    window.addEventListener('map:toast', handleToast)
+    })
     return () => {
-      window.removeEventListener('map:toast', handleToast)
+      removeListener()
       if (toastTimer.current) clearTimeout(toastTimer.current)
     }
   }, [])
 
   // Explore pin event listener
   useEffect(() => {
-    function handleExplorePin(e: Event) {
-      const detail = (e as CustomEvent<{ lat: number; lng: number }>).detail
-      if (detail) setExplorePin({ lat: detail.lat, lng: detail.lng })
-    }
-    window.addEventListener('map:explore-pin', handleExplorePin)
-    return () => window.removeEventListener('map:explore-pin', handleExplorePin)
+    return addMapEventListener('map:explore-pin', (detail) => {
+      setExplorePin({ lat: detail.lat, lng: detail.lng })
+    })
   }, [])
 
   // Sync exploreMode to data attribute for map click handler
@@ -478,13 +470,13 @@ export default function MapView() {
               store.setPriorityPlayers([...current.slice(0, 1), playerName])
             }
             map.closePopup()
-            window.dispatchEvent(new CustomEvent('map:toast', {
-              detail: { message: removing
+            dispatchMapEvent('map:toast', {
+              message: removing
                 ? `${playerName} removed from priority`
-                : `${playerName} set as priority — trip planner will optimize around them` },
-            }))
+                : `${playerName} set as priority — trip planner will optimize around them`,
+            })
           } else if (action === 'schedule') {
-            window.dispatchEvent(new CustomEvent('map:open-schedule', { detail: { player: playerName } }))
+            dispatchMapEvent('map:open-schedule', { player: playerName })
             map.closePopup()
           } else if (action === 'visited') {
             const rosterStore = useRosterStore.getState()
@@ -500,9 +492,7 @@ export default function MapView() {
       // Explore mode: click-to-pin handler
       map.on('click', (e: import('leaflet').LeafletMouseEvent) => {
         if (mapRef.current?.dataset.exploreMode !== 'true') return
-        window.dispatchEvent(new CustomEvent('map:explore-pin', {
-          detail: { lat: e.latlng.lat, lng: e.latlng.lng },
-        }))
+        dispatchMapEvent('map:explore-pin', { lat: e.latlng.lat, lng: e.latlng.lng })
       })
 
       mapInstance.current = map
@@ -1076,7 +1066,7 @@ export default function MapView() {
                 localStorage.removeItem('sv-travel-d1baseball-cache')
                 localStorage.removeItem('sv-travel-maxpreps-cache')
                 localStorage.removeItem('sv-travel-geocode-cache')
-                window.dispatchEvent(new CustomEvent('map:toast', { detail: { message: 'Schedule caches cleared — reload schedules to refresh' } }))
+                dispatchMapEvent('map:toast', { message: 'Schedule caches cleared — reload schedules to refresh' })
               } catch { /* ignore */ }
             }}
             className="rounded px-2 py-0.5 text-text-dim hover:text-text hover:bg-gray-800 transition-colors"

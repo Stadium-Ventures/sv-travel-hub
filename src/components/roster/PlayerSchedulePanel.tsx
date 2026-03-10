@@ -259,9 +259,9 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                     : g.source === 'hs-lookup' && g.confidence === 'high' ? 'MaxPreps'
                     : g.confidence === 'medium' ? 'Likely'
                     : 'Estimated'
-                  const confidenceColor = confidenceLabel === 'Estimated' ? 'text-accent-orange'
-                    : confidenceLabel === 'Likely' ? 'text-yellow-400'
-                    : 'text-accent-green'
+                  const confidenceBadgeStyle = confidenceLabel === 'Estimated' ? 'bg-gray-500/15 text-gray-400'
+                    : confidenceLabel === 'Likely' ? 'bg-yellow-400/15 text-yellow-400'
+                    : 'bg-accent-green/15 text-accent-green'
                   return (
                     <div key={g.id} className={`rounded-lg border px-3 py-2 text-sm ${
                       isPostponed
@@ -278,7 +278,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                           }`}>
                             {sourceLabel}
                           </span>
-                          <span className={`text-[10px] font-medium ${confidenceColor}`}>
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${confidenceBadgeStyle}`}>
                             {confidenceLabel}
                           </span>
                           {isPostponed && (

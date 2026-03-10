@@ -179,7 +179,10 @@ function computeScoreBreakdown(
   }
 
   const rawScore = tier1Points + tier2Points + tier3Points
-  const finalScore = tuesdayBonus ? Math.round(rawScore * 1.2) : rawScore
+  // Tuesday bonus should NOT stack on top of pitcher match bonus —
+  // if any tracked pitcher is a probable starter, the 1.5x pitcher boost takes priority
+  const hasPitcherMatch = pitcherMatchBonus > 0
+  const finalScore = (tuesdayBonus && !hasPitcherMatch) ? Math.round(rawScore * 1.2) : rawScore
 
   return {
     tier1Count, tier1Points,
@@ -647,20 +650,38 @@ export async function generateTrips(
         }
       }
 
-      // Estimate total driving — sequential chain: home → anchor → stop2 → stop3 → ... → home
-      // Sort nearby games by distance from anchor so we visit closest first
-      const sortedNearby = [...nearbyGames].sort((a, b) => a.driveMinutes - b.driveMinutes)
-      let interVenueDrive = 0
-      let prevCoords = anchor.venue.coords
-      for (const g of sortedNearby) {
-        interVenueDrive += cachedDriveMinutes(prevCoords, g.venue.coords)
-        prevCoords = g.venue.coords
+      // Estimate total driving — try all permutations of nearby stops to find shortest route
+      // With at most 2-3 nearby stops, this is at most 6 permutations — negligible cost
+      function permutations<T>(arr: T[]): T[][] {
+        if (arr.length <= 1) return [arr]
+        const result: T[][] = []
+        for (let i = 0; i < arr.length; i++) {
+          const rest = [...arr.slice(0, i), ...arr.slice(i + 1)]
+          for (const perm of permutations(rest)) {
+            result.push([arr[i]!, ...perm])
+          }
+        }
+        return result
       }
-      const lastVenueKey = sortedNearby.length > 0
-        ? coordKey(sortedNearby[sortedNearby.length - 1]!.venue.coords)
-        : anchorKey
-      const returnHome = homeToVenue.get(lastVenueKey) ?? homeToAnchor
-      const totalDrive = homeToAnchor + interVenueDrive + returnHome
+
+      let bestTotalDrive = Infinity
+      for (const perm of permutations(nearbyGames)) {
+        let interVenueDrive = 0
+        let prevCoords = anchor.venue.coords
+        for (const g of perm) {
+          interVenueDrive += cachedDriveMinutes(prevCoords, g.venue.coords)
+          prevCoords = g.venue.coords
+        }
+        const lastKey = perm.length > 0
+          ? coordKey(perm[perm.length - 1]!.venue.coords)
+          : anchorKey
+        const returnHome = homeToVenue.get(lastKey) ?? homeToAnchor
+        const drive = homeToAnchor + interVenueDrive + returnHome
+        if (drive < bestTotalDrive) {
+          bestTotalDrive = drive
+        }
+      }
+      const totalDrive = bestTotalDrive
 
       // Skip trips that exceed total driving cap (too much time on the road for 3 days)
       if (totalDrive > MAX_TOTAL_DRIVE_MINUTES) continue
@@ -674,7 +695,7 @@ export async function generateTrips(
       // Drive efficiency penalty: prefer trips with less driving per point
       // A 30-point trip with 6h driving should be close in value to a 20-point trip with 2h driving
       const driveHours = totalDrive / 60
-      const efficiencyFactor = driveHours > 0 ? Math.max(0.5, 1.0 - (driveHours - 2) * 0.08) : 1.0
+      const efficiencyFactor = driveHours > 0 ? Math.max(0.6, 1.0 - (driveHours - 3) * 0.05) : 1.0
       const adjustedScore = Math.round(breakdown.finalScore * efficiencyFactor)
 
       candidates.push({
@@ -892,7 +913,7 @@ export async function generateTrips(
 
       // Apply drive efficiency penalty during greedy selection too
       const driveHours = trip.totalDriveMinutes / 60
-      const efficiencyFactor = driveHours > 0 ? Math.max(0.5, 1.0 - (driveHours - 2) * 0.08) : 1.0
+      const efficiencyFactor = driveHours > 0 ? Math.max(0.6, 1.0 - (driveHours - 3) * 0.05) : 1.0
       rawCoverageScore = Math.round(rawCoverageScore * efficiencyFactor)
 
       // Penalize trips that overlap with already-selected trips

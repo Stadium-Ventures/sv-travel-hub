@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRosterStore } from '../../store/rosterStore'
+import type { SortField } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { formatTimeAgo } from '../../lib/formatters'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
 import Term from '../ui/Term'
-
-type SortField = 'playerName' | 'tier' | 'visitsRemaining' | 'org' | 'loveScore'
-type SortDir = 'asc' | 'desc'
 
 export default function RosterDashboard() {
   const players = useRosterStore((s) => s.players)
@@ -39,9 +37,12 @@ export default function RosterDashboard() {
   const getPlayerData = useHeartbeatStore((s) => s.getPlayerData)
   const getPlayerUrgency = useHeartbeatStore((s) => s.getPlayerUrgency)
 
+  const sortField = useRosterStore((s) => s.sortColumn)
+  const sortDir = useRosterStore((s) => s.sortDirection)
+  const setSortField = useRosterStore((s) => s.setSortColumn)
+  const setSortDir = useRosterStore((s) => s.setSortDirection)
+
   const [levelFilter, setLevelFilter] = useState<PlayerLevel | 'All'>('All')
-  const [sortField, setSortField] = useState<SortField>('tier')
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [search, setSearch] = useState('')
 
   const hasHeartbeat = heartbeatPlayers.length > 0

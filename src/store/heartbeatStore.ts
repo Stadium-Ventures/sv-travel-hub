@@ -1,7 +1,34 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { fetchWithTimeout } from '../lib/fetchWithTimeout'
 
 const HEARTBEAT_BASE = 'https://sv-heartbeat.vercel.app/api/heartbeat'
+
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
+const MAX_RETRY_ATTEMPTS = 3
+
+async function fetchWithRetry(
+  url: string,
+  options?: RequestInit & { timeoutMs?: number },
+): Promise<Response> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, { timeoutMs: 10000, ...options })
+      if (res.ok || !RETRYABLE_STATUS.has(res.status)) {
+        return res
+      }
+      lastError = new Error(`HTTP ${res.status}`)
+    } catch (e) {
+      lastError = e
+    }
+    if (attempt < MAX_RETRY_ATTEMPTS - 1) {
+      const delayMs = 1000 * Math.pow(2, attempt) // 1s, 2s, 4s
+      await new Promise((r) => setTimeout(r, delayMs))
+    }
+  }
+  throw lastError
+}
 
 export interface HeartbeatPriority {
   name: string
@@ -82,8 +109,8 @@ export const useHeartbeatStore = create<HeartbeatState>()(
         set({ loading: true, error: null })
         try {
           const [priorityRes, summaryRes] = await Promise.all([
-            fetch(`${HEARTBEAT_BASE}/visit-priority`),
-            fetch(`${HEARTBEAT_BASE}/summary`),
+            fetchWithRetry(`${HEARTBEAT_BASE}/visit-priority`),
+            fetchWithRetry(`${HEARTBEAT_BASE}/summary`),
           ])
 
           if (!priorityRes.ok) throw new Error(`Visit priority API: ${priorityRes.status}`)

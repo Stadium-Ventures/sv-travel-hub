@@ -350,6 +350,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
   // Build concise summary
   const t1Names = [...allPlayers].filter((n) => playerMap.get(n)?.tier === 1)
 
+  const [scoreOpen, setScoreOpen] = useState(false)
   const [markedPlayers, setMarkedPlayers] = useState<Set<string>>(new Set())
   const [copyError, setCopyError] = useState(false)
   const [calError, setCalError] = useState(false)
@@ -555,6 +556,44 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
               Show on Map
             </button>
           </div>
+
+          {/* Score Details (collapsible, power-user info) */}
+          {breakdown && (
+            <div className="border-t border-border/30 pt-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); setScoreOpen(!scoreOpen) }}
+                className="flex items-center gap-1 text-[11px] text-text-dim/60 hover:text-text-dim transition-colors"
+              >
+                <span className={`transition-transform text-[9px] ${scoreOpen ? 'rotate-90' : ''}`}>&#9654;</span>
+                Score Details
+                <span className="text-text-dim/40">({breakdown.finalScore} pts)</span>
+              </button>
+              {scoreOpen && (
+                <div className="mt-1.5 grid grid-cols-2 gap-x-6 gap-y-0.5 text-[11px] text-text-dim/70 pl-3">
+                  <span className="col-span-2 text-xs font-semibold text-text-dim mb-0.5">
+                    Total: {breakdown.finalScore} pts
+                    {breakdown.tuesdayBonus && <span className="font-normal text-text-dim/50"> (incl. Tue +20%)</span>}
+                  </span>
+                  {breakdown.tier1Count > 0 && (
+                    <span><span className="text-accent-red">Tier 1</span>: {breakdown.tier1Count} player{breakdown.tier1Count !== 1 ? 's' : ''} = {breakdown.tier1Points} pts</span>
+                  )}
+                  {breakdown.tier2Count > 0 && (
+                    <span><span className="text-accent-orange">Tier 2</span>: {breakdown.tier2Count} player{breakdown.tier2Count !== 1 ? 's' : ''} = {breakdown.tier2Points} pts</span>
+                  )}
+                  {breakdown.tier3Count > 0 && (
+                    <span><span className="text-yellow-400">Tier 3</span>: {breakdown.tier3Count} player{breakdown.tier3Count !== 1 ? 's' : ''} = {breakdown.tier3Points} pts</span>
+                  )}
+                  {breakdown.pitcherMatchBonus > 0 && (
+                    <span className="text-accent-green">Pitcher match: +{breakdown.pitcherMatchBonus} pts</span>
+                  )}
+                  {breakdown.tuesdayBonus && (
+                    <span className="text-accent-blue">Tuesday bonus: +{breakdown.finalScore - breakdown.rawScore} pts</span>
+                  )}
+                  <span className="text-text-dim/50">Raw score: {breakdown.rawScore}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Mark Visited */}
           <div className="border-t border-border/30 pt-3">
