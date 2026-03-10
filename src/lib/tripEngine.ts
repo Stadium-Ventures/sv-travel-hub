@@ -13,7 +13,7 @@ const HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
 const MAX_DRIVE_MINUTES = 180 // 3 hours one-way
 const MAX_INTER_VENUE_MINUTES = 120 // max detour between stops on multi-venue trip
 const MAX_TOTAL_DRIVE_MINUTES = 600 // 10h total round-trip driving cap for a 3-day trip
-const MAX_ROAD_TRIPS = 15 // cap greedy selection to avoid overwhelming results
+const MAX_ROAD_TRIPS = 5 // cap greedy selection to avoid overwhelming results
 const ANCHOR_DAY = 2 // Tuesday (0=Sun, 2=Tue)
 
 // Confidence multipliers: high-confidence games are worth more
@@ -887,6 +887,20 @@ export async function generateTrips(
 
     const best = remainingCandidates[0]!
     if (best.visitValue === 0) break
+
+    // When priority players are set, only select trips that include at least one priority player
+    if (priorityPlayers.length > 0) {
+      const bestPlayers = new Set([
+        ...best.anchorGame.playerNames,
+        ...best.nearbyGames.flatMap((g) => g.playerNames),
+      ])
+      const hasPriority = priorityPlayers.some((n) => bestPlayers.has(n))
+      if (!hasPriority) {
+        // Skip this trip — it doesn't include any priority player
+        remainingCandidates.shift()
+        continue
+      }
+    }
 
     selectedTrips.push(best)
     recordTripPlayers(best)

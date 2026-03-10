@@ -218,6 +218,21 @@ function assignStopsToDays(stops: VenueStop[], suggestedDays: string[]): Map<str
     }
   }
 
+  // Deduplicate players: each player should only appear on ONE day (their first/best day).
+  // If a player shows up at multiple venues on different days, keep only the first occurrence.
+  const playerAssignedDay = new Set<string>()
+  for (const [day, dayStops] of dayMap) {
+    for (const stop of dayStops) {
+      stop.players = stop.players.filter((name) => {
+        if (playerAssignedDay.has(name)) return false
+        playerAssignedDay.add(name)
+        return true
+      })
+    }
+    // Remove stops that have no players left after dedup
+    dayMap.set(day, dayStops.filter((s) => s.players.length > 0))
+  }
+
   return dayMap
 }
 
