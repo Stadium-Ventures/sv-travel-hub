@@ -3,6 +3,35 @@ import { fetchWithTimeout } from './fetchWithTimeout'
 
 const MLB_BASE = 'https://statsapi.mlb.com/api/v1'
 
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
+const MAX_RETRY_ATTEMPTS = 3
+
+// Wraps fetchWithTimeout with retry + exponential backoff for transient failures
+async function fetchWithRetry(
+  url: string,
+  options?: RequestInit & { timeoutMs?: number },
+): Promise<Response> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, options)
+      if (res.ok || !RETRYABLE_STATUS.has(res.status)) {
+        return res
+      }
+      // Retryable HTTP status — fall through to backoff
+      lastError = new Error(`HTTP ${res.status}`)
+    } catch (e) {
+      // Network error or timeout — retryable
+      lastError = e
+    }
+    if (attempt < MAX_RETRY_ATTEMPTS - 1) {
+      const delayMs = 1000 * Math.pow(2, attempt) // 1s, 2s, 4s
+      await new Promise((r) => setTimeout(r, delayMs))
+    }
+  }
+  throw lastError
+}
+
 // MiLB sport IDs: 11=AAA, 12=AA, 13=High-A, 14=A, 1=MLB
 const MILB_SPORT_IDS = [1, 11, 12, 13, 14]
 
@@ -44,7 +73,7 @@ export interface MLBGameRaw {
 export async function fetchAffiliates(parentTeamId: number): Promise<MLBAffiliate[]> {
   const sportIds = MILB_SPORT_IDS.join(',')
   const url = `${MLB_BASE}/teams/affiliates?teamIds=${parentTeamId}&sportIds=${sportIds}`
-  const res = await fetchWithTimeout(url)
+  const res = await fetchWithRetry(url)
   if (!res.ok) throw new Error(`MLB affiliates fetch failed: ${res.status}`)
   const data = await res.json()
 
@@ -65,7 +94,7 @@ export async function fetchSchedule(
   endDate: string,
 ): Promise<MLBGameRaw[]> {
   const url = `${MLB_BASE}/schedule?sportId=${sportId}&teamId=${teamId}&startDate=${startDate}&endDate=${endDate}&hydrate=venue(location),probablePitcher`
-  const res = await fetchWithTimeout(url)
+  const res = await fetchWithRetry(url)
   if (!res.ok) throw new Error(`MLB schedule fetch failed: ${res.status}`)
   const data = await res.json()
 
@@ -96,7 +125,7 @@ export interface MLBRosterEntry {
 
 export async function fetchTeamRoster(teamId: number, sportId: number): Promise<MLBRosterEntry[]> {
   const url = `${MLB_BASE}/teams/${teamId}/roster?rosterType=fullRoster`
-  const res = await fetchWithTimeout(url, { timeoutMs: 10000 })
+  const res = await fetchWithRetry(url, { timeoutMs: 10000 })
   if (!res.ok) {
     console.warn(`Roster fetch failed for team ${teamId}: HTTP ${res.status}`)
     return [] // Some teams may not have rosters available
@@ -128,8 +157,13 @@ export async function fetchAllRosters(
     const batch = teams.slice(i, i + concurrency)
     const results = await Promise.all(
       batch.map(async (t) => {
-        const roster = await fetchTeamRoster(t.teamId, t.sportId)
-        return roster.map((r) => ({ ...r, teamName: t.teamName }))
+        try {
+          const roster = await fetchTeamRoster(t.teamId, t.sportId)
+          return roster.map((r) => ({ ...r, teamName: t.teamName }))
+        } catch (e) {
+          console.warn(`Roster fetch failed for team ${t.teamId} after retries:`, e)
+          return [] as MLBRosterEntry[]
+        }
       }),
     )
     for (const entries of results) all.push(...entries)
@@ -178,8 +212,13 @@ export async function fetchAllSchedules(
     const batch = teams.slice(i, i + concurrency)
     const results = await Promise.all(
       batch.map(async (t) => {
-        const games = await fetchSchedule(t.teamId, t.sportId, startDate, endDate)
-        return { teamId: t.teamId, games }
+        try {
+          const games = await fetchSchedule(t.teamId, t.sportId, startDate, endDate)
+          return { teamId: t.teamId, games }
+        } catch (e) {
+          console.warn(`Schedule fetch failed for team ${t.teamId} after retries:`, e)
+          return { teamId: t.teamId, games: [] as MLBGameRaw[] }
+        }
       }),
     )
     for (const r of results) {
@@ -210,7 +249,7 @@ export async function fetchTransactions(
   endDate: string,
 ): Promise<MLBTransaction[]> {
   const url = `${MLB_BASE}/transactions?teamId=${teamId}&startDate=${startDate}&endDate=${endDate}`
-  const res = await fetchWithTimeout(url)
+  const res = await fetchWithRetry(url)
   if (!res.ok) throw new Error(`MLB transactions fetch failed: ${res.status}`)
   const data = await res.json()
 

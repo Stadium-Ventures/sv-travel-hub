@@ -35,6 +35,7 @@ interface ScheduleState {
   // Pro schedules
   proSchedules: Record<number, MLBGameRaw[]> // teamId → games
   proGames: GameEvent[]
+  proDroppedGames: number // games dropped due to missing venue coordinates
   schedulesLoading: boolean
   schedulesError: string | null
   schedulesProgress: { completed: number; total: number } | null
@@ -134,6 +135,7 @@ export const useScheduleStore = create<ScheduleState>()(
 
       proSchedules: {},
       proGames: [],
+      proDroppedGames: 0,
       schedulesLoading: false,
       schedulesError: null,
       schedulesProgress: null,
@@ -349,24 +351,14 @@ export const useScheduleStore = create<ScheduleState>()(
       regenerateProGames: () => {
         const state = get()
         const assignments = state.playerTeamAssignments
-        const allAffiliates = state.affiliates
         const rawSchedules = state.proSchedules
 
-        // Rebuild player-to-parent-org mapping
-        const playersByParentOrg = new Map<number, string[]>()
+        // Build player-to-teamId mapping directly from assignments
+        const playersByTeamId = new Map<number, string[]>()
         for (const [playerName, assignment] of Object.entries(assignments)) {
-          const aff = allAffiliates.find((a) => a.teamId === assignment.teamId)
-          const parentOrgId = aff?.parentOrgId
-          if (!parentOrgId) continue
-          const existing = playersByParentOrg.get(parentOrgId)
+          const existing = playersByTeamId.get(assignment.teamId)
           if (existing) existing.push(playerName)
-          else playersByParentOrg.set(parentOrgId, [playerName])
-        }
-
-        // Build team → parentOrg lookup
-        const teamToParentOrg = new Map<number, number>()
-        for (const aff of allAffiliates) {
-          teamToParentOrg.set(aff.teamId, aff.parentOrgId)
+          else playersByTeamId.set(assignment.teamId, [playerName])
         }
 
         // Re-process cached raw game data
@@ -374,13 +366,11 @@ export const useScheduleStore = create<ScheduleState>()(
         const seenIds = new Set<string>()
         for (const [teamIdStr, games] of Object.entries(rawSchedules)) {
           const teamId = parseInt(teamIdStr)
-          const parentOrgId = teamToParentOrg.get(teamId)
-          if (!parentOrgId) continue
-          const orgPlayers = playersByParentOrg.get(parentOrgId) ?? []
-          if (orgPlayers.length === 0) continue
+          const teamPlayers = playersByTeamId.get(teamId) ?? []
+          if (teamPlayers.length === 0) continue
 
           for (const game of games) {
-            const event = mlbGameToEvent(game, teamId, orgPlayers)
+            const event = mlbGameToEvent(game, teamId, teamPlayers)
             if (event && !seenIds.has(event.id)) {
               seenIds.add(event.id)
               allGames.push(event)
@@ -398,32 +388,30 @@ export const useScheduleStore = create<ScheduleState>()(
         const assignments = state.playerTeamAssignments
         const allAffiliates = state.affiliates
 
-        // Collect players by parent org
-        const playersByParentOrg = new Map<number, string[]>()
+        // Collect players by their specific assigned teamId
+        const playersByTeamId = new Map<number, string[]>()
+        const parentOrgIds = new Set<number>()
         for (const [playerName, assignment] of Object.entries(assignments)) {
-          // Find this team's parent org from affiliates
-          const aff = allAffiliates.find((a) => a.teamId === assignment.teamId)
-          const parentOrgId = aff?.parentOrgId
-          if (!parentOrgId) continue
-          const existing = playersByParentOrg.get(parentOrgId)
+          const existing = playersByTeamId.get(assignment.teamId)
           if (existing) existing.push(playerName)
-          else playersByParentOrg.set(parentOrgId, [playerName])
+          else playersByTeamId.set(assignment.teamId, [playerName])
+          // Also track parent orgs so we fetch ALL affiliate schedules
+          const aff = allAffiliates.find((a) => a.teamId === assignment.teamId)
+          if (aff?.parentOrgId) parentOrgIds.add(aff.parentOrgId)
         }
 
-        if (playersByParentOrg.size === 0) {
+        if (playersByTeamId.size === 0) {
           set({ proGames: [], schedulesError: 'No players assigned to teams yet' })
           return
         }
 
         // For each parent org, get ALL affiliate teams (not just assigned ones)
         const teamsToFetch: Array<{ teamId: number; sportId: number }> = []
-        const teamToParentOrg = new Map<number, number>()
-        for (const parentOrgId of playersByParentOrg.keys()) {
+        for (const parentOrgId of parentOrgIds) {
           const orgAffiliates = allAffiliates.filter((a) => a.parentOrgId === parentOrgId)
           for (const aff of orgAffiliates) {
             if (!teamsToFetch.some((t) => t.teamId === aff.teamId)) {
               teamsToFetch.push({ teamId: aff.teamId, sportId: aff.sportId })
-              teamToParentOrg.set(aff.teamId, parentOrgId)
             }
           }
         }
@@ -435,20 +423,22 @@ export const useScheduleStore = create<ScheduleState>()(
             set({ schedulesProgress: { completed, total } })
           })
 
-          // Convert to GameEvents — attach all org players to each affiliate's games
+          // Convert to GameEvents — attach only players assigned to this specific team
           const allGames: GameEvent[] = []
           const seenIds = new Set<string>()
+          let droppedGames = 0
 
           for (const [teamId, games] of schedules.entries()) {
-            const parentOrgId = teamToParentOrg.get(teamId)
-            if (!parentOrgId) continue
-            const orgPlayers = playersByParentOrg.get(parentOrgId) ?? []
+            const teamPlayers = playersByTeamId.get(teamId) ?? []
+            if (teamPlayers.length === 0) continue
 
             for (const game of games) {
-              const event = mlbGameToEvent(game, teamId, orgPlayers)
+              const event = mlbGameToEvent(game, teamId, teamPlayers)
               if (event && !seenIds.has(event.id)) {
                 seenIds.add(event.id)
                 allGames.push(event)
+              } else if (!event) {
+                droppedGames++
               }
             }
           }
@@ -464,6 +454,7 @@ export const useScheduleStore = create<ScheduleState>()(
           set({
             proSchedules: rawSchedules,
             proGames: allGames,
+            proDroppedGames: droppedGames,
             schedulesLoading: false,
             schedulesProgress: null,
             proFetchedAt: Date.now(),
@@ -494,9 +485,11 @@ export const useScheduleStore = create<ScheduleState>()(
         set({ rosterMovesLoading: true })
 
         try {
-          // Look back 30 days
-          const endDate = new Date().toISOString().split('T')[0]!
-          const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]!
+          // Look back to start of current season (Feb 1) to catch all moves
+          const now = new Date()
+          const endDate = now.toISOString().split('T')[0]!
+          const seasonStart = new Date(now.getFullYear(), 1, 1) // Feb 1
+          const startDate = seasonStart.toISOString().split('T')[0]!
 
           const txResult = await fetchAllTransactions(
             [...parentOrgIds],

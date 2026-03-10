@@ -31,7 +31,20 @@ function getCache(): Record<string, MaxPrepsSchedule> {
 }
 
 function setCache(cache: Record<string, MaxPrepsSchedule>) {
-  localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+  } catch {
+    // Quota exceeded — prune entries older than 48 hours and retry
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000
+    for (const key of Object.keys(cache)) {
+      if (cache[key]!.fetchedAt < cutoff) delete cache[key]
+    }
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+    } catch {
+      console.warn('localStorage quota exceeded for maxpreps cache — continuing without caching')
+    }
+  }
 }
 
 // Resolve an org|state key to a MaxPreps slug (case-insensitive)

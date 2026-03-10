@@ -57,6 +57,24 @@ export async function fetchRoster(): Promise<RosterParseResult> {
   const parsed = Papa.parse<RosterRow>(text, { header: true, skipEmptyLines: true })
   const warnings: string[] = []
 
+  // Validate expected columns exist in the sheet
+  if (parsed.data.length > 0) {
+    const sampleRow = parsed.data[0]!
+    const colNames = Object.keys(sampleRow).map((k) => k.trim().toLowerCase())
+    const requiredGroups: Array<{ label: string; candidates: string[] }> = [
+      { label: 'Name', candidates: ['name', 'player name', 'player'] },
+      { label: 'Org', candidates: ['org', 'organization', 'team', 'school'] },
+      { label: 'Level', candidates: ['level', 'player level'] },
+      { label: 'Tier', candidates: ['tier', 'player tier'] },
+    ]
+    for (const { label, candidates } of requiredGroups) {
+      const found = candidates.some((c) => colNames.some((k) => k === c || k.startsWith(c + ' ') || k.startsWith(c + '(')))
+      if (!found) {
+        warnings.push(`Sheet may be missing "${label}" column — expected one of: ${candidates.join(', ')}`)
+      }
+    }
+  }
+
   const players = parsed.data
     .filter((r) => findColumn(r, ['Name', 'Player Name', 'Player']))
     .map((r) => {

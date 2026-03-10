@@ -55,7 +55,20 @@ function getCache(): Record<string, D1Schedule> {
 }
 
 function setCache(cache: Record<string, D1Schedule>) {
-  localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+  } catch {
+    // Quota exceeded — prune entries older than 48 hours and retry
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000
+    for (const key of Object.keys(cache)) {
+      if (cache[key]!.fetchedAt < cutoff) delete cache[key]
+    }
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+    } catch {
+      console.warn('localStorage quota exceeded for d1baseball cache — continuing without caching')
+    }
+  }
 }
 
 // Parse the D1Baseball schedule HTML into structured game data

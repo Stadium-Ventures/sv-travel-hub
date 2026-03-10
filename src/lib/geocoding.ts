@@ -14,7 +14,18 @@ function getCache(): Record<string, Coordinates> {
 }
 
 function setCache(cache: Record<string, Coordinates>) {
-  localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+  } catch {
+    // Quota exceeded — prune stale entries and retry
+    // Geocode cache has no timestamps, so clear entirely on quota error
+    try {
+      localStorage.removeItem(CACHE_KEY)
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+    } catch {
+      console.warn('localStorage quota exceeded for geocode cache — continuing without caching')
+    }
+  }
 }
 
 function cacheKey(schoolName: string, state: string): string {

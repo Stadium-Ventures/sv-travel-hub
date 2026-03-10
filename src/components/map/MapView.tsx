@@ -188,11 +188,12 @@ function useDateFilteredVenueKeys(filterStart: string, filterEnd: string) {
     for (const game of ncaaGames) {
       if (filterStart && game.date < filterStart) continue
       if (filterEnd && game.date > filterEnd) continue
-      // Match by coordinate proximity to any ncaa venue
+      // Match by coordinate proximity to any ncaa venue (~500m threshold using squared Euclidean)
       for (const [vk, v] of Object.entries(venues)) {
         if (!vk.startsWith('ncaa-')) continue
-        const dist = Math.abs(v.coords.lat - game.venue.coords.lat) + Math.abs(v.coords.lng - game.venue.coords.lng)
-        if (dist < 0.05) { keys.add(vk); break }
+        const dLat = v.coords.lat - game.venue.coords.lat
+        const dLng = v.coords.lng - game.venue.coords.lng
+        if (dLat * dLat + dLng * dLng < 0.00002) { keys.add(vk); break } // ~500m
       }
     }
 
@@ -202,8 +203,9 @@ function useDateFilteredVenueKeys(filterStart: string, filterEnd: string) {
       if (filterEnd && game.date > filterEnd) continue
       for (const [vk, v] of Object.entries(venues)) {
         if (!vk.startsWith('hs-')) continue
-        const dist = Math.abs(v.coords.lat - game.venue.coords.lat) + Math.abs(v.coords.lng - game.venue.coords.lng)
-        if (dist < 0.05) { keys.add(vk); break }
+        const dLat = v.coords.lat - game.venue.coords.lat
+        const dLng = v.coords.lng - game.venue.coords.lng
+        if (dLat * dLat + dLng * dLng < 0.00002) { keys.add(vk); break } // ~500m
       }
     }
 
@@ -1052,22 +1054,36 @@ export default function MapView() {
 
       {/* Schedule freshness badges — show when loaded */}
       {players.length > 0 && !anyScheduleNeeded && (proFetchedAt || ncaaFetchedAt || hsFetchedAt) && (
-        <div className="flex flex-wrap gap-2 text-[11px]">
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
           {proFetchedAt && (
             <span className={`rounded px-2 py-0.5 ${proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
               Pro: loaded {formatTimeAgo(proFetchedAt)}
             </span>
           )}
           {ncaaFetchedAt && (
-            <span className="rounded bg-accent-green/10 px-2 py-0.5 text-accent-green">
+            <span className={`rounded px-2 py-0.5 ${ncaaFetchedAt && (Date.now() - ncaaFetchedAt > 24 * 60 * 60 * 1000) ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
               College: loaded {formatTimeAgo(ncaaFetchedAt)}
             </span>
           )}
           {hsFetchedAt && (
-            <span className="rounded bg-accent-green/10 px-2 py-0.5 text-accent-green">
+            <span className={`rounded px-2 py-0.5 ${hsFetchedAt && (Date.now() - hsFetchedAt > 24 * 60 * 60 * 1000) ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
               HS: loaded {formatTimeAgo(hsFetchedAt)}
             </span>
           )}
+          <button
+            onClick={() => {
+              try {
+                localStorage.removeItem('sv-travel-d1baseball-cache')
+                localStorage.removeItem('sv-travel-maxpreps-cache')
+                localStorage.removeItem('sv-travel-geocode-cache')
+                window.dispatchEvent(new CustomEvent('map:toast', { detail: { message: 'Schedule caches cleared — reload schedules to refresh' } }))
+              } catch { /* ignore */ }
+            }}
+            className="rounded px-2 py-0.5 text-text-dim hover:text-text hover:bg-gray-800 transition-colors"
+            title="Clear cached D1Baseball, MaxPreps, and geocoding data"
+          >
+            Clear Caches
+          </button>
         </div>
       )}
 

@@ -135,7 +135,19 @@ export const useTripStore = create<TripState>()(
       startDate, endDate, hsVenues,
     )
 
-    const allGames = [...scheduledGames, ...stEvents, ...realNcaaGames, ...ncaaSyntheticEvents, ...realHsGames, ...hsSyntheticEvents]
+    // Merge all game sources and deduplicate by venue+date+playerSet
+    // This prevents synthetic events from duplicating real schedule data
+    const rawGames = [...scheduledGames, ...stEvents, ...realNcaaGames, ...ncaaSyntheticEvents, ...realHsGames, ...hsSyntheticEvents]
+    const gameMap = new Map<string, typeof rawGames[0]>()
+    for (const game of rawGames) {
+      // Prefer real (high confidence) games over synthetic ones at same venue+date
+      const dedupeKey = `${game.venue.coords.lat.toFixed(4)},${game.venue.coords.lng.toFixed(4)}|${game.date}|${game.playerNames.sort().join(',')}`
+      const existing = gameMap.get(dedupeKey)
+      if (!existing || (game.confidence === 'high' && existing.confidence !== 'high')) {
+        gameMap.set(dedupeKey, game)
+      }
+    }
+    const allGames = [...gameMap.values()]
 
     // Build urgency map from heartbeat data
     const urgencyMap: UrgencyMap = new Map()

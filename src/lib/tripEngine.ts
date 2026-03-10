@@ -34,10 +34,10 @@ export function haversineKm(a: Coordinates, b: Coordinates): number {
 }
 
 // Estimate drive time in minutes from straight-line distance
-// ~90 km/h avg speed with 1.3 detour factor (reasonable for Florida highway driving)
+// ~95 km/h avg speed with 1.2 detour factor (calibrated for Florida interstate driving)
 export function estimateDriveMinutes(a: Coordinates, b: Coordinates): number {
   const km = haversineKm(a, b)
-  return Math.round((km * 1.3 / 90) * 60)
+  return Math.round((km * 1.2 / 95) * 60)
 }
 
 // Estimate total travel time for a fly-in visit (hours)
@@ -788,6 +788,31 @@ export async function generateTrips(
 
     // Remove this candidate
     remainingCandidates.shift()
+  }
+
+  // Post-selection improvement pass: check if any low-value trip at the end
+  // can be dropped without losing coverage (all its players are covered by other trips)
+  for (let i = selectedTrips.length - 1; i >= 0; i--) {
+    const trip = selectedTrips[i]!
+    const tripPlayers = new Set([
+      ...trip.anchorGame.playerNames,
+      ...trip.nearbyGames.flatMap((g) => g.playerNames),
+    ].filter((n) => eligiblePlayers.has(n)))
+
+    // Check if all players in this trip are covered by other selected trips
+    let allCovered = true
+    for (const name of tripPlayers) {
+      const coveredElsewhere = selectedTrips.some((other, j) =>
+        j !== i && [
+          ...other.anchorGame.playerNames,
+          ...other.nearbyGames.flatMap((g) => g.playerNames),
+        ].includes(name),
+      )
+      if (!coveredElsewhere) { allCovered = false; break }
+    }
+    if (allCovered && trip.visitValue < 5) {
+      selectedTrips.splice(i, 1)
+    }
   }
 
   // --- Fly-in visits for players beyond driving range ---
