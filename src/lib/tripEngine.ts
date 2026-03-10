@@ -896,7 +896,12 @@ export async function generateTrips(
   onProgress?.('Fly-in analysis', 'Finding fly-in options for distant players...')
 
   const visitedPlayers = new Set(playerVisitCounts.keys())
-  const playersNotOnRoadTrips = [...eligiblePlayers].filter((n) => !visitedPlayers.has(n))
+  // Include priority players in fly-in consideration even if they appeared in road trips
+  // (they might have better fly-in options). Also include any player not on a road trip.
+  const prioritySet = new Set(priorityPlayers.map(n => n))
+  const playersForFlyIns = [...eligiblePlayers].filter(
+    (n) => !visitedPlayers.has(n) || prioritySet.has(n),
+  )
   const flyInVisits: FlyInVisit[] = []
   const flyInCovered = new Set<string>()
 
@@ -920,11 +925,16 @@ export async function generateTrips(
 
   for (const game of eligibleGames) {
     if (game.venue.coords.lat === 0 && game.venue.coords.lng === 0) continue
-    const relevantPlayers = game.playerNames.filter((n) => playersNotOnRoadTrips.includes(n))
+    const relevantPlayers = game.playerNames.filter((n) => playersForFlyIns.includes(n))
     if (relevantPlayers.length === 0) continue
 
     const driveMinutes = homeToVenue.get(coordKey(game.venue.coords)) ?? Infinity
-    if (driveMinutes <= maxDriveMinutes) continue // handled by road trips
+    // Skip venues within driving range UNLESS they have priority players who weren't
+    // covered by road trips (prevents priority players from falling through the cracks)
+    const hasPriorityPlayerNotOnTrip = relevantPlayers.some(
+      (n) => prioritySet.has(n) && !visitedPlayers.has(n),
+    )
+    if (driveMinutes <= maxDriveMinutes && !hasPriorityPlayerNotOnTrip) continue
 
     // Key by venue coords + team + week number → one fly-in per week per venue
     const teamName = game.isHome ? game.homeTeam : game.awayTeam
@@ -986,10 +996,10 @@ export async function generateTrips(
   }
 
   // Sort fly-in visits: priority players first, then by score
-  const prioritySet = new Set(priorityPlayers.map(n => n.toLowerCase()))
+  const prioritySetLower = new Set(priorityPlayers.map(n => n.toLowerCase()))
   flyInVisits.sort((a, b) => {
-    const aHasPriority = a.playerNames.some(n => prioritySet.has(n.toLowerCase()))
-    const bHasPriority = b.playerNames.some(n => prioritySet.has(n.toLowerCase()))
+    const aHasPriority = a.playerNames.some(n => prioritySetLower.has(n.toLowerCase()))
+    const bHasPriority = b.playerNames.some(n => prioritySetLower.has(n.toLowerCase()))
     if (aHasPriority && !bHasPriority) return -1
     if (!aHasPriority && bHasPriority) return 1
     return b.visitValue - a.visitValue
@@ -1021,7 +1031,7 @@ export async function generateTrips(
   flyInVisits.push(...filteredFlyIns)
 
   // Truly unreachable: no games at all in date range (not even fly-in)
-  const trulyUnreachableNames = playersNotOnRoadTrips.filter((n) => !flyInCovered.has(n))
+  const trulyUnreachableNames = playersForFlyIns.filter((n) => !flyInCovered.has(n))
 
   // Compute reasons for each unreachable player
   const trulyUnreachable: UnvisitablePlayer[] = trulyUnreachableNames.map((name) => {
