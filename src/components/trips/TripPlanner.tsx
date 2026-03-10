@@ -1133,6 +1133,22 @@ export default function TripPlanner() {
             {progressDetail && <p className="mt-1 text-xs text-text-dim">{progressDetail}</p>}
           </div>
         )}
+
+        {/* Blocked / Error state — shown when generation was refused or failed */}
+        {!computing && !tripPlan && (progressStep === 'Blocked' || progressStep === 'Error') && (
+          <div className="mt-4 rounded-lg border border-accent-red/50 bg-accent-red/10 p-4">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">⛔</span>
+              <span className="text-sm font-semibold text-accent-red">{progressStep === 'Blocked' ? 'Trip Generation Blocked' : 'Trip Generation Failed'}</span>
+            </div>
+            {progressDetail && (
+              <p className="mt-2 text-sm text-text-dim whitespace-pre-line">{progressDetail}</p>
+            )}
+            <p className="mt-3 text-xs text-text-dim">
+              Make sure all schedule data is loaded before generating trips. Go to the <strong>Player Setup</strong> tab to load schedules.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Results */}

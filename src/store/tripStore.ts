@@ -111,6 +111,30 @@ export const useTripStore = create<TripState>()(
       }
     }
 
+    // BLOCK: Refuse to generate if priority player schedule data is missing
+    if (priorityPlayers.length > 0) {
+      const missingSchedule: string[] = []
+      for (const pName of priorityPlayers) {
+        const player = players.find((p) => p.playerName === pName)
+        if (!player) continue
+        if (player.level === 'Pro' && scheduleState.proGames.length === 0) {
+          missingSchedule.push(`${pName} (Pro) — schedule data failed to load. Try clicking "Match Players to Teams" first, then "Load Pro Schedules".`)
+        }
+        if (player.level === 'NCAA' && scheduleState.ncaaGames.length === 0) {
+          missingSchedule.push(`${pName} (NCAA) — no NCAA schedule data loaded.`)
+        }
+      }
+      if (missingSchedule.length > 0) {
+        set({
+          computing: false,
+          tripPlan: null,
+          progressStep: 'Blocked',
+          progressDetail: `Cannot generate trips — missing schedule data for priority player(s):\n${missingSchedule.join('\n')}`,
+        })
+        return
+      }
+    }
+
     const scheduledGames = scheduleState.proGames
     const realNcaaGames = scheduleState.ncaaGames
 
