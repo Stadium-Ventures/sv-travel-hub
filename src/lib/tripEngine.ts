@@ -1133,6 +1133,10 @@ export async function generateTrips(
     // Check if player had ANY games generated
     const playerGames = games.filter((g) => g.playerNames.includes(name))
     if (playerGames.length === 0) {
+      // Check if the date range misses spring training (before ~Mar 31)
+      if (player.level === 'Pro' && startDate > `${startDate.slice(0, 4)}-03-31`) {
+        return { name, reason: 'No games in date range — MiLB schedules may not be published yet. Try including March dates for spring training visits.' }
+      }
       return { name, reason: 'No games in date range' }
     }
 

@@ -5,7 +5,7 @@ import type { Coordinates } from '../types/roster'
 
 // Spring Training typically runs mid-February through late March
 export const SPRING_TRAINING_START = '02-15' // MM-DD
-export const SPRING_TRAINING_END = '03-28'   // MM-DD
+export const SPRING_TRAINING_END = '03-31'   // MM-DD (extended through March; MiLB starts early April)
 
 export function isSpringTraining(dateStr: string): boolean {
   const mmdd = dateStr.slice(5) // "YYYY-MM-DD" → "MM-DD"
