@@ -14,7 +14,7 @@ import { useRosterStore } from './rosterStore'
 import { useVenueStore } from './venueStore'
 import { useDiagnosticsStore } from './diagnosticsStore'
 
-interface PlayerTeamAssignment {
+export interface PlayerTeamAssignment {
   teamId: number
   sportId: number
   teamName: string

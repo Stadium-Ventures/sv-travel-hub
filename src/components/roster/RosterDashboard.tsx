@@ -24,6 +24,8 @@ export default function RosterDashboard() {
   const rosterMovesError = useScheduleStore((s) => s.rosterMovesError)
   const checkRosterMoves = useScheduleStore((s) => s.checkRosterMoves)
   const playerTeamAssignments = useScheduleStore((s) => s.playerTeamAssignments)
+  const autoAssignPlayers = useScheduleStore((s) => s.autoAssignPlayers)
+  const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
 
   const heartbeatPlayers = useHeartbeatStore((s) => s.players)
   const heartbeatPriorities = useHeartbeatStore((s) => s.priorities)
@@ -319,17 +321,81 @@ export default function RosterDashboard() {
       )}
 
       {/* Player table grouped by level */}
-      {(['Pro', 'NCAA', 'HS'] as const).map((level) => {
+      {grouped.Pro.length > 0 && (
+        <div>
+          <div className="mb-2 flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-text">Professional</h3>
+            <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-text-dim">
+              {grouped.Pro.length}
+            </span>
+            <button
+              onClick={autoAssignPlayers}
+              disabled={autoAssignLoading}
+              className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text disabled:opacity-50"
+              title="Auto-detect MLB/MiLB affiliate for each Pro player via roster lookups"
+            >
+              {autoAssignLoading ? (
+                <span className="h-3 w-3 animate-spin rounded-full border border-text-dim border-t-transparent" />
+              ) : (
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              )}
+              Auto-assign Affiliates
+            </button>
+          </div>
+
+          {/* Split Pro into MLB / MiLB / Unassigned sub-groups */}
+          {(() => {
+            const mlbPlayers = grouped.Pro.filter((p) => {
+              const a = playerTeamAssignments[p.playerName]
+              return a && a.sportId === 1
+            })
+            const milbPlayers = grouped.Pro.filter((p) => {
+              const a = playerTeamAssignments[p.playerName]
+              return a && a.sportId !== 1
+            })
+            const unassignedPlayers = grouped.Pro.filter((p) => !playerTeamAssignments[p.playerName])
+
+            const subGroups = [
+              { label: 'MLB', players: mlbPlayers },
+              { label: 'MiLB', players: milbPlayers },
+              { label: 'Unassigned', players: unassignedPlayers },
+            ].filter((g) => g.players.length > 0)
+
+            return subGroups.map((sub) => (
+              <div key={sub.label} className="mb-4">
+                <div className="mb-1 flex items-center gap-2 pl-1">
+                  <span className={`text-xs font-medium ${
+                    sub.label === 'MLB' ? 'text-accent-blue' :
+                    sub.label === 'MiLB' ? 'text-accent-green' :
+                    'text-text-dim/60'
+                  }`}>
+                    {sub.label}
+                  </span>
+                  <span className="text-[10px] text-text-dim/50">{sub.players.length}</span>
+                </div>
+                <ProTable
+                  players={sub.players}
+                  hasHeartbeat={hasHeartbeat}
+                  playerTeamAssignments={playerTeamAssignments}
+                  toggleSort={toggleSort}
+                  sortIndicator={sortIndicator}
+                />
+              </div>
+            ))
+          })()}
+        </div>
+      )}
+
+      {(['NCAA', 'HS'] as const).map((level) => {
         const group = grouped[level]
-        if (group.length === 0 && levelFilter !== 'All' && levelFilter !== level) return null
         if (group.length === 0) return null
 
         return (
           <div key={level}>
             <div className="mb-2 flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-text">
-                {level === 'Pro' ? 'Professional' : level}
-              </h3>
+              <h3 className="text-sm font-semibold text-text">{level}</h3>
               <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-text-dim">
                 {group.length}
               </span>
@@ -381,6 +447,63 @@ export default function RosterDashboard() {
           <p className="mt-1 text-xs text-text-dim/60">The roster pulls automatically from the Google Sheet. Click Refresh above if it hasn't loaded.</p>
         </div>
       )}
+    </div>
+  )
+}
+
+function ProTable({
+  players,
+  hasHeartbeat,
+  playerTeamAssignments,
+  toggleSort,
+  sortIndicator,
+}: {
+  players: RosterPlayer[]
+  hasHeartbeat: boolean
+  playerTeamAssignments: Record<string, { teamId: number; sportId: number; teamName: string }>
+  toggleSort: (field: SortField) => void
+  sortIndicator: (field: SortField) => string
+}) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-border">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-surface text-left text-xs font-medium text-text-dim">
+            <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('playerName')}>
+              Name{sortIndicator('playerName')}
+            </th>
+            <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('org')}>
+              Org{sortIndicator('org')}
+            </th>
+            <th className="px-4 py-2.5">Affiliate</th>
+            <th className="px-4 py-2.5">Pos</th>
+            <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('tier')}>
+              Tier{sortIndicator('tier')}
+            </th>
+            <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('visitsRemaining')}>
+              Visits Left{sortIndicator('visitsRemaining')}
+            </th>
+            <th className="px-4 py-2.5">Target</th>
+            {hasHeartbeat && (
+              <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('loveScore')}>
+                Love{sortIndicator('loveScore')}
+              </th>
+            )}
+            <th className="px-4 py-2.5">Agent</th>
+          </tr>
+        </thead>
+        <tbody>
+          {players.map((player) => (
+            <PlayerCard
+              key={player.normalizedName}
+              player={player}
+              showHeartbeat={hasHeartbeat}
+              showAffiliate
+              affiliate={playerTeamAssignments[player.playerName] ?? null}
+            />
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

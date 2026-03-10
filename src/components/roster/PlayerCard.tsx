@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { RosterPlayer } from '../../types/roster'
 import { useRosterStore } from '../../store/rosterStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
+import type { PlayerTeamAssignment } from '../../store/scheduleStore'
 
 const TIER_COLORS: Record<number, string> = {
   1: 'bg-accent-blue/20 text-accent-blue',
@@ -10,7 +11,14 @@ const TIER_COLORS: Record<number, string> = {
   4: 'bg-gray-500/20 text-gray-400',
 }
 
-export default function PlayerCard({ player, showHeartbeat }: { player: RosterPlayer; showHeartbeat?: boolean }) {
+interface PlayerCardProps {
+  player: RosterPlayer
+  showHeartbeat?: boolean
+  showAffiliate?: boolean
+  affiliate?: PlayerTeamAssignment | null
+}
+
+export default function PlayerCard({ player, showHeartbeat, showAffiliate, affiliate }: PlayerCardProps) {
   const [expanded, setExpanded] = useState(false)
   const setVisitOverride = useRosterStore((s) => s.setVisitOverride)
   const visitOverrides = useRosterStore((s) => s.visitOverrides)
@@ -19,7 +27,9 @@ export default function PlayerCard({ player, showHeartbeat }: { player: RosterPl
   const hbData = useHeartbeatStore((s) => s.getPlayerData)(player.playerName)
   const hbUrgency = useHeartbeatStore((s) => s.getPlayerUrgency)(player.playerName)
 
-  const colSpan = showHeartbeat ? 8 : 7
+  let colSpan = 7
+  if (showHeartbeat) colSpan++
+  if (showAffiliate) colSpan++
 
   return (
     <>
@@ -45,6 +55,17 @@ export default function PlayerCard({ player, showHeartbeat }: { player: RosterPl
           </div>
         </td>
         <td className="px-4 py-2.5 text-text-dim">{player.org}</td>
+        {showAffiliate && (
+          <td className="px-4 py-2.5">
+            {affiliate ? (
+              <span className="text-text-dim" title={`Sport ID: ${affiliate.sportId} (${affiliate.sportId === 1 ? 'MLB' : 'MiLB'})`}>
+                {affiliate.teamName}
+              </span>
+            ) : (
+              <span className="text-text-dim/40">—</span>
+            )}
+          </td>
+        )}
         <td className="px-4 py-2.5 text-text-dim">{player.position}</td>
         <td className="px-4 py-2.5">
           <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${TIER_COLORS[player.tier] ?? TIER_COLORS[4]}`}>
