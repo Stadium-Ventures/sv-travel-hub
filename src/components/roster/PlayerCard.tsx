@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { RosterPlayer } from '../../types/roster'
 import { useRosterStore } from '../../store/rosterStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import type { PlayerTeamAssignment } from '../../store/scheduleStore'
+import { resolveMLBTeamId } from '../../data/aliases'
 
 const TIER_COLORS: Record<number, string> = {
   1: 'bg-accent-blue/20 text-accent-blue',
@@ -11,21 +12,43 @@ const TIER_COLORS: Record<number, string> = {
   4: 'bg-gray-500/20 text-gray-400',
 }
 
+const SPORT_LABELS: Record<number, string> = { 1: 'MLB', 11: 'AAA', 12: 'AA', 13: 'High-A', 14: 'A' }
+
+interface AffiliateOption {
+  teamId: number
+  teamName: string
+  sportId: number
+  parentOrgId: number
+}
+
 interface PlayerCardProps {
   player: RosterPlayer
   showHeartbeat?: boolean
   showAffiliate?: boolean
   affiliate?: PlayerTeamAssignment | null
+  affiliateOptions?: AffiliateOption[]
+  onAssignAffiliate?: (playerName: string, assignment: PlayerTeamAssignment) => void
 }
 
-export default function PlayerCard({ player, showHeartbeat, showAffiliate, affiliate }: PlayerCardProps) {
+export default function PlayerCard({ player, showHeartbeat, showAffiliate, affiliate, affiliateOptions, onAssignAffiliate }: PlayerCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const [editingAffiliate, setEditingAffiliate] = useState(false)
   const setVisitOverride = useRosterStore((s) => s.setVisitOverride)
   const visitOverrides = useRosterStore((s) => s.visitOverrides)
   const hasOverride = !!visitOverrides[player.playerName]
 
   const hbData = useHeartbeatStore((s) => s.getPlayerData)(player.playerName)
   const hbUrgency = useHeartbeatStore((s) => s.getPlayerUrgency)(player.playerName)
+
+  // Filter affiliate options to this player's org
+  const orgAffiliates = useMemo(() => {
+    if (!affiliateOptions) return []
+    const orgId = resolveMLBTeamId(player.org)
+    if (!orgId) return affiliateOptions // show all if can't resolve
+    return affiliateOptions
+      .filter((a) => a.parentOrgId === orgId)
+      .sort((a, b) => a.sportId - b.sportId)
+  }, [affiliateOptions, player.org])
 
   let colSpan = 7
   if (showHeartbeat) colSpan++
@@ -56,13 +79,36 @@ export default function PlayerCard({ player, showHeartbeat, showAffiliate, affil
         </td>
         <td className="px-4 py-2.5 text-text-dim">{player.org}</td>
         {showAffiliate && (
-          <td className="px-4 py-2.5">
-            {affiliate ? (
-              <span className="text-text-dim" title={`Sport ID: ${affiliate.sportId} (${affiliate.sportId === 1 ? 'MLB' : 'MiLB'})`}>
-                {affiliate.teamName}
-              </span>
+          <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+            {editingAffiliate ? (
+              <select
+                autoFocus
+                className="w-full rounded border border-accent-blue bg-gray-950 px-1.5 py-1 text-xs text-text focus:outline-none"
+                value={affiliate ? `${affiliate.teamId}` : ''}
+                onChange={(e) => {
+                  const opt = orgAffiliates.find((a) => a.teamId === Number(e.target.value))
+                  if (opt && onAssignAffiliate) {
+                    onAssignAffiliate(player.playerName, { teamId: opt.teamId, sportId: opt.sportId, teamName: opt.teamName })
+                  }
+                  setEditingAffiliate(false)
+                }}
+                onBlur={() => setEditingAffiliate(false)}
+              >
+                <option value="">— Select —</option>
+                {orgAffiliates.map((a) => (
+                  <option key={a.teamId} value={a.teamId}>
+                    {a.teamName} ({SPORT_LABELS[a.sportId] ?? `L${a.sportId}`})
+                  </option>
+                ))}
+              </select>
             ) : (
-              <span className="text-text-dim/40">—</span>
+              <button
+                className="text-left text-text-dim hover:text-accent-blue hover:underline transition-colors"
+                onClick={() => setEditingAffiliate(true)}
+                title="Click to change affiliate"
+              >
+                {affiliate ? affiliate.teamName : <span className="text-text-dim/40">— assign —</span>}
+              </button>
             )}
           </td>
         )}

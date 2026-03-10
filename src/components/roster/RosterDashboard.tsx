@@ -26,6 +26,9 @@ export default function RosterDashboard() {
   const playerTeamAssignments = useScheduleStore((s) => s.playerTeamAssignments)
   const autoAssignPlayers = useScheduleStore((s) => s.autoAssignPlayers)
   const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
+  const autoAssignResult = useScheduleStore((s) => s.autoAssignResult)
+  const assignPlayerToTeam = useScheduleStore((s) => s.assignPlayerToTeam)
+  const affiliates = useScheduleStore((s) => s.affiliates)
 
   const heartbeatPlayers = useHeartbeatStore((s) => s.players)
   const heartbeatPriorities = useHeartbeatStore((s) => s.priorities)
@@ -345,6 +348,15 @@ export default function RosterDashboard() {
             </button>
           </div>
 
+          {autoAssignResult?.springTrainingEstimate && (
+            <div className="mb-3 rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-4 py-2.5">
+              <p className="text-xs font-medium text-accent-orange">Spring training — MiLB rosters not yet published</p>
+              <p className="mt-0.5 text-[11px] text-text-dim">
+                Affiliates are estimated from last year's assignment + one level promotion (e.g. A→High-A, AA→AAA). Players not found in last year's data default to the org's High-A team. These will auto-correct once regular season rosters are available.
+              </p>
+            </div>
+          )}
+
           {/* Split Pro into MLB / MiLB / Unassigned sub-groups */}
           {(() => {
             const mlbPlayers = grouped.Pro.filter((p) => {
@@ -379,6 +391,8 @@ export default function RosterDashboard() {
                   players={sub.players}
                   hasHeartbeat={hasHeartbeat}
                   playerTeamAssignments={playerTeamAssignments}
+                  affiliates={affiliates}
+                  onAssign={assignPlayerToTeam}
                   toggleSort={toggleSort}
                   sortIndicator={sortIndicator}
                 />
@@ -455,12 +469,16 @@ function ProTable({
   players,
   hasHeartbeat,
   playerTeamAssignments,
+  affiliates,
+  onAssign,
   toggleSort,
   sortIndicator,
 }: {
   players: RosterPlayer[]
   hasHeartbeat: boolean
   playerTeamAssignments: Record<string, { teamId: number; sportId: number; teamName: string }>
+  affiliates: Array<{ teamId: number; teamName: string; sportId: number; parentOrgId: number }>
+  onAssign: (playerName: string, assignment: { teamId: number; sportId: number; teamName: string }) => void
   toggleSort: (field: SortField) => void
   sortIndicator: (field: SortField) => string
 }) {
@@ -500,6 +518,8 @@ function ProTable({
               showHeartbeat={hasHeartbeat}
               showAffiliate
               affiliate={playerTeamAssignments[player.playerName] ?? null}
+              affiliateOptions={affiliates}
+              onAssignAffiliate={onAssign}
             />
           ))}
         </tbody>

@@ -83,7 +83,7 @@ interface ScheduleState {
 
   // Auto-assign
   autoAssignLoading: boolean
-  autoAssignResult: { assigned: number; notFound: string[]; error?: string } | null
+  autoAssignResult: { assigned: number; notFound: string[]; error?: string; springTrainingEstimate?: boolean } | null
 
   // Actions
   fetchAffiliates: (forceRefresh?: boolean) => Promise<void>
@@ -331,20 +331,88 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
+          // Detect spring training: before April 1, MiLB rosters are likely empty
+          const now = new Date()
+          const isSpringTraining = now.getMonth() < 3 // Jan=0, Feb=1, Mar=2 → before April
+          const milbRosterCount = milbRosterEntries.length
+
+          // If spring training and MiLB rosters are sparse, fetch last year's rosters
+          // to estimate each player's level, then promote by one level
+          let lastYearMilbLookup = new Map<number, PlayerTeamAssignment>()
+          if (isSpringTraining && milbRosterCount < 20) {
+            const lastYear = now.getFullYear() - 1
+            const lastYearTeamsToQuery = allAffiliates
+              .filter((a) => [...parentOrgIds].some((orgId) => a.parentOrgId === orgId) && a.sportId !== 1)
+              .map((a) => ({ teamId: a.teamId, sportId: a.sportId, teamName: a.teamName }))
+
+            if (lastYearTeamsToQuery.length > 0) {
+              const lastYearEntries = await fetchAllRosters(lastYearTeamsToQuery, undefined, lastYear)
+              for (const entry of lastYearEntries) {
+                if (entry.playerId > 0) {
+                  lastYearMilbLookup.set(entry.playerId, {
+                    teamId: entry.teamId,
+                    sportId: entry.sportId,
+                    teamName: entry.teamName,
+                  })
+                }
+              }
+            }
+          }
+
+          // Promotion map: sportId → promoted sportId
+          // 14 (A) → 13 (High-A), 13 → 12 (AA), 12 → 11 (AAA), 11 → 11 (stay AAA)
+          const PROMOTE_SPORT: Record<number, number> = { 14: 13, 13: 12, 12: 11, 11: 11 }
+
+          // Find the affiliate team for a promoted sportId within the same org
+          function findAffiliateForSport(orgId: number, targetSportId: number): { teamId: number; sportId: number; teamName: string } | null {
+            const match = allAffiliates.find((a) => a.parentOrgId === orgId && a.sportId === targetSportId)
+            return match ? { teamId: match.teamId, sportId: match.sportId, teamName: match.teamName } : null
+          }
+
           // Assign players: prefer MiLB roster (where they're actually playing)
           // over 40-man roster (where they might just be on the reserve list).
+          // During spring training, use last year's level + 1 as estimate.
           const remainingPlayers: typeof proPlayers = []
           for (const player of proPlayers) {
-            // Check MiLB first — if found, they're playing at that level
+            // Check current MiLB first — if found, they're playing at that level
             const milbMatch = milbPlayerIdToTeam.get(player.mlbPlayerId!)
             if (milbMatch) {
               newAssignments[player.playerName] = milbMatch
               assignedCount++
               continue
             }
-            // Fall back to MLB roster
+
+            // Spring training fallback: use last year's level, promote by 1
+            if (isSpringTraining && lastYearMilbLookup.size > 0) {
+              const lastYearMatch = lastYearMilbLookup.get(player.mlbPlayerId!)
+              if (lastYearMatch) {
+                const promotedSportId = PROMOTE_SPORT[lastYearMatch.sportId] ?? lastYearMatch.sportId
+                const orgId = resolveMLBTeamId(player.org, customMlb)
+                const promoted = orgId ? findAffiliateForSport(orgId, promotedSportId) : null
+                if (promoted) {
+                  newAssignments[player.playerName] = promoted
+                  assignedCount++
+                  continue
+                }
+              }
+            }
+
+            // Fall back to MLB roster (40-man)
             const mlbMatch = mlbPlayerIdToTeam.get(player.mlbPlayerId!)
             if (mlbMatch) {
+              // During spring training, if on 40-man but not on MiLB roster and not found
+              // in last year's data, check if they've ever debuted — if not, assign to
+              // highest A-ball affiliate instead of MLB
+              if (isSpringTraining) {
+                const orgId = resolveMLBTeamId(player.org, customMlb)
+                // Default non-debuted 40-man players to High-A (sportId 13)
+                const highA = orgId ? findAffiliateForSport(orgId, 13) : null
+                if (highA) {
+                  newAssignments[player.playerName] = highA
+                  assignedCount++
+                  continue
+                }
+              }
               newAssignments[player.playerName] = mlbMatch
               assignedCount++
             } else {
@@ -393,23 +461,23 @@ export const useScheduleStore = create<ScheduleState>()(
           // Build activity log — compare old vs new assignments
           const oldAssignments = state.playerTeamAssignments
           const changeLog: AssignmentChange[] = []
-          const now = Date.now()
+          const logTimestamp = Date.now()
           for (const [playerName, newAssignment] of Object.entries(newAssignments)) {
             const oldAssignment = oldAssignments[playerName]
             if (!oldAssignment) {
-              changeLog.push({ playerName, action: 'assigned', to: newAssignment.teamName, timestamp: now })
+              changeLog.push({ playerName, action: 'assigned', to: newAssignment.teamName, timestamp: logTimestamp })
             } else if (oldAssignment.teamId !== newAssignment.teamId) {
-              changeLog.push({ playerName, action: 'reassigned', from: oldAssignment.teamName, to: newAssignment.teamName, timestamp: now })
+              changeLog.push({ playerName, action: 'reassigned', from: oldAssignment.teamName, to: newAssignment.teamName, timestamp: logTimestamp })
             }
           }
           for (const name of notFoundNames) {
-            changeLog.push({ playerName: name, action: 'not-found', timestamp: now })
+            changeLog.push({ playerName: name, action: 'not-found', timestamp: logTimestamp })
           }
 
           set({
             playerTeamAssignments: newAssignments,
             autoAssignLoading: false,
-            autoAssignResult: { assigned: assignedCount, notFound: notFoundNames },
+            autoAssignResult: { assigned: assignedCount, notFound: notFoundNames, springTrainingEstimate: isSpringTraining && lastYearMilbLookup.size > 0 },
             assignmentLog: [...(get().assignmentLog ?? []), ...changeLog],
           })
 

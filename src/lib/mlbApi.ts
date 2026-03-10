@@ -123,8 +123,8 @@ export interface MLBRosterEntry {
   sportId: number
 }
 
-export async function fetchTeamRoster(teamId: number, sportId: number): Promise<MLBRosterEntry[]> {
-  const url = `${MLB_BASE}/teams/${teamId}/roster?rosterType=fullRoster`
+export async function fetchTeamRoster(teamId: number, sportId: number, season?: number): Promise<MLBRosterEntry[]> {
+  const url = `${MLB_BASE}/teams/${teamId}/roster?rosterType=fullRoster${season ? `&season=${season}` : ''}`
   const res = await fetchWithRetry(url, { timeoutMs: 10000 })
   if (!res.ok) {
     console.warn(`Roster fetch failed for team ${teamId}: HTTP ${res.status}`)
@@ -148,6 +148,7 @@ export async function fetchTeamRoster(teamId: number, sportId: number): Promise<
 export async function fetchAllRosters(
   teams: Array<{ teamId: number; sportId: number; teamName: string }>,
   onProgress?: (completed: number, total: number) => void,
+  season?: number,
 ): Promise<MLBRosterEntry[]> {
   const all: MLBRosterEntry[] = []
   const concurrency = 5
@@ -158,7 +159,7 @@ export async function fetchAllRosters(
     const results = await Promise.all(
       batch.map(async (t) => {
         try {
-          const roster = await fetchTeamRoster(t.teamId, t.sportId)
+          const roster = await fetchTeamRoster(t.teamId, t.sportId, season)
           return roster.map((r) => ({ ...r, teamName: t.teamName }))
         } catch (e) {
           console.warn(`Roster fetch failed for team ${t.teamId} after retries:`, e)
