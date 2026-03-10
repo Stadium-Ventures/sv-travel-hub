@@ -4,11 +4,10 @@ import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { isSpringTraining } from '../../data/springTraining'
-import { isNcaaSeason, isHsSeason, analyzeBestWeeks, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../../lib/tripEngine'
+import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
 import { resolveMaxPrepsSlug } from '../../lib/maxpreps'
 import { resolveNcaaName } from '../../data/aliases'
 import { useVenueStore } from '../../store/venueStore'
-import type { Coordinates } from '../../types/roster'
 import TripCard, { generateItineraryText, buildVenueStops, MarkVisitedChip } from './TripCard'
 import { clearScheduleCaches } from '../../lib/cacheUtils'
 import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
@@ -143,17 +142,6 @@ function getDayName(dateStr: string): string {
   return DAY_NAMES[new Date(dateStr + 'T12:00:00Z').getUTCDay()]!
 }
 
-function getDaysInRange(start: string, end: string): string[] {
-  const days: string[] = []
-  const cur = new Date(start + 'T12:00:00Z')
-  const last = new Date(end + 'T12:00:00Z')
-  while (cur <= last) {
-    days.push(DAY_NAMES[cur.getUTCDay()]!)
-    cur.setUTCDate(cur.getUTCDate() + 1)
-  }
-  return days
-}
-
 const STEPS = [
   { label: 'Load Roster', desc: 'Import players from Google Sheet' },
   { label: 'Load Schedules', desc: 'Pull game schedules from all sources' },
@@ -283,16 +271,9 @@ export default function TripPlanner() {
 
   const [copiedAll, setCopiedAll] = useState(false)
   const [statusFilter, setStatusFilter] = useState<'all' | TripStatus>('all')
-  const [sortBy, setSortBy] = useState<'score' | 'players' | 'drive' | 'date'>('score')
-  const [filterHasT1, setFilterHasT1] = useState(false)
-  const [filterHasT2, setFilterHasT2] = useState(false)
-  const [filterConfirmedOnly, setFilterConfirmedOnly] = useState(false)
+  const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
 
-  const ncaaGames = useScheduleStore((s) => s.ncaaGames)
-  const hsGamesReal = useScheduleStore((s) => s.hsGames)
-  const customMlbAliases = useScheduleStore((s) => s.customMlbAliases)
-  const customNcaaAliases = useScheduleStore((s) => s.customNcaaAliases)
   const venueState = useVenueStore((s) => s.venues)
   const geocodeHsVenues = useVenueStore((s) => s.geocodeHsVenues)
   const hsGeocodingProgress = useVenueStore((s) => s.hsGeocodingProgress)
@@ -312,38 +293,7 @@ export default function TripPlanner() {
   )
 
   // Best week suggestions — computed on-demand only when user clicks "Suggest"
-  const [bestWeeks, setBestWeeks] = useState<ReturnType<typeof analyzeBestWeeks>>([])
-  const [bestWeeksLoading, setBestWeeksLoading] = useState(false)
-  function computeBestWeeks() {
-    if (players.length === 0 || bestWeeksLoading) return
-    setBestWeeksLoading(true)
-    // Use full season range (Mar–Sep) so suggestions aren't limited to current date selection
-    const y = new Date().getFullYear()
-    const seasonStart = `${y}-03-01`
-    const seasonEnd = `${y}-09-30`
-    // Run in next tick to allow UI to show loading state
-    setTimeout(() => {
-      const stEvents = generateSpringTrainingEvents(players, seasonStart, seasonEnd, customMlbAliases)
-      const ncaaPlayersWithReal = new Set(ncaaGames.flatMap((g: { playerNames: string[] }) => g.playerNames))
-      const syntheticNcaa = generateNcaaEvents(
-        players.filter((p) => p.level === 'NCAA' && !ncaaPlayersWithReal.has(p.playerName)),
-        seasonStart, seasonEnd,
-        customNcaaAliases,
-      )
-      const hsPlayersWithReal = new Set(hsGamesReal.flatMap((g: { playerNames: string[] }) => g.playerNames))
-      const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
-      for (const [key, v] of Object.entries(venueState)) {
-        if (v.source === 'hs-geocoded') hsVenues.set(key.replace(/^hs-/, ''), { name: v.name, coords: v.coords })
-      }
-      const syntheticHs = generateHsEvents(
-        players.filter((p) => p.level === 'HS' && !hsPlayersWithReal.has(p.playerName)),
-        seasonStart, seasonEnd, hsVenues,
-      )
-      const allGames = [...proGames, ...stEvents, ...ncaaGames, ...syntheticNcaa, ...hsGamesReal, ...syntheticHs]
-      setBestWeeks(analyzeBestWeeks(allGames, players, seasonStart, seasonEnd, maxDriveMinutes))
-      setBestWeeksLoading(false)
-    }, 0)
-  }
+  // bestWeeks removed — trip planner generates for the dates selected
 
   const hasStDates = isSpringTraining(startDate) || isSpringTraining(endDate)
   const hasNcaaDates = isNcaaSeason(startDate) || isNcaaSeason(endDate)
@@ -447,7 +397,7 @@ export default function TripPlanner() {
   const [copyAllError, setCopyAllError] = useState(false)
   const [calAllError, setCalAllError] = useState(false)
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
-  const [flyInLimit, setFlyInLimit] = useState(5)
+  const flyInLimit = 10 // Hard cap on fly-in results
   const [showOverlaps, setShowOverlaps] = useState(false)
 
   async function handleCopyAllTrips() {
@@ -497,20 +447,10 @@ export default function TripPlanner() {
               Estimated travel = flight + 1h airport + ground transport
             </p>
           </div>
-          {totalCount > 5 && (
-            <div className="flex items-center gap-2">
-              <label className="text-[11px] text-text-dim">
-                Showing {Math.min(flyInLimit, totalCount)} of {totalCount}
-              </label>
-              <input
-                type="range"
-                min={1}
-                max={totalCount}
-                value={Math.min(flyInLimit, totalCount)}
-                onChange={(e) => setFlyInLimit(Number(e.target.value))}
-                className="h-1 w-24 cursor-pointer accent-purple-400"
-              />
-            </div>
+          {totalCount > flyInLimit && (
+            <span className="text-[11px] text-text-dim">
+              Top {flyInLimit} of {totalCount}
+            </span>
           )}
         </div>
         <div className="space-y-4">
@@ -873,39 +813,6 @@ export default function TripPlanner() {
           </div>
         )}
 
-        {/* Best week suggestions */}
-        {bestWeeks.length > 0 ? (
-          <div className="mb-4 rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-2">
-            <span className="text-xs font-medium text-accent-blue" title="Weeks with the most must-see and high priority players who have games">Best weeks: </span>
-            {bestWeeks.map((w, i) => {
-              const s = new Date(w.weekStart + 'T12:00:00Z')
-              const e = new Date(w.weekEnd + 'T12:00:00Z')
-              const label = `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][s.getUTCMonth()]} ${s.getUTCDate()}–${e.getUTCDate()}`
-              return (
-                <span key={i}>
-                  {i > 0 && <span className="text-text-dim/40 mx-1">·</span>}
-                  <button
-                    onClick={() => setDateRange(w.weekStart, w.weekEnd)}
-                    className="text-xs text-accent-blue hover:underline"
-                  >
-                    {label} ({w.t1Count} T1, {w.t2Count} T2)
-                  </button>
-                </span>
-              )
-            })}
-          </div>
-        ) : players.length > 0 && (
-          <div className="mb-4">
-            <button
-              onClick={computeBestWeeks}
-              disabled={bestWeeksLoading}
-              className="rounded-lg border border-accent-blue/30 bg-accent-blue/10 px-3 py-1.5 text-xs font-medium text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
-            >
-              {bestWeeksLoading ? 'Analyzing...' : 'Suggest Best Travel Weeks'}
-            </button>
-          </div>
-        )}
-
         {/* Quick date presets */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <span className="text-[11px] text-text-dim">Quick:</span>
@@ -1045,8 +952,7 @@ export default function TripPlanner() {
           </p>
         )}
 
-        {/* Day-of-week strip */}
-        <DayStrip startDate={startDate} endDate={endDate} />
+        {/* DayStrip removed — days are shown in trip cards */}
 
         {/* Priority players */}
         <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
@@ -1216,7 +1122,6 @@ export default function TripPlanner() {
           {/* Coverage stats */}
           {(() => {
             const beyondPlayers = tripPlan.unvisitablePlayers.filter((e) => e.reason.startsWith('Beyond max flight'))
-            const noGamePlayers = tripPlan.unvisitablePlayers.filter((e) => !e.reason.startsWith('Beyond max flight'))
             // Collect all player names that appear in road trips
             const roadTripPlayerNames = [...new Set(tripPlan.trips.flatMap((t) => [
               ...t.anchorGame.playerNames,
@@ -1241,62 +1146,33 @@ export default function TripPlanner() {
               {beyondPlayers.length > 0 && (
                 <StatCard label="Beyond Flight" value={beyondPlayers.length} accent="orange" scrollTo="section-beyond-flight" hoverNames={beyondPlayers.map((e) => e.name)} />
               )}
-              <StatCard label="No Games Found" value={noGamePlayers.length} accent={noGamePlayers.length > 0 ? 'red' : 'green'} scrollTo="section-no-games" hoverNames={noGamePlayers.map((e) => e.name)} />
             </div>
             )
           })()}
 
-          {/* At-a-glance summary */}
-          {(() => {
-            const totalEligible = players.filter((p) => p.visitsRemaining > 0).length
-            const allNames = [...new Set([
-              ...tripPlan.trips.flatMap((t) => [...t.anchorGame.playerNames, ...t.nearbyGames.flatMap((g) => g.playerNames)]),
-              ...tripPlan.flyInVisits.flatMap((v) => v.playerNames),
-            ])]
-            const t1Reachable = allNames.filter((n) => playerMap.get(n)?.tier === 1)
-            const unreachableCount = tripPlan.unvisitablePlayers.length
-
-            // Build human-readable sentences
-            const parts: string[] = []
-            parts.push(`You can see ${allNames.length} of your ${totalEligible} players this window`)
-
-            if (t1Reachable.length > 0) {
-              const t1Details: string[] = []
-              for (const name of t1Reachable) {
-                // Find which trip this T1 is in
-                const roadIdx = tripPlan.trips.findIndex((t) =>
-                  t.anchorGame.playerNames.includes(name) || t.nearbyGames.some((g) => g.playerNames.includes(name))
-                )
-                const flyIdx = tripPlan.flyInVisits.findIndex((v) => v.playerNames.includes(name))
-                if (roadIdx >= 0) {
-                  t1Details.push(`${name} is in Trip #${roadIdx + 1}`)
-                } else if (flyIdx >= 0) {
-                  t1Details.push(`${name} requires a fly-in`)
-                } else {
-                  t1Details.push(name)
-                }
-              }
-              parts.push(`${t1Reachable.length > 1 ? 'Must-see players' : 'Must-see player'} reachable — ${t1Details.join(', ')}`)
-            }
-
-            if (unreachableCount > 0) {
-              parts.push(`${unreachableCount} player${unreachableCount !== 1 ? 's' : ''} can't be reached`)
-            }
-
+          {/* Priority player status — the most important thing */}
+          {priorityPlayers.length > 0 && (() => {
+            const prioInRoad = priorityPlayers.filter((n) =>
+              tripPlan.trips.some((t) => t.anchorGame.playerNames.includes(n) || t.nearbyGames.some((g) => g.playerNames.includes(n)))
+            )
+            const prioInFlyIn = priorityPlayers.filter((n) =>
+              !prioInRoad.includes(n) && tripPlan.flyInVisits.some((v) => v.playerNames.includes(n))
+            )
+            const prioMissing = priorityPlayers.filter((n) => !prioInRoad.includes(n) && !prioInFlyIn.includes(n))
             return (
-              <div className="rounded-lg bg-gray-950/40 px-3 py-2">
-                <p className="text-sm text-text-dim">{parts.join('. ')}.</p>
-                <details className="mt-1">
-                  <summary className="cursor-pointer text-[10px] text-text-dim/50 hover:text-text-dim/70">Technical details</summary>
-                  <p className="mt-1 text-[11px] text-text-dim/60">
-                    Analyzed {tripPlan.analyzedEventCount} game events for {players.filter((p) => p.visitsRemaining > 0).length} players in the selected date range.
-                    {tripPlan.skippedPlayers.length > 0 && (
-                      <span className="ml-1">
-                        {tripPlan.skippedPlayers.length} player{tripPlan.skippedPlayers.length !== 1 ? 's' : ''} skipped: {tripPlan.skippedPlayers.map((p) => `${p.name} (${p.reason})`).join(', ')}.
+              <div className={`rounded-lg px-3 py-2 ${prioMissing.length > 0 ? 'bg-accent-red/10 border border-accent-red/30' : 'bg-accent-green/10 border border-accent-green/30'}`}>
+                <p className="text-sm font-medium">
+                  {prioMissing.length > 0
+                    ? <span className="text-accent-red">Priority player {prioMissing.join(', ')} not found in any trip option</span>
+                    : <span className="text-accent-green">
+                        {prioInRoad.map((n) => {
+                          const idx = tripPlan.trips.findIndex((t) => t.anchorGame.playerNames.includes(n) || t.nearbyGames.some((g) => g.playerNames.includes(n)))
+                          return `${n} → Trip #${idx + 1}`
+                        }).join(' · ')}
+                        {prioInFlyIn.length > 0 && ` · ${prioInFlyIn.join(', ')} → Fly-in`}
                       </span>
-                    )}
-                  </p>
-                </details>
+                  }
+                </p>
               </div>
             )
           })()}
@@ -1348,35 +1224,9 @@ export default function TripPlanner() {
             if (statusFilter !== 'all') {
               indexedTrips = indexedTrips.filter(({ trip: t }) => tripStatuses[getTripKey(t)] === statusFilter)
             }
-            if (filterHasT1) {
-              indexedTrips = indexedTrips.filter(({ trip: t }) => {
-                const allNames = [
-                  ...t.anchorGame.playerNames,
-                  ...t.nearbyGames.flatMap((g) => g.playerNames),
-                ]
-                return allNames.some((n) => playerMap.get(n)?.tier === 1)
-              })
-            }
-            if (filterHasT2) {
-              indexedTrips = indexedTrips.filter(({ trip: t }) => {
-                const allNames = [
-                  ...t.anchorGame.playerNames,
-                  ...t.nearbyGames.flatMap((g) => g.playerNames),
-                ]
-                return allNames.some((n) => playerMap.get(n)?.tier === 2)
-              })
-            }
-            if (filterConfirmedOnly) {
-              indexedTrips = indexedTrips.filter(({ trip: t }) => {
-                return t.anchorGame.source === 'mlb-api' || (t.anchorGame.confidence === 'high')
-              })
-            }
 
-            // Apply sort — use scoreBreakdown.finalScore (displayed value) for consistency
             indexedTrips.sort((a, b) => {
               if (sortBy === 'score') return (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) - (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue)
-              if (sortBy === 'players') return b.trip.totalPlayersVisited - a.trip.totalPlayersVisited
-              if (sortBy === 'drive') return a.trip.totalDriveMinutes - b.trip.totalDriveMinutes
               if (sortBy === 'date') return a.trip.anchorGame.date.localeCompare(b.trip.anchorGame.date)
               return 0
             })
@@ -1390,12 +1240,9 @@ export default function TripPlanner() {
                   <h3 className="text-sm font-semibold text-text">
                     Road Trips
                     <span className="ml-2 text-xs font-normal text-text-dim">
-                      Drivable from Orlando within {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''} radius
+                      within {Math.floor(maxDriveMinutes / 60)}h drive of Orlando
                     </span>
                   </h3>
-                  <p className="text-[10px] text-text-dim/60">
-                    Higher score = more priority players on good visit days. Tier 1 = 5pts, Tier 2 = 3pts, Tier 3 = 1pt. Tuesdays get +20% bonus.
-                  </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -1423,15 +1270,11 @@ export default function TripPlanner() {
                 </div>
               </div>
 
-              {/* Sort & filter toolbar — sticky */}
-              <div className="sticky top-0 z-10 -mx-5 mb-3 rounded-b-lg bg-surface px-5 pb-2 pt-2 border-b border-border/30">
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Sort */}
-                <span className="text-[11px] text-text-dim" title="Score = Must-see 5pts, High priority 3pts, Standard 1pt per visit remaining. Tuesday +20%. Pitcher start bonus.">Sort:</span>
+              {/* Compact toolbar */}
+              <div className="sticky top-0 z-10 -mx-5 mb-3 flex items-center gap-3 rounded-b-lg bg-surface px-5 pb-2 pt-2 border-b border-border/30">
+                <span className="text-[11px] text-text-dim">Sort:</span>
                 {([
-                  { key: 'score', label: 'Score' },
-                  { key: 'players', label: 'Players' },
-                  { key: 'drive', label: 'Drive Time' },
+                  { key: 'score', label: 'Best' },
                   { key: 'date', label: 'Date' },
                 ] as const).map(({ key, label }) => (
                   <button
@@ -1444,44 +1287,12 @@ export default function TripPlanner() {
                     {label}
                   </button>
                 ))}
-
                 <span className="mx-1 text-text-dim/30">|</span>
-
-                {/* Filters */}
-                <button
-                  onClick={() => setFilterHasT1(!filterHasT1)}
-                  className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                    filterHasT1 ? 'bg-accent-red/20 text-accent-red' : 'bg-gray-800/50 text-text-dim hover:text-text'
-                  }`}
-                >
-                  Has T1
-                </button>
-                <button
-                  onClick={() => setFilterHasT2(!filterHasT2)}
-                  className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                    filterHasT2 ? 'bg-accent-orange/20 text-accent-orange' : 'bg-gray-800/50 text-text-dim hover:text-text'
-                  }`}
-                >
-                  Has T2
-                </button>
-                <button
-                  onClick={() => setFilterConfirmedOnly(!filterConfirmedOnly)}
-                  className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                    filterConfirmedOnly ? 'bg-accent-green/20 text-accent-green' : 'bg-gray-800/50 text-text-dim hover:text-text'
-                  }`}
-                  title="Only show trips where the main game is confirmed (not estimated)"
-                >
-                  Confirmed Main Stop
-                </button>
-              </div>
-
-              {/* Status filter pills */}
-              <div className="mb-3 flex items-center gap-2">
                 {(['all', 'planned', 'completed'] as const).map((f) => (
                   <button
                     key={f}
                     onClick={() => setStatusFilter(f)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                    className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
                       statusFilter === f
                         ? f === 'planned' ? 'bg-accent-blue/20 text-accent-blue' : f === 'completed' ? 'bg-accent-green/20 text-accent-green' : 'bg-gray-700 text-text'
                         : 'bg-gray-800/50 text-text-dim hover:text-text'
@@ -1490,15 +1301,11 @@ export default function TripPlanner() {
                     {f === 'all' ? 'All' : f === 'planned' ? 'Planned' : 'Completed'}
                   </button>
                 ))}
-                <span className="text-[11px] text-text-dim">
-                  Showing {filteredTrips.length} of {tripPlan.trips.length} trips
-                </span>
-              </div>
               </div>
 
               <div className="space-y-4">
                 {indexedTrips.map(({ trip, originalIndex }, i) => (
-                  <TripCard key={`trip-${originalIndex}`} trip={trip} index={originalIndex} playerMap={playerMap} defaultExpanded={i === 0 && statusFilter === 'all' && !filterHasT1 && !filterHasT2} onPlayerClick={setSelectedPlayer} />
+                  <TripCard key={`trip-${originalIndex}`} trip={trip} index={originalIndex} playerMap={playerMap} defaultExpanded={i === 0 && statusFilter === 'all'} onPlayerClick={setSelectedPlayer} />
                 ))}
                 {filteredTrips.length === 0 && (
                   <p className="py-4 text-center text-sm text-text-dim">No trips match the selected filters.</p>
@@ -2081,56 +1888,6 @@ function FlyInCard({
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function DayStrip({ startDate, endDate }: { startDate: string; endDate: string }) {
-  const daysInRange = getDaysInRange(startDate, endDate)
-  const dayCount = daysInRange.length
-
-  if (dayCount < 1 || dayCount > 14) return null
-
-  // Count occurrences of each day
-  const dayCounts = new Map<string, number>()
-  for (const d of daysInRange) {
-    dayCounts.set(d, (dayCounts.get(d) ?? 0) + 1)
-  }
-
-  const hasSunday = dayCounts.has('Sun')
-  const hasTuesday = dayCounts.has('Tue')
-
-  return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
-      <div className="flex items-center gap-1">
-        {DAY_NAMES.map((day) => {
-          const inRange = dayCounts.has(day)
-          const isSunday = day === 'Sun'
-          const isTuesday = day === 'Tue'
-
-          return (
-            <span
-              key={day}
-              className={`flex h-7 w-8 items-center justify-center rounded text-[11px] font-medium ${
-                !inRange
-                  ? 'text-text-dim/20'
-                  : isSunday
-                    ? 'bg-accent-red/15 text-accent-red line-through'
-                    : isTuesday
-                      ? 'bg-accent-blue/15 text-accent-blue'
-                      : 'bg-gray-800 text-text-dim'
-              }`}
-            >
-              {day}
-            </span>
-          )
-        })}
-      </div>
-      <span className="text-[11px] text-text-dim/60">
-        {dayCount} day{dayCount !== 1 ? 's' : ''}
-        {hasTuesday && ' · Tue preferred'}
-        {hasSunday && ' · Sun blacked out'}
-      </span>
     </div>
   )
 }
