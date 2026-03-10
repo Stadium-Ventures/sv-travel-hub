@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { RosterPlayer } from '../types/roster'
 import { fetchRoster } from '../lib/csv'
+import { useDiagnosticsStore } from './diagnosticsStore'
 
 interface VisitOverride {
   visitsCompleted: number
@@ -58,6 +59,19 @@ export const useRosterStore = create<RosterState>()(
           }
           const players = applyOverrides(result.players, prunedOverrides)
           set({ players, loading: false, lastFetchedAt: new Date().toISOString(), parseWarnings: result.warnings, visitOverrides: prunedOverrides })
+
+          // Diagnostics
+          const diag = useDiagnosticsStore.getState()
+          diag.clearSource('roster')
+          if (result.warnings.length > 0) {
+            for (const warning of result.warnings) {
+              diag.addIssue({
+                level: 'warning',
+                source: 'roster',
+                message: warning,
+              })
+            }
+          }
         } catch (e) {
           set({ loading: false, error: e instanceof Error ? e.message : 'Unknown error' })
         }

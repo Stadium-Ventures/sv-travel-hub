@@ -23,10 +23,14 @@ export const CORS_PROXIES: CorsProxy[] = [
     url: 'https://corsproxy.io/?url=',
     extract: async (res) => res.text(),
   },
+  {
+    url: 'https://api.codetabs.com/v1/proxy?quest=',
+    extract: async (res) => res.text(),
+  },
 ]
 
 const CACHE_KEY = 'sv-travel-d1baseball-cache'
-const CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours
+const CACHE_TTL = 10 * 60 * 60 * 1000 // 10 hours
 
 export interface D1Game {
   date: string // ISO date YYYY-MM-DD
@@ -150,12 +154,73 @@ export async function fetchWithCorsProxy(targetUrl: string): Promise<string> {
   throw new Error(`All CORS proxies failed: ${errors.join('; ')}`)
 }
 
+// Slug discovery: attempt to find a D1Baseball slug automatically
+const DISCOVERED_SLUGS_KEY = 'sv-travel-d1-discovered-slugs'
+
+function getDiscoveredSlugs(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(DISCOVERED_SLUGS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveDiscoveredSlug(schoolName: string, slug: string) {
+  try {
+    const cache = getDiscoveredSlugs()
+    cache[schoolName] = slug
+    localStorage.setItem(DISCOVERED_SLUGS_KEY, JSON.stringify(cache))
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
+export async function discoverD1Slug(schoolName: string): Promise<string | null> {
+  try {
+    // Check localStorage cache first
+    const cached = getDiscoveredSlugs()[schoolName]
+    if (cached) return cached
+
+    // Build slug guess: lowercase, spaces→hyphens, strip special chars
+    const slugGuess = schoolName
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+
+    if (!slugGuess) return null
+
+    const url = `https://d1baseball.com/team/${slugGuess}/schedule/`
+    const html = await fetchWithCorsProxy(url)
+
+    // Validate: check if the HTML contains a schedule table
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+    const hasScheduleTable = doc.querySelector('table tbody tr') !== null
+
+    if (hasScheduleTable) {
+      saveDiscoveredSlug(schoolName, slugGuess)
+      return slugGuess
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
 // Fetch schedule for a single school
 export async function fetchD1Schedule(
   canonicalName: string,
 ): Promise<D1Schedule | null> {
-  const slug = D1_BASEBALL_SLUGS[canonicalName]
-  if (!slug) return null
+  let slug: string | undefined = D1_BASEBALL_SLUGS[canonicalName]
+  if (!slug) {
+    const discovered = await discoverD1Slug(canonicalName)
+    if (!discovered) return null
+    slug = discovered
+  }
 
   // Check cache
   const cache = getCache()

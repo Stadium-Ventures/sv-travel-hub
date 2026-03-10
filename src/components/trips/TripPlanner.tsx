@@ -259,6 +259,8 @@ export default function TripPlanner() {
   const fetchHsSchedules = useScheduleStore((s) => s.fetchHsSchedules)
   const autoAssignPlayers = useScheduleStore((s) => s.autoAssignPlayers)
   const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
+  const autoAssignResult = useScheduleStore((s) => s.autoAssignResult)
+  const assignmentLog = useScheduleStore((s) => s.assignmentLog) ?? []
   const playerTeamAssignments = useScheduleStore((s) => s.playerTeamAssignments)
   const players = useRosterStore((s) => s.players)
   const rosterLoading = useRosterStore((s) => s.loading)
@@ -771,15 +773,71 @@ export default function TripPlanner() {
           </div>
         )}
 
-        {/* Roster staleness warning */}
-        {rosterLastFetched && (Date.now() - new Date(rosterLastFetched).getTime() > 24 * 60 * 60 * 1000) && (
-          <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
-            <p className="text-[11px] text-accent-orange">
-              Roster data is more than 24 hours old (loaded {new Date(rosterLastFetched).toLocaleDateString()}).
-              <button onClick={fetchRoster} disabled={rosterLoading} className="ml-1 underline hover:no-underline">
-                {rosterLoading ? 'Refreshing...' : 'Refresh now'}
-              </button>
+        {/* Roster & assignment status */}
+        {rosterLastFetched && (
+          <div className={`mb-4 rounded-lg border px-3 py-1.5 ${
+            Date.now() - new Date(rosterLastFetched).getTime() > 24 * 60 * 60 * 1000
+              ? 'border-accent-orange/20 bg-accent-orange/5'
+              : 'border-border/30 bg-surface'
+          }`}>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-text-dim">
+                <span className="font-medium text-text">Roster:</span>{' '}
+                {formatTimeAgo(new Date(rosterLastFetched).getTime())}
+                {Date.now() - new Date(rosterLastFetched).getTime() > 24 * 60 * 60 * 1000 && (
+                  <span className="ml-1 text-accent-orange">(stale)</span>
+                )}
+                {autoAssignResult && autoAssignResult.assigned > 0 && (
+                  <span className="ml-2 text-accent-green">· {autoAssignResult.assigned} players auto-assigned</span>
+                )}
+                {autoAssignResult && autoAssignResult.notFound.length > 0 && (
+                  <span className="ml-2 text-accent-orange">· {autoAssignResult.notFound.length} not found on MLB rosters</span>
+                )}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={fetchRoster}
+                  disabled={rosterLoading}
+                  className="rounded bg-gray-800 px-2 py-0.5 text-[10px] font-medium text-text-dim hover:text-text hover:bg-gray-700 disabled:opacity-50"
+                >
+                  {rosterLoading ? 'Refreshing...' : 'Refresh Roster'}
+                </button>
+                <button
+                  onClick={autoAssignPlayers}
+                  disabled={autoAssignLoading || players.length === 0}
+                  className="rounded bg-gray-800 px-2 py-0.5 text-[10px] font-medium text-text-dim hover:text-text hover:bg-gray-700 disabled:opacity-50"
+                  title="Re-check MLB rosters for player assignments (trades, promotions, demotions)"
+                >
+                  {autoAssignLoading ? 'Checking...' : 'Check Roster Moves'}
+                </button>
+              </div>
+            </div>
+            <p className="mt-0.5 text-[9px] text-text-dim/50">
+              Refresh Roster pulls the Google Sheet. Check Roster Moves re-queries MLB rosters for trades/promotions/demotions.
             </p>
+            {/* Show recent assignment changes */}
+            {assignmentLog.length > 0 && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-[10px] text-text-dim hover:text-text">
+                  {assignmentLog.length} recent assignment change{assignmentLog.length !== 1 ? 's' : ''}
+                </summary>
+                <div className="mt-1 max-h-24 overflow-y-auto text-[10px]">
+                  {assignmentLog.slice(-10).reverse().map((entry, i) => (
+                    <p key={i} className={`leading-snug ${
+                      entry.action === 'reassigned' ? 'text-accent-blue' :
+                      entry.action === 'not-found' ? 'text-accent-orange' :
+                      'text-text-dim'
+                    }`}>
+                      {entry.action === 'assigned' && `✓ ${entry.playerName} → ${entry.to}`}
+                      {entry.action === 'reassigned' && `↻ ${entry.playerName}: ${entry.from} → ${entry.to}`}
+                      {entry.action === 'not-found' && `? ${entry.playerName}: not found on any roster`}
+                      {entry.action === 'name-matched' && `≈ ${entry.playerName} → ${entry.to} (name match)`}
+                      {entry.action === 'fallback' && `↓ ${entry.playerName} → ${entry.to} (org fallback)`}
+                    </p>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
         )}
 
@@ -1654,7 +1712,8 @@ function FlyInCard({
 
   const coordKey = `${visit.venue.coords.lat.toFixed(4)},${visit.venue.coords.lng.toFixed(4)}`
   const teamSlug = (visit.teamLabel ?? '').toLowerCase().replace(/\s+/g, '-')
-  const flyInKey = `flyin-${coordKey}${teamSlug ? `-${teamSlug}` : ''}`
+  const dateSlug = visit.dates[0] ?? ''
+  const flyInKey = `flyin-${coordKey}${teamSlug ? `-${teamSlug}` : ''}-${dateSlug}`
   const currentStatus = tripStatuses[flyInKey] as TripStatus | undefined
 
   function cycleStatus(e: React.MouseEvent) {
@@ -1783,7 +1842,7 @@ function FlyInCard({
           <p className="mt-0.5 text-sm text-text-dim">
             {dateLabel}
             <span className="ml-2 text-xs text-text-dim/60">
-              {dayCount} date{dayCount !== 1 ? 's' : ''} available
+              {dayCount}-day trip
             </span>
           </p>
         </div>

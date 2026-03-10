@@ -9,14 +9,24 @@ import type { D1Schedule } from '../lib/d1baseball'
 import { fetchAllD1Schedules, resolveOpponentVenue } from '../lib/d1baseball'
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import type { MaxPrepsSchedule } from '../lib/maxpreps'
-import { fetchAllMaxPrepsSchedules, resolveMaxPrepsSlug } from '../lib/maxpreps'
+import { fetchAllMaxPrepsSchedules } from '../lib/maxpreps'
 import { useRosterStore } from './rosterStore'
 import { useVenueStore } from './venueStore'
+import { useDiagnosticsStore } from './diagnosticsStore'
 
 interface PlayerTeamAssignment {
   teamId: number
   sportId: number
   teamName: string
+}
+
+// Activity log entry — tracks visible changes for transparency
+export interface AssignmentChange {
+  playerName: string
+  action: 'assigned' | 'reassigned' | 'not-found' | 'name-matched' | 'fallback'
+  from?: string // previous team name
+  to?: string   // new team name
+  timestamp: number
 }
 
 interface ScheduleState {
@@ -31,6 +41,9 @@ interface ScheduleState {
   // Custom aliases for unrecognized org names (persisted)
   customMlbAliases: Record<string, string>   // raw name → canonical MLB org name
   customNcaaAliases: Record<string, string>   // raw name → canonical NCAA school name
+
+  // Assignment activity log (persisted) — shows what auto-assign did
+  assignmentLog: AssignmentChange[]
 
   // Pro schedules
   proSchedules: Record<number, MLBGameRaw[]> // teamId → games
@@ -132,6 +145,7 @@ export const useScheduleStore = create<ScheduleState>()(
       playerTeamAssignments: {},
       customMlbAliases: {},
       customNcaaAliases: {},
+      assignmentLog: [],
 
       proSchedules: {},
       proGames: [],
@@ -225,12 +239,17 @@ export const useScheduleStore = create<ScheduleState>()(
 
         const allAffiliates = state.affiliates
 
-        // Get Pro players that need assignment
+        // Get Pro players that need assignment (with mlbPlayerId for roster lookup)
         const proPlayers = rosterPlayers.filter(
           (p) => p.level === 'Pro' && p.mlbPlayerId && !state.playerTeamAssignments[p.playerName],
         )
 
-        if (proPlayers.length === 0) {
+        // Also get Pro players without mlbPlayerId (will be handled via fallback)
+        const proPlayersWithoutId = rosterPlayers.filter(
+          (p) => p.level === 'Pro' && !p.mlbPlayerId && !state.playerTeamAssignments[p.playerName],
+        )
+
+        if (proPlayers.length === 0 && proPlayersWithoutId.length === 0) {
           set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, notFound: [] } })
           return
         }
@@ -238,7 +257,7 @@ export const useScheduleStore = create<ScheduleState>()(
         // Collect unique parent org IDs and build orgId → orgName lookup
         const parentOrgIds = new Set<number>()
         const orgIdToName = new Map<number, string>()
-        for (const p of proPlayers) {
+        for (const p of [...proPlayers, ...proPlayersWithoutId]) {
           const orgId = resolveMLBTeamId(p.org, customMlb)
           if (orgId) {
             parentOrgIds.add(orgId)
@@ -247,7 +266,7 @@ export const useScheduleStore = create<ScheduleState>()(
         }
 
         if (parentOrgIds.size === 0) {
-          set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, notFound: proPlayers.map((p) => p.playerName) } })
+          set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, notFound: [...proPlayers, ...proPlayersWithoutId].map((p) => p.playerName) } })
           return
         }
 
@@ -291,6 +310,9 @@ export const useScheduleStore = create<ScheduleState>()(
           }
 
           // Phase 2: For remaining players, search affiliate rosters (MiLB levels)
+          // Hoist milbRosterEntries so Phase 3 can also use them for name matching
+          let milbRosterEntries: typeof mlbRosterEntries = []
+
           if (remainingPlayers.length > 0) {
             const remainingOrgIds = new Set<number>()
             for (const p of remainingPlayers) {
@@ -304,9 +326,9 @@ export const useScheduleStore = create<ScheduleState>()(
               .map((a) => ({ teamId: a.teamId, sportId: a.sportId, teamName: a.teamName }))
 
             if (teamsToQuery.length > 0) {
-              const rosterEntries = await fetchAllRosters(teamsToQuery)
+              milbRosterEntries = await fetchAllRosters(teamsToQuery)
               const playerIdToTeam = new Map<number, PlayerTeamAssignment>()
-              for (const entry of rosterEntries) {
+              for (const entry of milbRosterEntries) {
                 if (entry.playerId > 0) {
                   playerIdToTeam.set(entry.playerId, {
                     teamId: entry.teamId,
@@ -333,16 +355,77 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
+          // Phase 3: Name-based fallback for players without mlbPlayerId
+          if (proPlayersWithoutId.length > 0) {
+            // Build a name lookup from all rosters already fetched (MLB + MiLB)
+            const allRosterEntries = [...mlbRosterEntries, ...milbRosterEntries]
+
+            const nameToTeam = new Map<string, PlayerTeamAssignment>()
+            for (const entry of allRosterEntries) {
+              if (entry.fullName) {
+                nameToTeam.set(entry.fullName.toLowerCase().trim(), {
+                  teamId: entry.teamId,
+                  sportId: entry.sportId,
+                  teamName: entry.teamName,
+                })
+              }
+            }
+
+            for (const player of proPlayersWithoutId) {
+              const normalizedName = player.playerName.toLowerCase().trim()
+              const match = nameToTeam.get(normalizedName)
+              if (match) {
+                newAssignments[player.playerName] = match
+                assignedCount++
+                // Remove from notFoundNames if present
+                const idx = notFoundNames.indexOf(player.playerName)
+                if (idx >= 0) notFoundNames.splice(idx, 1)
+              } else {
+                if (!notFoundNames.includes(player.playerName)) {
+                  notFoundNames.push(player.playerName)
+                }
+              }
+            }
+          }
+
+          // Build activity log — compare old vs new assignments
+          const oldAssignments = state.playerTeamAssignments
+          const changeLog: AssignmentChange[] = []
+          const now = Date.now()
+          for (const [playerName, newAssignment] of Object.entries(newAssignments)) {
+            const oldAssignment = oldAssignments[playerName]
+            if (!oldAssignment) {
+              changeLog.push({ playerName, action: 'assigned', to: newAssignment.teamName, timestamp: now })
+            } else if (oldAssignment.teamId !== newAssignment.teamId) {
+              changeLog.push({ playerName, action: 'reassigned', from: oldAssignment.teamName, to: newAssignment.teamName, timestamp: now })
+            }
+          }
+          for (const name of notFoundNames) {
+            changeLog.push({ playerName: name, action: 'not-found', timestamp: now })
+          }
+
           set({
             playerTeamAssignments: newAssignments,
             autoAssignLoading: false,
             autoAssignResult: { assigned: assignedCount, notFound: notFoundNames },
+            assignmentLog: [...(get().assignmentLog ?? []), ...changeLog],
           })
+
+          // Diagnostics
+          const diagAuto = useDiagnosticsStore.getState()
+          if (notFoundNames.length > 0) {
+            diagAuto.addIssue({
+              level: 'warning',
+              source: 'pro',
+              message: `${notFoundNames.length} player(s) not found on any roster`,
+              details: notFoundNames.join(', '),
+            })
+          }
         } catch (e) {
           const msg = e instanceof Error ? e.message : 'Unknown error'
           set({
             autoAssignLoading: false,
-            autoAssignResult: { assigned: 0, notFound: proPlayers.map((p) => p.playerName), error: msg },
+            autoAssignResult: { assigned: 0, notFound: [...proPlayers, ...proPlayersWithoutId].map((p) => p.playerName), error: msg },
           })
           console.error('Auto-assign failed:', e)
         }
@@ -459,6 +542,17 @@ export const useScheduleStore = create<ScheduleState>()(
             schedulesProgress: null,
             proFetchedAt: Date.now(),
           })
+
+          // Diagnostics
+          const diag = useDiagnosticsStore.getState()
+          diag.clearSource('pro')
+          if (droppedGames > 0) {
+            diag.addIssue({
+              level: 'warning',
+              source: 'pro',
+              message: `${droppedGames} Pro games dropped — missing venue coordinates`,
+            })
+          }
         } catch (e) {
           set({
             schedulesLoading: false,
@@ -647,6 +741,25 @@ export const useScheduleStore = create<ScheduleState>()(
             ncaaFailedSchools: mergedFailed,
             ncaaDroppedAwayGames: droppedAwayGames,
           })
+
+          // Diagnostics
+          const diag = useDiagnosticsStore.getState()
+          diag.clearSource('ncaa')
+          if (mergedFailed.length > 0) {
+            diag.addIssue({
+              level: 'warning',
+              source: 'ncaa',
+              message: `${mergedFailed.length} NCAA school(s) failed to fetch`,
+              details: mergedFailed.join(', '),
+            })
+          }
+          if (droppedAwayGames > 0) {
+            diag.addIssue({
+              level: 'info',
+              source: 'ncaa',
+              message: `${droppedAwayGames} NCAA away games skipped — unknown opponent venue`,
+            })
+          }
         } catch (e) {
           set({
             ncaaLoading: false,
@@ -658,19 +771,18 @@ export const useScheduleStore = create<ScheduleState>()(
       fetchHsSchedules: async (playerOrgs, { merge = false } = {}) => {
         if (get().hsLoading) return
 
-        // Group players by org|state key
+        // Group players by org|state key — include all schools (slug discovery
+        // in fetchMaxPrepsSchedule will attempt to find unknown slugs automatically)
         const schoolToPlayers = new Map<string, string[]>()
         for (const { playerName, org, state } of playerOrgs) {
           const key = `${org}|${state}`
-          // Skip schools without MaxPreps slugs
-          if (!resolveMaxPrepsSlug(org, state)) continue
           const existing = schoolToPlayers.get(key)
           if (existing) existing.push(playerName)
           else schoolToPlayers.set(key, [playerName])
         }
 
         if (schoolToPlayers.size === 0) {
-          set({ hsError: 'No schools with MaxPreps slugs found' })
+          set({ hsError: 'No HS schools found in roster' })
           return
         }
 
@@ -766,6 +878,18 @@ export const useScheduleStore = create<ScheduleState>()(
             hsFetchedAt: merge ? (prevState.hsFetchedAt ?? Date.now()) : Date.now(),
             hsFailedSchools: mergedFailed,
           })
+
+          // Diagnostics
+          const diag = useDiagnosticsStore.getState()
+          diag.clearSource('hs')
+          if (mergedFailed.length > 0) {
+            diag.addIssue({
+              level: 'warning',
+              source: 'hs',
+              message: `${mergedFailed.length} HS school(s) failed to fetch`,
+              details: mergedFailed.join(', '),
+            })
+          }
         } catch (e) {
           set({
             hsLoading: false,
@@ -792,6 +916,7 @@ export const useScheduleStore = create<ScheduleState>()(
         affiliates: state.affiliates,
         customMlbAliases: state.customMlbAliases,
         customNcaaAliases: state.customNcaaAliases,
+        assignmentLog: (state.assignmentLog ?? []).slice(-50), // keep last 50 entries
         rosterMoves: state.rosterMoves,
         rosterMovesCheckedAt: state.rosterMovesCheckedAt,
         // proGames/ncaaGames/hsGames and their fetchedAt are NOT persisted.
@@ -807,6 +932,7 @@ export const useScheduleStore = create<ScheduleState>()(
           playerTeamAssignments: p?.playerTeamAssignments ?? {},
           customMlbAliases: p?.customMlbAliases ?? {},
           customNcaaAliases: p?.customNcaaAliases ?? {},
+          assignmentLog: p?.assignmentLog ?? [],
           proGames: [],  // Always start fresh — re-fetch each session
           ncaaGames: [], // Always start fresh — re-fetch each session
           hsGames: [],   // Always start fresh — re-fetch each session

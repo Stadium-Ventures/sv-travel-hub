@@ -2,7 +2,7 @@ import { MAXPREPS_SLUGS } from '../data/maxprepsSlugs'
 import { fetchWithCorsProxy } from './d1baseball'
 
 const CACHE_KEY = 'sv-travel-maxpreps-cache'
-const CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours
+const CACHE_TTL = 10 * 60 * 60 * 1000 // 10 hours
 
 export interface MaxPrepsGame {
   date: string      // ISO date YYYY-MM-DD
@@ -125,6 +125,68 @@ export function parseMaxPrepsHtml(html: string, schoolName: string): { teamName:
   return { teamName, games }
 }
 
+// Slug discovery: attempt to find a MaxPreps slug automatically
+const DISCOVERED_SLUGS_KEY = 'sv-travel-maxpreps-discovered-slugs'
+
+function getDiscoveredSlugs(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(DISCOVERED_SLUGS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveDiscoveredSlug(key: string, slug: string) {
+  try {
+    const cache = getDiscoveredSlugs()
+    cache[key] = slug
+    localStorage.setItem(DISCOVERED_SLUGS_KEY, JSON.stringify(cache))
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
+export async function discoverMaxPrepsSlug(org: string, state: string): Promise<string | null> {
+  try {
+    const key = `${org}|${state}`
+
+    // Check localStorage cache first
+    const cached = getDiscoveredSlugs()[key]
+    if (cached) return cached
+
+    // Build slug guess: lowercase, spaces→hyphens, strip special chars
+    const orgSlug = org
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+
+    const stateAbbr = state.toLowerCase()
+
+    if (!orgSlug || !stateAbbr) return null
+
+    const slug = `high-schools/${orgSlug}-(${stateAbbr})`
+    const url = `https://www.maxpreps.com/${slug}/baseball/schedule/`
+    const html = await fetchWithCorsProxy(url)
+
+    // Validate: check if the HTML contains JSON-LD data
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+    const hasJsonLd = doc.querySelector('script[type="application/ld+json"]') !== null
+
+    if (hasJsonLd) {
+      saveDiscoveredSlug(key, slug)
+      return slug
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
 // Fetch schedule for a single school by org|state key
 export async function fetchMaxPrepsSchedule(
   orgStateKey: string,
@@ -132,8 +194,11 @@ export async function fetchMaxPrepsSchedule(
   const [org, state] = orgStateKey.split('|')
   if (!org || !state) return null
 
-  const slug = resolveMaxPrepsSlug(org, state)
-  if (!slug) return null
+  let slug = resolveMaxPrepsSlug(org, state)
+  if (!slug) {
+    slug = await discoverMaxPrepsSlug(org, state)
+    if (!slug) return null
+  }
 
   // Check cache
   const cache = getCache()

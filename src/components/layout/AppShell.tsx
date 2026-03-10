@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import DiagnosticsPanel from '../diagnostics/DiagnosticsPanel'
 
 export type TabId = 'roster' | 'schedule' | 'calendar' | 'trips' | 'map'
 
@@ -74,6 +75,7 @@ export default function AppShell({ children }: AppShellProps) {
         <p className="mt-1 text-sm text-text-dim">{currentTab.description}</p>
       </div>
 
+      <DiagnosticsPanel />
       <main>{children[activeTab]}</main>
     </div>
   )

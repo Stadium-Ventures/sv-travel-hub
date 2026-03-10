@@ -32,6 +32,10 @@ function cacheKey(schoolName: string, state: string): string {
   return `${schoolName.toLowerCase().trim()}|${state.toLowerCase().trim()}`
 }
 
+function isInContinentalUS(coords: Coordinates): boolean {
+  return coords.lat >= 24.5 && coords.lat <= 49.5 && coords.lng >= -125.0 && coords.lng <= -66.5
+}
+
 // Geocode a single school venue
 export async function geocodeVenue(
   schoolName: string,
@@ -42,7 +46,6 @@ export async function geocodeVenue(
   const key = cacheKey(schoolName, state)
   if (cache[key]) return cache[key]!
 
-  // Try specific baseball field query first
   const queries = [
     `${schoolName} baseball field, ${city}, ${state}`,
     `${schoolName}, ${city}, ${state}`,
@@ -57,24 +60,49 @@ export async function geocodeVenue(
       countrycodes: 'us',
     })
 
-    const res = await fetchWithTimeout(`${NOMINATIM_BASE}?${params}`, {
-      timeoutMs: 8000,
-      headers: {
-        'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures internal tool)',
-      },
-    })
+    // Retry up to 2 times with backoff for rate limit errors
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetchWithTimeout(`${NOMINATIM_BASE}?${params}`, {
+          timeoutMs: 8000,
+          headers: {
+            'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures internal tool)',
+          },
+        })
 
-    if (!res.ok) continue
+        if (res.status === 429) {
+          // Rate limited — back off and retry
+          await new Promise(r => setTimeout(r, 2000 * (attempt + 1)))
+          continue
+        }
 
-    const results = await res.json()
-    if (results.length > 0) {
-      const coords: Coordinates = {
-        lat: parseFloat(results[0].lat),
-        lng: parseFloat(results[0].lon),
+        if (!res.ok) break // Non-retryable HTTP error, try next query
+
+        const results = await res.json()
+        if (results.length > 0) {
+          const coords: Coordinates = {
+            lat: parseFloat(results[0].lat),
+            lng: parseFloat(results[0].lon),
+          }
+
+          // Validate coordinates are in continental US
+          if (!isInContinentalUS(coords)) {
+            console.warn(`Geocoding for "${q}" returned non-US coordinates (${coords.lat}, ${coords.lng}) — skipping`)
+            break // Try next query
+          }
+
+          cache[key] = coords
+          setCache(cache)
+          return coords
+        }
+        break // No results, try next query
+      } catch {
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+          continue
+        }
+        break // All retries exhausted, try next query
       }
-      cache[key] = coords
-      setCache(cache)
-      return coords
     }
   }
 
@@ -107,7 +135,7 @@ export async function geocodeAllHsVenues(
 
     // Rate limit: 1 req/sec for Nominatim
     if (completed < entries.length) {
-      await new Promise((resolve) => setTimeout(resolve, 1100))
+      await new Promise((resolve) => setTimeout(resolve, 1200))
     }
   }
 

@@ -1,5 +1,8 @@
 import type { Coordinates } from '../types/roster'
 
+// Spring Training sites — last verified: March 2026
+// Update when teams relocate (rare, ~1 per 2-3 years)
+
 // Spring Training typically runs mid-February through late March
 export const SPRING_TRAINING_START = '02-15' // MM-DD
 export const SPRING_TRAINING_END = '03-28'   // MM-DD
@@ -336,4 +339,19 @@ export function getSpringTrainingSite(parentTeamId: number): SpringTrainingSite 
 // Check if a team's ST site is in the Grapefruit League (Florida = drivable from Orlando)
 export function isGrapefruitLeague(parentTeamId: number): boolean {
   return SPRING_TRAINING_SITES[parentTeamId]?.league === 'Grapefruit'
+}
+
+// Validate that all spring training site coordinates fall within FL or AZ
+export function validateSpringTrainingSites(): string[] {
+  const warnings: string[] = []
+  for (const [teamIdStr, site] of Object.entries(SPRING_TRAINING_SITES)) {
+    // Basic coordinate validation: all ST sites should be in FL or AZ
+    const { lat, lng } = site.coords
+    const inFlorida = lat >= 25.5 && lat <= 30.5 && lng >= -82.5 && lng <= -80.0
+    const inArizona = lat >= 31.5 && lat <= 34.0 && lng >= -113.0 && lng <= -111.0
+    if (!inFlorida && !inArizona) {
+      warnings.push(`Team ${teamIdStr} (${site.venueName}): coordinates (${lat}, ${lng}) not in FL or AZ`)
+    }
+  }
+  return warnings
 }
