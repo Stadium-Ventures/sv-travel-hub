@@ -3,8 +3,6 @@ import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
-import { isSpringTraining } from '../../data/springTraining'
-import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
 import TripCard, { generateItineraryText, buildVenueStops, MarkVisitedChip } from './TripCard'
 import DoubleUpSection from './DoubleUpSection'
 import PlayerCoverageCard from './PlayerCoverageCard'
@@ -140,6 +138,30 @@ function getDayName(dateStr: string): string {
   return DAY_NAMES[new Date(dateStr + 'T12:00:00Z').getUTCDay()]!
 }
 
+// Progress bar helpers for trip generation
+function getProgressPercent(step: string): string {
+  if (step.includes('Auto-assigning')) return '10%'
+  if (step.includes('Pro schedules')) return '25%'
+  if (step.includes('College')) return '45%'
+  if (step.includes('Mapping HS')) return '55%'
+  if (step.includes('HS schedules')) return '65%'
+  if (step.includes('Starting')) return '75%'
+  if (step.includes('Analyzing') || step.includes('Scoring')) return '85%'
+  if (step.includes('Optimizing') || step.includes('Selecting')) return '92%'
+  return '50%'
+}
+
+function getProgressNote(step: string): string {
+  if (step.includes('Auto-assigning')) return 'Checking MLB/MiLB rosters for player affiliates (~5s)'
+  if (step.includes('Pro schedules')) return 'Fetching game schedules from MLB API (~15-30s)'
+  if (step.includes('College')) return 'Scraping D1Baseball schedules (~30-60s)'
+  if (step.includes('Mapping HS')) return 'Geocoding high school locations (~5s)'
+  if (step.includes('HS schedules')) return 'Fetching MaxPreps schedules (~15-30s)'
+  if (step.includes('Starting') || step.includes('Analyzing')) return 'Building trip candidates...'
+  if (step.includes('Optimizing') || step.includes('Selecting')) return 'Almost done — selecting best trips...'
+  return 'First run loads all schedule data. Subsequent runs are much faster.'
+}
+
 // Data status badges — read-only indicators of what's loaded
 function DataStatusBadges({ proGames, ncaaGames, hsGames, proStale, ncaaStale, hsStale, hasHsPlayers }: {
   proGames: any[]; ncaaGames: any[]; hsGames: any[]
@@ -245,11 +267,6 @@ export default function TripPlanner() {
   // Best week suggestions — computed on-demand only when user clicks "Suggest"
   // bestWeeks removed — trip planner generates for the dates selected
 
-  const hasStDates = isSpringTraining(startDate) || isSpringTraining(endDate)
-  const hasNcaaDates = isNcaaSeason(startDate) || isNcaaSeason(endDate)
-  const hasHsDates = isHsSeason(startDate) || isHsSeason(endDate)
-  const hasProPlayers = players.some((p) => p.level === 'Pro' && p.visitsRemaining > 0)
-  const hasNcaaPlayers = players.some((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
   const hasHsPlayers = players.some((p) => p.level === 'HS' && p.visitsRemaining > 0)
 
 
@@ -575,58 +592,23 @@ export default function TripPlanner() {
           </div>
         </div>
 
-        {!canGenerate && !computing && (
-          <p className="mt-3 text-xs text-accent-orange">
-            {players.length === 0
-              ? 'Load the roster first.'
-              : 'No games found in the selected date range. Try adjusting dates to cover a season — Spring Training: Feb 15–Mar 28, College: Feb 14–Jun 15, High School: Feb 14–May 15. For Pro regular season games, load schedules on the Data Setup tab first.'}
-          </p>
-        )}
-
-        {/* Warning: priority player's schedule data not loaded */}
-        {priorityPlayers.length > 0 && (() => {
-          const missingData: string[] = []
-          for (const name of priorityPlayers) {
-            const player = players.find((p) => p.playerName === name)
-            if (!player) continue
-            if (player.level === 'Pro' && proGames.length === 0) {
-              missingData.push(`${name} is a Pro player but Pro schedules aren't loaded yet`)
-            }
-          }
-          if (missingData.length === 0) return null
-          return (
-            <div className="mt-3 rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-2">
-              <p className="text-xs font-medium text-accent-red">Missing data for your priority player:</p>
-              {missingData.map((msg, i) => (
-                <p key={i} className="text-xs text-accent-red/80 mt-0.5">{msg}</p>
-              ))}
-              <p className="text-[10px] text-text-dim mt-1">
-                Click "Generate Trips" anyway — it will auto-load Pro schedules first. Or use the Load buttons above.
-              </p>
-            </div>
-          )
-        })()}
-        {canGenerate && proGames.length === 0 && priorityPlayers.every(n => {
-          const p = players.find(pl => pl.playerName === n)
-          return !p || p.level !== 'Pro'
-        }) && (
-          <p className="mt-3 text-xs text-accent-green">
-            {[
-              hasStDates && hasProPlayers ? 'Spring training (Pro)' : '',
-              hasNcaaDates && hasNcaaPlayers ? 'College season' : '',
-              hasHsDates && hasHsPlayers ? 'High school season' : '',
-            ].filter(Boolean).join(', ')} data available — trips can be generated now.
-            {hasProPlayers && ' For exact Pro regular season schedules, load game data on the Data Setup tab.'}
-          </p>
+        {!canGenerate && !computing && players.length === 0 && (
+          <p className="mt-3 text-xs text-accent-orange">Loading roster...</p>
         )}
 
         {computing && (
-          <div className="mt-4 rounded-lg border border-border/50 bg-gray-950 p-3">
-            <div className="flex items-center gap-2">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent-blue border-t-transparent" />
-              <span className="text-sm font-medium text-text">{progressStep}</span>
+          <div className="mt-4 rounded-xl border border-accent-blue/30 bg-accent-blue/5 p-4">
+            <div className="flex items-center gap-3 mb-2">
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-accent-blue border-t-transparent" />
+              <span className="text-sm font-semibold text-text">{progressStep || 'Working...'}</span>
             </div>
-            {progressDetail && <p className="mt-1 text-xs text-text-dim">{progressDetail}</p>}
+            {progressDetail && <p className="text-xs text-text-dim mb-2">{progressDetail}</p>}
+            <div className="h-1.5 rounded-full bg-gray-800 overflow-hidden">
+              <div className="h-full rounded-full bg-accent-blue animate-pulse" style={{ width: getProgressPercent(progressStep) }} />
+            </div>
+            <p className="mt-1.5 text-[10px] text-text-dim/60">
+              {getProgressNote(progressStep)}
+            </p>
           </div>
         )}
 

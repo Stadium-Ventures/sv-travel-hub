@@ -1,7 +1,6 @@
 import { Component, type ReactNode } from 'react'
 import AppShell from './components/layout/AppShell'
 import RosterDashboard from './components/roster/RosterDashboard'
-import CalendarView from './components/schedule/CalendarView'
 import TripPlanner from './components/trips/TripPlanner'
 import MapView from './components/map/MapView'
 
@@ -49,7 +48,6 @@ export default function App() {
       <AppShell>
         {{
           roster: <RosterDashboard />,
-          calendar: <CalendarView />,
           trips: <TripPlanner />,
           map: <MapView />,
         }}
