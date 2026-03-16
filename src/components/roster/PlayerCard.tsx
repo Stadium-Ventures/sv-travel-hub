@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { RosterPlayer } from '../../types/roster'
 import type { PlayerTeamAssignment } from '../../store/scheduleStore'
+import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { resolveMLBTeamId } from '../../data/aliases'
 
 const TIER_COLORS: Record<number, string> = {
@@ -30,6 +31,9 @@ interface PlayerCardProps {
 export default function PlayerCard({ player, showAffiliate, affiliate, affiliateOptions, onAssignAffiliate }: PlayerCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [editingAffiliate, setEditingAffiliate] = useState(false)
+  const heartbeatData = useHeartbeatStore((s) => s.getPlayerData(player.playerName))
+  const loveScore = heartbeatData?.loveScore ?? null
+  const daysSinceVisit = heartbeatData?.daysSinceInPerson ?? null
 
   // Filter affiliate options to this player's org
   const orgAffiliates = useMemo(() => {
@@ -41,7 +45,7 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
       .sort((a, b) => a.sportId - b.sportId)
   }, [affiliateOptions, player.org])
 
-  let colSpan = 5
+  let colSpan = 7
   if (showAffiliate) colSpan++
 
   return (
@@ -97,6 +101,28 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
           <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${TIER_COLORS[player.tier] ?? TIER_COLORS[4]}`}>
             {player.tier}
           </span>
+        </td>
+        <td className="px-4 py-2.5">
+          {daysSinceVisit !== null ? (
+            <span className={`text-xs ${daysSinceVisit > 90 ? 'text-accent-red' : daysSinceVisit > 45 ? 'text-accent-orange' : 'text-accent-green'}`}>
+              {daysSinceVisit}d
+            </span>
+          ) : (
+            <span className="text-xs text-text-dim/40">—</span>
+          )}
+        </td>
+        <td className="px-4 py-2.5">
+          {loveScore !== null ? (
+            <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ${
+              loveScore >= 60 ? 'bg-accent-green/20 text-accent-green' :
+              loveScore >= 30 ? 'bg-accent-orange/20 text-accent-orange' :
+              'bg-accent-red/20 text-accent-red'
+            }`}>
+              {loveScore}
+            </span>
+          ) : (
+            <span className="text-xs text-text-dim/40">—</span>
+          )}
         </td>
         <td className="px-4 py-2.5 text-text-dim">{player.leadAgent}</td>
       </tr>

@@ -410,19 +410,10 @@ export const useScheduleStore = create<ScheduleState>()(
             // Fall back to MLB roster (40-man)
             const mlbMatch = mlbPlayerIdToTeam.get(player.mlbPlayerId!)
             if (mlbMatch) {
-              // During spring training, if on 40-man but not on MiLB roster and not found
-              // in last year's data, check if they've ever debuted — if not, assign to
-              // highest A-ball affiliate instead of MLB
-              if (isSpringTraining) {
-                const orgId = resolveMLBTeamId(player.org, customMlb)
-                // Default non-debuted 40-man players to High-A (sportId 13)
-                const highA = orgId ? findAffiliateForSport(orgId, 13) : null
-                if (highA) {
-                  newAssignments[player.playerName] = highA
-                  assignedCount++
-                  continue
-                }
-              }
+              // On the 40-man roster — assign to MLB team directly.
+              // During spring training this is the right call for established MLB players.
+              // MiLB prospects who are on the 40-man will get corrected once
+              // regular season rosters publish.
               newAssignments[player.playerName] = mlbMatch
               assignedCount++
             } else {

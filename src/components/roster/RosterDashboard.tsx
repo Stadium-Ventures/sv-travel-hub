@@ -312,6 +312,8 @@ export default function RosterDashboard() {
                     <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('tier')}>
                       Tier{sortIndicator('tier')}
                     </th>
+                    <th className="px-4 py-2.5">Last Visit</th>
+                    <th className="px-4 py-2.5">Love</th>
                     <th className="px-4 py-2.5">Agent</th>
                   </tr>
                 </thead>
@@ -426,6 +428,8 @@ function ProTable({
             <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('tier')}>
               Tier{sortIndicator('tier')}
             </th>
+            <th className="px-4 py-2.5">Last Visit</th>
+            <th className="px-4 py-2.5">Love</th>
             <th className="px-4 py-2.5">Agent</th>
           </tr>
         </thead>
