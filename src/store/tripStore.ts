@@ -112,33 +112,37 @@ export const useTripStore = create<TripState>()(
       }
     }
 
-    // Auto-fetch NCAA schedules if NCAA players exist but haven't been loaded
+    // Auto-fetch NCAA schedules — T1/T2 + priority players only (faster first load)
     const hasNcaaPlayers = players.some((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
     if (hasNcaaPlayers && scheduleState.ncaaGames.length === 0 && !scheduleState.ncaaLoading) {
-      set({ computing: true, tripPlan: null, progressStep: 'Loading College schedules...', progressDetail: '' })
+      const prioritySet = new Set(priorityPlayers)
       const ncaaPlayerOrgs = players
-        .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+        .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0 && (p.tier <= 2 || prioritySet.has(p.playerName)))
         .map((p) => ({ playerName: p.playerName, org: p.org }))
-      await useScheduleStore.getState().fetchNcaaSchedules(ncaaPlayerOrgs)
-      scheduleState = useScheduleStore.getState()
+      if (ncaaPlayerOrgs.length > 0) {
+        set({ computing: true, tripPlan: null, progressStep: 'Loading College schedules...', progressDetail: `${ncaaPlayerOrgs.length} schools (T1 & T2)` })
+        await useScheduleStore.getState().fetchNcaaSchedules(ncaaPlayerOrgs, { merge: true })
+        scheduleState = useScheduleStore.getState()
+      }
     }
 
-    // Auto-geocode HS venues and fetch HS schedules
+    // Auto-geocode HS venues and fetch HS schedules — T1/T2 + priority players only
     const hasHsPlayers = players.some((p) => p.level === 'HS' && p.visitsRemaining > 0)
     if (hasHsPlayers) {
+      const prioritySet = new Set(priorityPlayers)
       const venueState = useVenueStore.getState()
       const hsVenueCount = Object.values(venueState.venues).filter((v: any) => v.source === 'hs-geocoded').length
-      const hsPlayerList = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+      const hsPlayerList = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0 && (p.tier <= 2 || prioritySet.has(p.playerName)))
       if (hsVenueCount === 0 && hsPlayerList.length > 0) {
-        set({ computing: true, tripPlan: null, progressStep: 'Mapping HS school locations...', progressDetail: '' })
+        set({ computing: true, tripPlan: null, progressStep: 'Mapping HS school locations...', progressDetail: `${hsPlayerList.length} schools (T1 & T2)` })
         await useVenueStore.getState().geocodeHsVenues(
           hsPlayerList.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
         )
       }
-      if (scheduleState.hsGames.length === 0 && !scheduleState.hsLoading) {
-        set({ computing: true, tripPlan: null, progressStep: 'Loading HS schedules...', progressDetail: '' })
+      if (scheduleState.hsGames.length === 0 && !scheduleState.hsLoading && hsPlayerList.length > 0) {
+        set({ computing: true, tripPlan: null, progressStep: 'Loading HS schedules...', progressDetail: `${hsPlayerList.length} schools (T1 & T2)` })
         const hsPlayerOrgs = hsPlayerList.map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
-        await useScheduleStore.getState().fetchHsSchedules(hsPlayerOrgs)
+        await useScheduleStore.getState().fetchHsSchedules(hsPlayerOrgs, { merge: true })
         scheduleState = useScheduleStore.getState()
       }
     }
