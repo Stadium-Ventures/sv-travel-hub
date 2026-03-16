@@ -1,11 +1,9 @@
 import React, { useMemo, useState } from 'react'
-import { useRosterStore } from '../../store/rosterStore'
-import { useTripStore, getTripKey } from '../../store/tripStore'
+import { useTripStore } from '../../store/tripStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
 import { generateTripIcs, downloadIcs } from '../../lib/icsExport'
 import { haversineKm, HOME_BASE } from '../../lib/tripEngine'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
-import type { TripStatus } from '../../store/tripStore'
 import type { RosterPlayer } from '../../types/roster'
 
 interface Props {
@@ -274,24 +272,11 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
 }
 
 function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick }: Props) {
-  const setVisitOverride = useRosterStore((s) => s.setVisitOverride)
-
   const stops = useMemo(() => buildVenueStops(trip, playerMap), [trip, playerMap])
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [copied, setCopied] = useState(false)
 
-  const tripKey = getTripKey(trip)
-  const tripStatuses = useTripStore((s) => s.tripStatuses)
-  const setTripStatus = useTripStore((s) => s.setTripStatus)
   const setSelectedTripIndex = useTripStore((s) => s.setSelectedTripIndex)
-  const currentStatus = tripStatuses[tripKey] as TripStatus | undefined
-
-  function cycleStatus(e: React.MouseEvent) {
-    e.stopPropagation()
-    if (!currentStatus) setTripStatus(tripKey, 'planned')
-    else if (currentStatus === 'planned') setTripStatus(tripKey, 'completed')
-    else setTripStatus(tripKey, null)
-  }
 
   const allPlayers = new Set<string>()
   for (const stop of stops) {
@@ -349,7 +334,6 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
   const t1Names = [...allPlayers].filter((n) => playerMap.get(n)?.tier === 1)
 
   const [scoreOpen, setScoreOpen] = useState(false)
-  const [markedPlayers, setMarkedPlayers] = useState<Set<string>>(new Set())
   const [copyError, setCopyError] = useState(false)
   const [calError, setCalError] = useState(false)
 
@@ -398,18 +382,6 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                 {breakdown.finalScore} pts
               </span>
             )}
-            <button
-              onClick={cycleStatus}
-              className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                currentStatus === 'planned'
-                  ? 'bg-accent-blue/15 text-accent-blue border border-accent-blue/30'
-                  : currentStatus === 'completed'
-                    ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
-                    : 'bg-gray-800 text-text-dim/50 border border-border/30 hover:text-text-dim'
-              }`}
-            >
-              {currentStatus === 'planned' ? 'Planned' : currentStatus === 'completed' ? 'Completed' : 'Mark Status'}
-            </button>
           </div>
           {/* Compact summary line */}
           <p className="mt-0.5 text-sm text-text-dim">
@@ -619,32 +591,6 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             </div>
           )}
 
-          {/* Mark Visited */}
-          <div className="border-t border-border/30 pt-3">
-            <p className="mb-1.5 text-[11px] font-medium text-text-dim">Mark Visited</p>
-            <div className="flex flex-wrap gap-1.5">
-              {[...allPlayers].map((name) => {
-                const player = playerMap.get(name)
-                if (!player) return null
-                const tier = player.tier
-                const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                return (
-                  <MarkVisitedChip
-                    key={name}
-                    name={name}
-                    tier={tier}
-                    dotColor={dotColor}
-                    marked={markedPlayers.has(name)}
-                    onMark={() => {
-                      const today = new Date().toISOString().split('T')[0]!
-                      setVisitOverride(name, player.visitsCompleted + 1, today)
-                      setMarkedPlayers((prev) => new Set(prev).add(name))
-                    }}
-                  />
-                )
-              })}
-            </div>
-          </div>
 
         </div>
       )}
@@ -653,37 +599,3 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
 }
 
 export default React.memo(TripCard)
-
-export function MarkVisitedChip({ name, tier, dotColor, marked, onMark }: {
-  name: string
-  tier: number
-  dotColor: string
-  marked: boolean
-  onMark: () => void
-}) {
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation()
-        if (marked) return
-        onMark()
-      }}
-      disabled={marked}
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-        marked
-          ? 'bg-accent-green/15 text-accent-green'
-          : 'bg-surface text-text hover:bg-accent-green/10'
-      }`}
-      title={marked ? `Logged visit for ${name}` : `Log an in-person visit for ${name} today`}
-    >
-      <span className={`inline-block h-2 w-2 rounded-full ${marked ? 'bg-accent-green' : dotColor}`} />
-      {name}
-      <span className="text-text-dim/60">T{tier}</span>
-      {marked ? (
-        <span className="ml-0.5 text-accent-green">&#10003;</span>
-      ) : (
-        <span className="ml-0.5 text-text-dim/40">+1</span>
-      )}
-    </button>
-  )
-}

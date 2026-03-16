@@ -3,12 +3,9 @@ import { useRosterStore } from '../../store/rosterStore'
 import type { SortField } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import type { AssignmentChange } from '../../store/scheduleStore'
-import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '../../data/aliases'
-import { formatTimeAgo } from '../../lib/formatters'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
-import Term from '../ui/Term'
 
 export default function RosterDashboard() {
   const players = useRosterStore((s) => s.players)
@@ -19,8 +16,6 @@ export default function RosterDashboard() {
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
 
   const rosterMoves = useScheduleStore((s) => s.rosterMoves)
-  const rosterMovesLoading = useScheduleStore((s) => s.rosterMovesLoading)
-  const rosterMovesCheckedAt = useScheduleStore((s) => s.rosterMovesCheckedAt)
   const rosterMovesError = useScheduleStore((s) => s.rosterMovesError)
   const checkRosterMoves = useScheduleStore((s) => s.checkRosterMoves)
   const playerTeamAssignments = useScheduleStore((s) => s.playerTeamAssignments)
@@ -34,15 +29,6 @@ export default function RosterDashboard() {
   const customNcaaAliases = useScheduleStore((s) => s.customNcaaAliases)
   const setCustomAlias = useScheduleStore((s) => s.setCustomAlias)
 
-  const heartbeatPlayers = useHeartbeatStore((s) => s.players)
-  const heartbeatPriorities = useHeartbeatStore((s) => s.priorities)
-  const heartbeatLoading = useHeartbeatStore((s) => s.loading)
-  const heartbeatError = useHeartbeatStore((s) => s.error)
-  const heartbeatLastFetched = useHeartbeatStore((s) => s.lastFetchedAt)
-  const fetchHeartbeat = useHeartbeatStore((s) => s.fetchHeartbeat)
-  const getPlayerData = useHeartbeatStore((s) => s.getPlayerData)
-  const getPlayerUrgency = useHeartbeatStore((s) => s.getPlayerUrgency)
-
   const sortField = useRosterStore((s) => s.sortColumn)
   const sortDir = useRosterStore((s) => s.sortDirection)
   const setSortField = useRosterStore((s) => s.setSortColumn)
@@ -51,50 +37,24 @@ export default function RosterDashboard() {
   const [levelFilter, setLevelFilter] = useState<PlayerLevel | 'All'>('All')
   const [search, setSearch] = useState('')
 
-  const hasHeartbeat = heartbeatPlayers.length > 0
-
   const initialized = useRef(false)
   useEffect(() => {
     if (initialized.current) return
     initialized.current = true
     fetchRoster()
-    // Auto-fetch heartbeat if not loaded or stale (>1 hour)
-    const stale = !heartbeatLastFetched || (Date.now() - new Date(heartbeatLastFetched).getTime() > 3600000)
-    if (stale) fetchHeartbeat()
-  }, [fetchRoster, fetchHeartbeat, heartbeatLastFetched])
+  }, [fetchRoster])
 
   const stats = useMemo(() => {
     const total = players.length
-    const totalTarget = players.reduce((sum, p) => sum + p.visitTarget2026, 0)
-    const totalCompleted = players.reduce((sum, p) => sum + p.visitsCompleted, 0)
-    const coveragePercent = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0
 
-    // Per-tier breakdown
+    // Per-tier breakdown (count only)
     const tiers = [1, 2, 3, 4].map((tier) => {
       const tierPlayers = players.filter((p) => p.tier === tier)
-      const target = tierPlayers.reduce((sum, p) => sum + p.visitTarget2026, 0)
-      const completed = tierPlayers.reduce((sum, p) => sum + p.visitsCompleted, 0)
-      return { tier, count: tierPlayers.length, target, completed, percent: target > 0 ? Math.round((completed / target) * 100) : 0 }
+      return { tier, count: tierPlayers.length }
     }).filter((t) => t.count > 0)
 
-    return { total, totalTarget, totalCompleted, coveragePercent, tiers }
+    return { total, tiers }
   }, [players])
-
-  // Heartbeat aggregate stats
-  const heartbeatStats = useMemo(() => {
-    if (!hasHeartbeat) return null
-
-    const matched = players.filter((p) => getPlayerData(p.playerName))
-    const avgLove = matched.length > 0
-      ? Math.round(matched.reduce((sum, p) => sum + (getPlayerData(p.playerName)?.loveScore ?? 0), 0) / matched.length)
-      : 0
-
-    const overdue = heartbeatPriorities.filter((p) => p.inPersonOverdue).length
-    const redCount = heartbeatPlayers.filter((p) => p.status === 'red').length
-    const yellowCount = heartbeatPriorities.filter((p) => p.status === 'yellow').length
-
-    return { avgLove, overdue, redCount, yellowCount, matchedCount: matched.length }
-  }, [players, hasHeartbeat, heartbeatPlayers, heartbeatPriorities, getPlayerData, getPlayerUrgency])
 
   const filtered = players
     .filter((p) => levelFilter === 'All' || p.level === levelFilter)
@@ -107,11 +67,6 @@ export default function RosterDashboard() {
       const mul = sortDir === 'asc' ? 1 : -1
       if (sortField === 'playerName') return mul * a.playerName.localeCompare(b.playerName)
       if (sortField === 'org') return mul * a.org.localeCompare(b.org)
-      if (sortField === 'loveScore') {
-        const aScore = getPlayerData(a.playerName)?.loveScore ?? -1
-        const bScore = getPlayerData(b.playerName)?.loveScore ?? -1
-        return mul * (aScore - bScore)
-      }
       return mul * ((a[sortField] as number) - (b[sortField] as number))
     })
 
@@ -125,7 +80,7 @@ export default function RosterDashboard() {
       setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
     } else {
       setSortField(field)
-      setSortDir(field === 'loveScore' ? 'desc' : 'asc')
+      setSortDir('asc')
     }
   }
 
@@ -181,18 +136,14 @@ export default function RosterDashboard() {
 
   return (
     <div className="space-y-4">
-      {/* Compact summary: stats + tier progress in one row */}
+      {/* Compact summary: player count + tier breakdown */}
       <div className="rounded-xl border border-border bg-surface px-5 py-3">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <div className="flex items-center gap-4 text-sm">
             <span className="text-text-dim">{stats.total} players</span>
-            <span className="text-text-dim/30">·</span>
-            <span className={`font-semibold ${stats.coveragePercent >= 50 ? 'text-accent-green' : stats.coveragePercent >= 25 ? 'text-accent-orange' : 'text-accent-red'}`}>
-              {stats.totalCompleted}/{stats.totalTarget} visits ({stats.coveragePercent}%)
-            </span>
           </div>
           <div className="flex items-center gap-3 ml-auto">
-            {stats.tiers.filter((t) => t.target > 0).map(({ tier, target, completed, percent }) => (
+            {stats.tiers.map(({ tier, count }) => (
               <div key={tier} className="flex items-center gap-1.5">
                 <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${
                   tier === 1 ? 'bg-accent-blue/20 text-accent-blue' :
@@ -200,48 +151,12 @@ export default function RosterDashboard() {
                   tier === 3 ? 'bg-accent-orange/20 text-accent-orange' :
                   'bg-gray-500/20 text-gray-400'
                 }`}>{tier}</span>
-                <div className="w-12">
-                  <div className="h-1 rounded-full bg-gray-800">
-                    <div className={`h-full rounded-full ${percent >= 50 ? 'bg-accent-green' : percent >= 25 ? 'bg-accent-orange' : 'bg-accent-red'}`}
-                      style={{ width: `${Math.min(percent, 100)}%` }} />
-                  </div>
-                </div>
-                <span className="text-[10px] text-text-dim">{completed}/{target}</span>
+                <span className="text-[10px] text-text-dim">{count}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
-
-      {/* Falling-behind alerts for T1/T2 */}
-      <BehindPaceAlerts players={players} />
-
-      {/* Client Health — collapsed by default */}
-      <details className="rounded-xl border border-border bg-surface">
-        <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-text-dim hover:text-text flex items-center justify-between">
-          <span>Client Health</span>
-          {heartbeatStats && (
-            <span className="flex items-center gap-3 text-[11px]">
-              <span className={heartbeatStats.avgLove >= 60 ? 'text-accent-green' : heartbeatStats.avgLove >= 30 ? 'text-accent-orange' : 'text-accent-red'}>
-                Love: {heartbeatStats.avgLove}
-              </span>
-              {heartbeatStats.overdue > 0 && <span className="text-accent-red">{heartbeatStats.overdue} overdue</span>}
-              {heartbeatStats.redCount + heartbeatStats.yellowCount > 0 && (
-                <span className="text-accent-orange">{heartbeatStats.redCount + heartbeatStats.yellowCount} need attention</span>
-              )}
-            </span>
-          )}
-        </summary>
-        <div className="border-t border-border px-5 py-3">
-          <ClientHealthPanel
-            stats={heartbeatStats}
-            loading={heartbeatLoading}
-            error={heartbeatError}
-            lastFetched={heartbeatLastFetched}
-            onRefresh={fetchHeartbeat}
-          />
-        </div>
-      </details>
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
@@ -269,42 +184,6 @@ export default function RosterDashboard() {
           ))}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          {Object.keys(playerTeamAssignments).length > 0 && (
-            <button
-              onClick={checkRosterMoves}
-              disabled={rosterMovesLoading}
-              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text disabled:opacity-50"
-              title="Check if any Pro players have changed teams recently (trades, promotions, demotions)"
-            >
-              {rosterMovesLoading ? (
-                <span className="h-3 w-3 animate-spin rounded-full border border-text-dim border-t-transparent" />
-              ) : (
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-                </svg>
-              )}
-              Check for Trades
-              {rosterMovesCheckedAt && (
-                <span className="text-[9px] text-text-dim/50">{formatTimeAgo(new Date(rosterMovesCheckedAt).getTime())}</span>
-              )}
-            </button>
-          )}
-          <button
-            onClick={fetchRoster}
-            disabled={loading}
-            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text disabled:opacity-50"
-          >
-            {loading ? (
-              <span className="h-3 w-3 animate-spin rounded-full border border-text-dim border-t-transparent" />
-            ) : (
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            )}
-            Refresh
-          </button>
-        </div>
       </div>
 
       {lastFetchedAt && (
@@ -397,7 +276,6 @@ export default function RosterDashboard() {
 
           <ProTable
             players={grouped.Pro}
-            hasHeartbeat={hasHeartbeat}
             playerTeamAssignments={playerTeamAssignments}
             affiliates={affiliates}
             onAssign={assignPlayerToTeam}
@@ -434,21 +312,12 @@ export default function RosterDashboard() {
                     <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('tier')}>
                       Tier{sortIndicator('tier')}
                     </th>
-                    <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('visitsRemaining')}>
-                      Visits Left{sortIndicator('visitsRemaining')}
-                    </th>
-                    <th className="px-4 py-2.5">Target</th>
-                    {hasHeartbeat && (
-                      <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('loveScore')}>
-                        <Term tip="Love Score from SV Heartbeat — a composite of call frequency, text frequency, in-person visits, and recency. 60+ = healthy, 30–59 = needs work, below 30 = at risk.">Love</Term>{sortIndicator('loveScore')}
-                      </th>
-                    )}
                     <th className="px-4 py-2.5">Agent</th>
                   </tr>
                 </thead>
                 <tbody>
                   {group.map((player) => (
-                    <PlayerCard key={player.normalizedName} player={player} showHeartbeat={hasHeartbeat} />
+                    <PlayerCard key={player.normalizedName} player={player} />
                   ))}
                 </tbody>
               </table>
@@ -528,7 +397,6 @@ export default function RosterDashboard() {
 
 function ProTable({
   players,
-  hasHeartbeat,
   playerTeamAssignments,
   affiliates,
   onAssign,
@@ -536,7 +404,6 @@ function ProTable({
   sortIndicator,
 }: {
   players: RosterPlayer[]
-  hasHeartbeat: boolean
   playerTeamAssignments: Record<string, { teamId: number; sportId: number; teamName: string }>
   affiliates: Array<{ teamId: number; teamName: string; sportId: number; parentOrgId: number }>
   onAssign: (playerName: string, assignment: { teamId: number; sportId: number; teamName: string }) => void
@@ -559,15 +426,6 @@ function ProTable({
             <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('tier')}>
               Tier{sortIndicator('tier')}
             </th>
-            <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('visitsRemaining')}>
-              Visits Left{sortIndicator('visitsRemaining')}
-            </th>
-            <th className="px-4 py-2.5">Target</th>
-            {hasHeartbeat && (
-              <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('loveScore')}>
-                Love{sortIndicator('loveScore')}
-              </th>
-            )}
             <th className="px-4 py-2.5">Agent</th>
           </tr>
         </thead>
@@ -576,7 +434,6 @@ function ProTable({
             <PlayerCard
               key={player.normalizedName}
               player={player}
-              showHeartbeat={hasHeartbeat}
               showAffiliate
               affiliate={playerTeamAssignments[player.playerName] ?? null}
               affiliateOptions={affiliates}
@@ -589,188 +446,6 @@ function ProTable({
   )
 }
 
-function ClientHealthPanel({
-  stats,
-  loading,
-  error,
-  lastFetched,
-  onRefresh,
-}: {
-  stats: { avgLove: number; overdue: number; redCount: number; yellowCount: number; matchedCount: number } | null
-  loading: boolean
-  error: string | null
-  lastFetched: string | null
-  onRefresh: () => void
-}) {
-  if (!stats && !loading && !error && !lastFetched) {
-    // Never fetched — show connect prompt
-    return (
-      <div className="rounded-xl border border-border bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-text">Client Health</h3>
-            <p className="mt-0.5 text-xs text-text-dim">
-              Connect to SV Heartbeat for love scores, contact freshness, and visit urgency data.
-            </p>
-          </div>
-          <button
-            onClick={onRefresh}
-            disabled={loading}
-            className="rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
-          >
-            {loading ? 'Syncing...' : 'Sync Heartbeat'}
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="rounded-xl border border-border bg-surface p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-text">Client Health</h3>
-        <div className="flex items-center gap-2">
-          {lastFetched && (
-            <span className="text-[10px] text-text-dim/60">
-              via SV Heartbeat · {new Date(lastFetched).toLocaleTimeString()}
-            </span>
-          )}
-          <button
-            onClick={onRefresh}
-            disabled={loading}
-            className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[10px] font-medium text-text-dim hover:text-text disabled:opacity-50"
-          >
-            {loading ? (
-              <span className="h-2.5 w-2.5 animate-spin rounded-full border border-text-dim border-t-transparent" />
-            ) : (
-              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            )}
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      {error && (
-        <p className="mb-2 text-xs text-accent-red">{error}</p>
-      )}
-
-      {stats && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div title="Overall relationship health (0–100). Combines call, text, and visit frequency plus recency. 60+ = healthy, 30–59 = needs attention, under 30 = at risk.">
-            <p className="text-[10px] font-medium text-text-dim">Avg Love Score</p>
-            <p className={`text-lg font-bold ${
-              stats.avgLove >= 60 ? 'text-accent-green' :
-              stats.avgLove >= 30 ? 'text-accent-orange' :
-              'text-accent-red'
-            }`}>
-              {stats.avgLove}
-              <span className="text-xs font-normal text-text-dim">/100</span>
-            </p>
-            <p className="text-[9px] text-text-dim/50">60+ green · 30+ yellow · &lt;30 red</p>
-          </div>
-          <div title="Players who haven't had an in-person visit within their tier's threshold: T1 = 60 days, T2 = 120 days, T3 = 180 days.">
-            <p className="text-[10px] font-medium text-text-dim"><Term tip="Players who haven't had an in-person visit within their tier's threshold: Tier 1 = every 60 days, Tier 2 = every 120 days, Tier 3 = every 180 days.">In-Person Overdue</Term></p>
-            <p className={`text-lg font-bold ${stats.overdue > 0 ? 'text-accent-red' : 'text-accent-green'}`}>
-              {stats.overdue}
-            </p>
-            <p className="text-[9px] text-text-dim/50">T1: 60d · T2: 120d · T3: 180d</p>
-          </div>
-          <div title="Red = significantly overdue for contact. Yellow = getting close to overdue. Green = contact is current.">
-            <p className="text-[10px] font-medium text-text-dim">Needs Attention</p>
-            <p className={`text-lg font-bold ${
-              stats.redCount > 0 ? 'text-accent-red' :
-              stats.yellowCount > 0 ? 'text-accent-orange' :
-              'text-accent-green'
-            }`}>
-              {stats.redCount + stats.yellowCount}
-              {(stats.redCount > 0 || stats.yellowCount > 0) && (
-                <span className="ml-1 text-xs font-normal text-text-dim">
-                  ({stats.redCount > 0 ? `${stats.redCount} red` : ''}{stats.redCount > 0 && stats.yellowCount > 0 ? ', ' : ''}{stats.yellowCount > 0 ? `${stats.yellowCount} yellow` : ''})
-                </span>
-              )}
-            </p>
-          </div>
-          <div title="How many of your roster players were found in SV Heartbeat. Players not found won't show love scores.">
-            <p className="text-[10px] font-medium text-text-dim">Matched Players</p>
-            <p className="text-lg font-bold text-text">
-              {stats.matchedCount}
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function BehindPaceAlerts({ players }: { players: RosterPlayer[] }) {
-  const now = new Date()
-  const seasonEnd = new Date(now.getFullYear(), 8, 30) // Sept 30
-  if (now > seasonEnd) return null
-
-  const monthsLeft = Math.max(
-    (seasonEnd.getFullYear() - now.getFullYear()) * 12 + (seasonEnd.getMonth() - now.getMonth()),
-    0.5,
-  )
-
-  const behindT1: Array<{ name: string; remaining: number; perMonth: number }> = []
-  const behindT2: Array<{ name: string; remaining: number; perMonth: number }> = []
-
-  for (const p of players) {
-    if (p.visitsRemaining <= 0) continue
-    if (p.tier !== 1 && p.tier !== 2) continue
-    const perMonth = p.visitsRemaining / monthsLeft
-    if (perMonth > 1.5) {
-      const entry = { name: p.playerName, remaining: p.visitsRemaining, perMonth: Math.round(perMonth * 10) / 10 }
-      if (p.tier === 1) behindT1.push(entry)
-      else behindT2.push(entry)
-    }
-  }
-
-  if (behindT1.length === 0 && behindT2.length === 0) return null
-
-  return (
-    <div className="space-y-2">
-      {behindT1.length > 0 && (
-        <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-accent-red">
-            {behindT1.length} Tier 1 player{behindT1.length !== 1 ? 's' : ''} behind pace
-          </h3>
-          <p className="mb-2 text-xs text-text-dim">
-            Need &gt;1.5 visits/month to hit targets by Sept 30 ({Math.round(monthsLeft)} months left). Consider prioritizing these players in your next trip.
-          </p>
-          <div className="space-y-1">
-            {behindT1.map((p) => (
-              <div key={p.name} className="flex items-center justify-between text-sm">
-                <span className="font-medium text-text">{p.name}</span>
-                <span className="text-xs text-accent-red">{p.remaining} visits left ({p.perMonth}/mo needed)</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {behindT2.length > 0 && (
-        <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-accent-orange">
-            {behindT2.length} Tier 2 player{behindT2.length !== 1 ? 's' : ''} behind pace
-          </h3>
-          <p className="mb-2 text-xs text-text-dim">
-            Need &gt;1.5 visits/month to hit targets by Sept 30 ({Math.round(monthsLeft)} months left). Consider prioritizing these players in your next trip.
-          </p>
-          <div className="space-y-1">
-            {behindT2.map((p) => (
-              <div key={p.name} className="flex items-center justify-between text-sm">
-                <span className="font-medium text-text">{p.name}</span>
-                <span className="text-xs text-accent-orange">{p.remaining} visits left ({p.perMonth}/mo needed)</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 function ParseWarnings({ warnings }: { warnings: string[] }) {
   const [expanded, setExpanded] = useState(false)

@@ -1,5 +1,4 @@
 import { useState, type ReactNode } from 'react'
-import { clearAllData } from '../../lib/cacheUtils'
 
 export type TabId = 'roster' | 'trips' | 'map'
 
@@ -37,18 +36,6 @@ export default function AppShell({ children }: AppShellProps) {
           <h1 className="text-xl font-bold tracking-tight text-text">SV Travel Hub</h1>
           <p className="text-xs text-text-dim">Road trip planner for client visits</p>
         </div>
-        <button
-          onClick={() => {
-            if (confirm('This will clear all cached data and reload the app. Your roster will reload from Google Sheets. Continue?')) {
-              clearAllData()
-              window.location.reload()
-            }
-          }}
-          className="rounded-lg border border-border px-3 py-1.5 text-xs text-text-dim hover:text-accent-red hover:border-accent-red/50 transition-colors"
-          title="Clear all cached schedules and app data, then reload"
-        >
-          Reset & Reload
-        </button>
       </header>
 
       <nav className="mb-6 flex gap-1 rounded-xl border border-border bg-surface p-1">

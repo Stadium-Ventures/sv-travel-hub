@@ -2,13 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
-import { useHeartbeatStore } from '../../store/heartbeatStore'
-import TripCard, { generateItineraryText, buildVenueStops, MarkVisitedChip } from './TripCard'
+import TripCard, { generateItineraryText, buildVenueStops } from './TripCard'
 import PlayerCoverageCard from './PlayerCoverageCard'
 import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
-import { getTripKey } from '../../store/tripStore'
-import type { TripStatus } from '../../store/tripStore'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 
@@ -218,8 +215,6 @@ export default function TripPlanner() {
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const clearTrips = useTripStore((s) => s.clearTrips)
-  const tripStatuses = useTripStore((s) => s.tripStatuses)
-  const setTripStatus = useTripStore((s) => s.setTripStatus)
   const proGames = useScheduleStore((s) => s.proGames)
   const ncaaGames = useScheduleStore((s) => s.ncaaGames)
   const hsGames = useScheduleStore((s) => s.hsGames)
@@ -230,8 +225,6 @@ export default function TripPlanner() {
   const rosterLoading = useRosterStore((s) => s.loading)
   const rosterError = useRosterStore((s) => s.error)
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
-  const heartbeatPriorities = useHeartbeatStore((s) => s.priorities)
-  const heartbeatUrgencyActive = heartbeatPriorities.some((p) => p.visitUrgencyScore >= 25)
 
   // Auto-load roster if empty on mount (Trip Planner is the default tab)
   const rosterInitialized = useRef(false)
@@ -244,7 +237,6 @@ export default function TripPlanner() {
   }, [players.length, rosterLoading, fetchRoster])
 
   const [copiedAll, setCopiedAll] = useState(false)
-  const [statusFilter, setStatusFilter] = useState<'all' | TripStatus>('all')
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
 
@@ -380,8 +372,7 @@ export default function TripPlanner() {
               players={players}
               playerMap={playerMap}
               priorityPlayers={priorityPlayers}
-              tripStatuses={tripStatuses}
-              setTripStatus={setTripStatus}
+
               copiedFlyIn={copiedFlyIn}
               setCopiedFlyIn={setCopiedFlyIn}
               onPlayerClick={setSelectedPlayer}
@@ -570,11 +561,6 @@ export default function TripPlanner() {
             </button>
           )}
         </div>
-        {heartbeatUrgencyActive && (
-          <p className="text-[10px] text-accent-blue" title="Players overdue for visits (from Heartbeat data) get ranked higher in trip results">
-            Heartbeat urgency data active — overdue clients get boosted in trip scoring
-          </p>
-        )}
 
         {/* DayStrip removed — days are shown in trip cards */}
 
@@ -806,8 +792,6 @@ export default function TripPlanner() {
                   players={players}
                   playerMap={playerMap}
                   priorityPlayers={priorityPlayers}
-                  tripStatuses={tripStatuses}
-                  setTripStatus={setTripStatus}
                   copiedFlyIn={copiedFlyIn}
                   setCopiedFlyIn={setCopiedFlyIn}
                   onPlayerClick={setSelectedPlayer}
@@ -829,12 +813,8 @@ export default function TripPlanner() {
 
           {/* Road trip cards */}
           {tripPlan.trips.length > 0 && (() => {
-            // Tag each trip with its original index before filtering/sorting
+            // Tag each trip with its original index before sorting
             let trips = [...tripPlan.trips]
-
-            if (statusFilter !== 'all') {
-              trips = trips.filter((t) => tripStatuses[getTripKey(t)] === statusFilter)
-            }
 
             trips.sort((a, b) => {
               if (sortBy === 'score') return (b.scoreBreakdown?.finalScore ?? b.visitValue) - (a.scoreBreakdown?.finalScore ?? a.visitValue)
@@ -899,25 +879,11 @@ export default function TripPlanner() {
                     {label}
                   </button>
                 ))}
-                <span className="mx-1 text-text-dim/30">|</span>
-                {(['all', 'planned', 'completed'] as const).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setStatusFilter(f)}
-                    className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                      statusFilter === f
-                        ? f === 'planned' ? 'bg-accent-blue/20 text-accent-blue' : f === 'completed' ? 'bg-accent-green/20 text-accent-green' : 'bg-gray-700 text-text'
-                        : 'bg-gray-800/50 text-text-dim hover:text-text'
-                    }`}
-                  >
-                    {f === 'all' ? 'All' : f === 'planned' ? 'Planned' : 'Completed'}
-                  </button>
-                ))}
               </div>
 
               <div className="space-y-4">
                 {indexedTrips.map(({ trip, displayIndex }, i) => (
-                  <TripCard key={`trip-${getTripKey(trip)}`} trip={trip} index={displayIndex} playerMap={playerMap} defaultExpanded={i === 0 && statusFilter === 'all'} onPlayerClick={setSelectedPlayer} />
+                  <TripCard key={`trip-${displayIndex}`} trip={trip} index={displayIndex} playerMap={playerMap} defaultExpanded={i === 0} onPlayerClick={setSelectedPlayer} />
                 ))}
                 {trips.length === 0 && (
                   <p className="py-4 text-center text-sm text-text-dim">No trips match the selected filters.</p>
@@ -967,12 +933,7 @@ export default function TripPlanner() {
                 <>
                 <p className="mt-2 mb-3 text-[11px] text-text-dim">These trips share dates — you can only take one per time slot.</p>
                 <div className="space-y-4">
-                  {overlaps.map((o, i) => {
-                    const tripAKey = getTripKey(o.tripA)
-                    const tripBKey = getTripKey(o.tripB)
-                    const tripAStatus = tripStatuses[tripAKey]
-                    const tripBStatus = tripStatuses[tripBKey]
-                    return (
+                  {overlaps.map((o, i) => (
                     <div key={i} className="rounded-lg border border-border/30 bg-gray-950/30 p-3">
                       <p className="mb-2 text-xs text-text-dim">
                         <span className="font-medium text-accent-orange">Trips #{o.idxA} and #{o.idxB}</span> overlap on{' '}
@@ -1004,27 +965,8 @@ export default function TripPlanner() {
                           }) : <p className="text-text-dim/50">None</p>}
                         </div>
                       </div>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          onClick={() => { setTripStatus(tripAKey, 'planned'); setTripStatus(tripBKey, null) }}
-                          className={`rounded-lg px-3 py-1 text-[11px] font-medium transition-colors ${
-                            tripAStatus === 'planned' ? 'bg-accent-blue text-white' : 'border border-accent-blue/30 text-accent-blue hover:bg-accent-blue/10'
-                          }`}
-                        >
-                          {tripAStatus === 'planned' ? `Trip #${o.idxA} chosen` : `Choose Trip #${o.idxA}`}
-                        </button>
-                        <button
-                          onClick={() => { setTripStatus(tripBKey, 'planned'); setTripStatus(tripAKey, null) }}
-                          className={`rounded-lg px-3 py-1 text-[11px] font-medium transition-colors ${
-                            tripBStatus === 'planned' ? 'bg-accent-green text-white' : 'border border-accent-green/30 text-accent-green hover:bg-accent-green/10'
-                          }`}
-                        >
-                          {tripBStatus === 'planned' ? `Trip #${o.idxB} chosen` : `Choose Trip #${o.idxB}`}
-                        </button>
-                      </div>
                     </div>
-                    )
-                  })}
+                  ))}
                 </div>
                 </>
                 )}
@@ -1188,7 +1130,7 @@ function StatCard({ label, value, accent, scrollTo, hoverNames }: {
 }
 
 function FlyInCard({
-  visit, index, players, playerMap, priorityPlayers, tripStatuses, setTripStatus,
+  visit, index, players, playerMap, priorityPlayers,
   copiedFlyIn, setCopiedFlyIn, onPlayerClick, defaultExpanded,
 }: {
   visit: import('../../types/schedule').FlyInVisit
@@ -1196,16 +1138,12 @@ function FlyInCard({
   players: RosterPlayer[]
   playerMap: Map<string, RosterPlayer>
   priorityPlayers: string[]
-  tripStatuses: Record<string, TripStatus>
-  setTripStatus: (key: string, status: TripStatus | null) => void
   copiedFlyIn: string | null
   setCopiedFlyIn: (key: string | null) => void
   onPlayerClick: (name: string) => void
   defaultExpanded?: boolean
 }) {
-  const setVisitOverride = useRosterStore((s) => s.setVisitOverride)
   const [expanded, setExpanded] = useState(defaultExpanded ?? false)
-  const [markedPlayers, setMarkedPlayers] = useState<Set<string>>(new Set())
 
   // Derive org label — prefer teamLabel from trip engine (accurate per-team grouping)
   const firstPlayer = players.find((p) => visit.playerNames.includes(p.playerName))
@@ -1220,14 +1158,6 @@ function FlyInCard({
   const teamSlug = (visit.teamLabel ?? '').toLowerCase().replace(/\s+/g, '-')
   const dateSlug = visit.dates[0] ?? ''
   const flyInKey = `flyin-${coordKey}${teamSlug ? `-${teamSlug}` : ''}-${dateSlug}`
-  const currentStatus = tripStatuses[flyInKey] as TripStatus | undefined
-
-  function cycleStatus(e: React.MouseEvent) {
-    e.stopPropagation()
-    if (!currentStatus) setTripStatus(flyInKey, 'planned')
-    else if (currentStatus === 'planned') setTripStatus(flyInKey, 'completed')
-    else setTripStatus(flyInKey, null)
-  }
 
   const milesDisplay = Math.round(visit.distanceKm * 0.621).toLocaleString()
 
@@ -1332,18 +1262,6 @@ function FlyInCard({
                 {breakdown.finalScore} pts
               </span>
             )}
-            <button
-              onClick={cycleStatus}
-              className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                currentStatus === 'planned'
-                  ? 'bg-accent-blue/15 text-accent-blue border border-accent-blue/30'
-                  : currentStatus === 'completed'
-                    ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
-                    : 'bg-gray-800 text-text-dim/50 border border-border/30 hover:text-text-dim'
-              }`}
-            >
-              {currentStatus === 'planned' ? 'Planned' : currentStatus === 'completed' ? 'Completed' : 'Mark Status'}
-            </button>
           </div>
           <p className="mt-0.5 text-sm text-text-dim">
             {dateLabel}
@@ -1475,32 +1393,6 @@ function FlyInCard({
             </button>
           </div>
 
-          {/* Mark Visited */}
-          <div className="border-t border-border/30 pt-3">
-            <p className="mb-1.5 text-[11px] font-medium text-text-dim">Mark Visited</p>
-            <div className="flex flex-wrap gap-1.5">
-              {visit.playerNames.map((name) => {
-                const player = playerMap.get(name)
-                if (!player) return null
-                const tier = player.tier
-                const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                return (
-                  <MarkVisitedChip
-                    key={name}
-                    name={name}
-                    tier={tier}
-                    dotColor={dotColor}
-                    marked={markedPlayers.has(name)}
-                    onMark={() => {
-                      const today = new Date().toISOString().split('T')[0]!
-                      setVisitOverride(name, player.visitsCompleted + 1, today)
-                      setMarkedPlayers((prev) => new Set(prev).add(name))
-                    }}
-                  />
-                )
-              })}
-            </div>
-          </div>
         </div>
       )}
     </div>
