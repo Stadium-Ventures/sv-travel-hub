@@ -239,14 +239,14 @@ export const useScheduleStore = create<ScheduleState>()(
 
         const allAffiliates = state.affiliates
 
-        // Get Pro players that need assignment (with mlbPlayerId for roster lookup)
+        // Get ALL Pro players — re-check even previously assigned ones
         const proPlayers = rosterPlayers.filter(
-          (p) => p.level === 'Pro' && p.mlbPlayerId && !state.playerTeamAssignments[p.playerName],
+          (p) => p.level === 'Pro' && p.mlbPlayerId,
         )
 
         // Also get Pro players without mlbPlayerId (will be handled via fallback)
         const proPlayersWithoutId = rosterPlayers.filter(
-          (p) => p.level === 'Pro' && !p.mlbPlayerId && !state.playerTeamAssignments[p.playerName],
+          (p) => p.level === 'Pro' && !p.mlbPlayerId,
         )
 
         if (proPlayers.length === 0 && proPlayersWithoutId.length === 0) {
@@ -490,6 +490,9 @@ export const useScheduleStore = create<ScheduleState>()(
               changeLog.push({ playerName, action: 'assigned', to: newAssignment.teamName, timestamp: logTimestamp })
             } else if (oldAssignment.teamId !== newAssignment.teamId) {
               changeLog.push({ playerName, action: 'reassigned', from: oldAssignment.teamName, to: newAssignment.teamName, timestamp: logTimestamp })
+            } else {
+              // Same assignment — confirmed
+              changeLog.push({ playerName, action: 'assigned', to: newAssignment.teamName, timestamp: logTimestamp })
             }
           }
           for (const name of notFoundNames) {

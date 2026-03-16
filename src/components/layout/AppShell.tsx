@@ -37,8 +37,6 @@ interface AppShellProps {
 
 export default function AppShell({ children }: AppShellProps) {
   const [activeTab, setActiveTab] = useState<TabId>('trips')
-  const currentTab = TABS.find((t) => t.id === activeTab)!
-
   return (
     <div className="mx-auto min-h-screen max-w-7xl px-4 py-6 sm:px-6">
       <header className="mb-6 flex items-center justify-between">
@@ -75,12 +73,6 @@ export default function AppShell({ children }: AppShellProps) {
           </button>
         ))}
       </nav>
-
-      {/* Tab header */}
-      <div className="mb-6 rounded-xl border border-border/50 bg-surface/50 px-5 py-4">
-        <h2 className="text-base font-semibold text-text">{currentTab.heading}</h2>
-        <p className="mt-1 text-sm text-text-dim">{currentTab.description}</p>
-      </div>
 
       <DiagnosticsPanel />
       <main>{children[activeTab]}</main>

@@ -180,68 +180,68 @@ export default function RosterDashboard() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Total Players" value={stats.total} />
-        <StatCard label="Visit Target" value={stats.totalTarget} />
-        <StatCard label="Completed" value={stats.totalCompleted} />
-        <StatCard
-          label="Coverage"
-          value={`${stats.coveragePercent}%`}
-          accent={stats.coveragePercent >= 50 ? 'green' : stats.coveragePercent >= 25 ? 'orange' : 'red'}
-        />
-      </div>
-
-      {/* Client Health panel from Heartbeat */}
-      <ClientHealthPanel
-        stats={heartbeatStats}
-        loading={heartbeatLoading}
-        error={heartbeatError}
-        lastFetched={heartbeatLastFetched}
-        onRefresh={fetchHeartbeat}
-      />
-
-      {/* Falling-behind alerts for T1/T2 */}
-      <BehindPaceAlerts players={players} />
-
-      {/* Per-tier coverage */}
-      {stats.tiers.length > 0 && (
-        <div className="rounded-xl border border-border bg-surface p-4">
-          <h3 className="mb-1 text-xs font-medium text-text-dim">Visit Progress by Tier</h3>
-          <p className="mb-2 text-[10px] text-text-dim/60">
-            Tier 1 = top priority (visit most often) · Tier 2 = medium · Tier 3 = lower · Tier 4 = minimal
-          </p>
-          <div className="flex flex-wrap gap-4">
-            {stats.tiers.map(({ tier, count, target, completed, percent }) => (
-              <div key={tier} className="flex items-center gap-2">
-                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
+    <div className="space-y-4">
+      {/* Compact summary: stats + tier progress in one row */}
+      <div className="rounded-xl border border-border bg-surface px-5 py-3">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-text-dim">{stats.total} players</span>
+            <span className="text-text-dim/30">·</span>
+            <span className={`font-semibold ${stats.coveragePercent >= 50 ? 'text-accent-green' : stats.coveragePercent >= 25 ? 'text-accent-orange' : 'text-accent-red'}`}>
+              {stats.totalCompleted}/{stats.totalTarget} visits ({stats.coveragePercent}%)
+            </span>
+          </div>
+          <div className="flex items-center gap-3 ml-auto">
+            {stats.tiers.filter((t) => t.target > 0).map(({ tier, target, completed, percent }) => (
+              <div key={tier} className="flex items-center gap-1.5">
+                <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${
                   tier === 1 ? 'bg-accent-blue/20 text-accent-blue' :
                   tier === 2 ? 'bg-accent-green/20 text-accent-green' :
                   tier === 3 ? 'bg-accent-orange/20 text-accent-orange' :
                   'bg-gray-500/20 text-gray-400'
-                }`}>
-                  {tier}
-                </span>
-                <div className="w-20">
-                  <div className="h-1.5 rounded-full bg-gray-800">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        percent >= 50 ? 'bg-accent-green' : percent >= 25 ? 'bg-accent-orange' : 'bg-accent-red'
-                      }`}
-                      style={{ width: `${Math.min(percent, 100)}%` }}
-                    />
+                }`}>{tier}</span>
+                <div className="w-12">
+                  <div className="h-1 rounded-full bg-gray-800">
+                    <div className={`h-full rounded-full ${percent >= 50 ? 'bg-accent-green' : percent >= 25 ? 'bg-accent-orange' : 'bg-accent-red'}`}
+                      style={{ width: `${Math.min(percent, 100)}%` }} />
                   </div>
                 </div>
-                <span className="text-[11px] text-text-dim">
-                  {completed}/{target} ({percent}%)
-                </span>
-                <span className="text-[10px] text-text-dim/50">{count} players</span>
+                <span className="text-[10px] text-text-dim">{completed}/{target}</span>
               </div>
             ))}
           </div>
         </div>
-      )}
+      </div>
+
+      {/* Falling-behind alerts for T1/T2 */}
+      <BehindPaceAlerts players={players} />
+
+      {/* Client Health — collapsed by default */}
+      <details className="rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-text-dim hover:text-text flex items-center justify-between">
+          <span>Client Health</span>
+          {heartbeatStats && (
+            <span className="flex items-center gap-3 text-[11px]">
+              <span className={heartbeatStats.avgLove >= 60 ? 'text-accent-green' : heartbeatStats.avgLove >= 30 ? 'text-accent-orange' : 'text-accent-red'}>
+                Love: {heartbeatStats.avgLove}
+              </span>
+              {heartbeatStats.overdue > 0 && <span className="text-accent-red">{heartbeatStats.overdue} overdue</span>}
+              {heartbeatStats.redCount + heartbeatStats.yellowCount > 0 && (
+                <span className="text-accent-orange">{heartbeatStats.redCount + heartbeatStats.yellowCount} need attention</span>
+              )}
+            </span>
+          )}
+        </summary>
+        <div className="border-t border-border px-5 py-3">
+          <ClientHealthPanel
+            stats={heartbeatStats}
+            loading={heartbeatLoading}
+            error={heartbeatError}
+            lastFetched={heartbeatLastFetched}
+            onRefresh={fetchHeartbeat}
+          />
+        </div>
+      </details>
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
@@ -395,48 +395,15 @@ export default function RosterDashboard() {
             </div>
           )}
 
-          {/* Split Pro into MLB / MiLB / Unassigned sub-groups */}
-          {(() => {
-            const mlbPlayers = grouped.Pro.filter((p) => {
-              const a = playerTeamAssignments[p.playerName]
-              return a && a.sportId === 1
-            })
-            const milbPlayers = grouped.Pro.filter((p) => {
-              const a = playerTeamAssignments[p.playerName]
-              return a && a.sportId !== 1
-            })
-            const unassignedPlayers = grouped.Pro.filter((p) => !playerTeamAssignments[p.playerName])
-
-            const subGroups = [
-              { label: 'MLB', players: mlbPlayers },
-              { label: 'MiLB', players: milbPlayers },
-              { label: 'Unassigned', players: unassignedPlayers },
-            ].filter((g) => g.players.length > 0)
-
-            return subGroups.map((sub) => (
-              <div key={sub.label} className="mb-4">
-                <div className="mb-1 flex items-center gap-2 pl-1">
-                  <span className={`text-xs font-medium ${
-                    sub.label === 'MLB' ? 'text-accent-blue' :
-                    sub.label === 'MiLB' ? 'text-accent-green' :
-                    'text-text-dim/60'
-                  }`}>
-                    {sub.label}
-                  </span>
-                  <span className="text-[10px] text-text-dim/50">{sub.players.length}</span>
-                </div>
-                <ProTable
-                  players={sub.players}
-                  hasHeartbeat={hasHeartbeat}
-                  playerTeamAssignments={playerTeamAssignments}
-                  affiliates={affiliates}
-                  onAssign={assignPlayerToTeam}
-                  toggleSort={toggleSort}
-                  sortIndicator={sortIndicator}
-                />
-              </div>
-            ))
-          })()}
+          <ProTable
+            players={grouped.Pro}
+            hasHeartbeat={hasHeartbeat}
+            playerTeamAssignments={playerTeamAssignments}
+            affiliates={affiliates}
+            onAssign={assignPlayerToTeam}
+            toggleSort={toggleSort}
+            sortIndicator={sortIndicator}
+          />
         </div>
       )}
 
@@ -891,17 +858,3 @@ function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; 
   )
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
-  const accentColor =
-    accent === 'green' ? 'text-accent-green' :
-    accent === 'orange' ? 'text-accent-orange' :
-    accent === 'red' ? 'text-accent-red' :
-    'text-text'
-
-  return (
-    <div className="rounded-xl border border-border bg-surface p-4">
-      <p className="text-xs font-medium text-text-dim">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${accentColor}`}>{value}</p>
-    </div>
-  )
-}
