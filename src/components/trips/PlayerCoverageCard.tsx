@@ -7,6 +7,8 @@ interface Props {
   players: RosterPlayer[]
   allGames: GameEvent[]
   onPlayerClick?: (name: string) => void
+  onLoadAll?: () => void
+  loadingAll?: boolean
 }
 
 type DataStatus = 'mlb-api' | 'ncaa-real' | 'hs-real' | 'estimated' | 'no-data'
@@ -19,7 +21,7 @@ const STATUS_CONFIG: Record<DataStatus, { label: string; color: string; icon: st
   'no-data': { label: 'No Data', color: 'text-accent-red', icon: '○' },
 }
 
-export default function PlayerCoverageCard({ players, allGames, onPlayerClick }: Props) {
+export default function PlayerCoverageCard({ players, allGames, onPlayerClick, onLoadAll, loadingAll }: Props) {
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({})
 
   const playerData = useMemo(() => {
@@ -84,9 +86,20 @@ export default function PlayerCoverageCard({ players, allGames, onPlayerClick }:
             </span>
           )}
           {estimatedCount > 0 && (
-            <span className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-accent-orange">
-              {estimatedCount} estimated
-            </span>
+            <>
+              <span className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-accent-orange">
+                {estimatedCount} estimated
+              </span>
+              {onLoadAll && (
+                <button
+                  onClick={onLoadAll}
+                  disabled={loadingAll}
+                  className="rounded bg-accent-blue/15 px-1.5 py-0.5 text-accent-blue hover:bg-accent-blue/25 disabled:opacity-50 transition-colors"
+                >
+                  {loadingAll ? 'Loading...' : 'Load all schedules'}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

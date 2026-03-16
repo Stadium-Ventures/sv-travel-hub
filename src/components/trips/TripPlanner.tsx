@@ -293,6 +293,31 @@ export default function TripPlanner() {
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
   const flyInLimit = 10 // Hard cap on fly-in results
   const [showOverlaps, setShowOverlaps] = useState(false)
+  const [loadingAllSchedules, setLoadingAllSchedules] = useState(false)
+
+  async function handleLoadAllSchedules() {
+    if (loadingAllSchedules) return
+    setLoadingAllSchedules(true)
+    try {
+      const schedStore = useScheduleStore.getState()
+      const ncaaAllOrgs = players
+        .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+        .map((p) => ({ playerName: p.playerName, org: p.org }))
+      if (ncaaAllOrgs.length > 0) {
+        await schedStore.fetchNcaaSchedules(ncaaAllOrgs, { merge: true })
+      }
+      const hsAllOrgs = players
+        .filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+        .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
+      if (hsAllOrgs.length > 0) {
+        await schedStore.fetchHsSchedules(hsAllOrgs, { merge: true })
+      }
+      // Re-generate trips with the new data
+      await generateTrips()
+    } finally {
+      setLoadingAllSchedules(false)
+    }
+  }
 
   async function handleCopyAllTrips() {
     if (!tripPlan) return
@@ -696,6 +721,8 @@ export default function TripPlanner() {
             players={players}
             allGames={[...proGames, ...ncaaGames, ...hsGames]}
             onPlayerClick={setSelectedPlayer}
+            onLoadAll={handleLoadAllSchedules}
+            loadingAll={loadingAllSchedules}
           />
 
           {/* Coverage stats */}
