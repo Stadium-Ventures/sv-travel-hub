@@ -30,6 +30,19 @@ async function fetchWithRetry(
   throw lastError
 }
 
+export interface VisitCount {
+  name: string
+  tier: number
+  leadAgent: string
+  source: string
+  last12m: number
+  calendarYear: number
+  lastVisitDate: string | null
+  lastVisitAgent: string | null
+  nextPlannedDate: string | null
+  nextPlannedAgent: string | null
+}
+
 export interface HeartbeatPriority {
   name: string
   tier: number
@@ -69,8 +82,10 @@ export interface HeartbeatPlayer {
 interface HeartbeatState {
   priorities: HeartbeatPriority[]
   players: HeartbeatPlayer[]
+  visitCounts: Record<string, VisitCount>
   playerLookup: Map<string, HeartbeatPlayer>
   urgencyLookup: Map<string, HeartbeatPriority>
+  visitCountLookup: Map<string, VisitCount>
   loading: boolean
   error: string | null
   lastFetchedAt: string | null
@@ -78,6 +93,7 @@ interface HeartbeatState {
   fetchHeartbeat: () => Promise<void>
   getPlayerData: (playerName: string) => HeartbeatPlayer | undefined
   getPlayerUrgency: (playerName: string) => HeartbeatPriority | undefined
+  getVisitCount: (playerName: string) => VisitCount | undefined
 }
 
 // Normalize name for matching (heartbeat uses "First Last", roster uses "First Last")
@@ -85,12 +101,37 @@ function normalizeName(name: string): string {
   return name.trim().toLowerCase()
 }
 
-function buildLookups(players: HeartbeatPlayer[], priorities: HeartbeatPriority[]) {
+function buildLookups(players: HeartbeatPlayer[], priorities: HeartbeatPriority[], visitCounts: Record<string, VisitCount>) {
   const playerLookup = new Map<string, HeartbeatPlayer>()
   for (const p of players) playerLookup.set(normalizeName(p.name), p)
   const urgencyLookup = new Map<string, HeartbeatPriority>()
   for (const p of priorities) urgencyLookup.set(normalizeName(p.name), p)
-  return { playerLookup, urgencyLookup }
+  const visitCountLookup = new Map<string, VisitCount>()
+  for (const vc of Object.values(visitCounts)) visitCountLookup.set(normalizeName(vc.name), vc)
+  return { playerLookup, urgencyLookup, visitCountLookup }
+}
+
+// Apply visit counts from Heartbeat as overrides to the roster store
+// Uses calendarYear as visitsCompleted for the current year
+function _applyVisitCountsToRoster(visitCounts: Record<string, VisitCount>) {
+  // Lazy import to avoid circular dependency
+  const { useRosterStore } = require('./rosterStore')
+  const rosterState = useRosterStore.getState()
+  const players = rosterState.players
+  if (players.length === 0) return
+
+  for (const vc of Object.values(visitCounts)) {
+    const player = players.find((p: any) => normalizeName(p.playerName) === normalizeName(vc.name))
+    if (!player) continue
+    // Only apply if heartbeat has data and it differs from current
+    if (vc.calendarYear > 0 || vc.lastVisitDate) {
+      const currentOverride = rosterState.visitOverrides[player.playerName]
+      const heartbeatDate = vc.lastVisitDate ? vc.lastVisitDate.split('T')[0] ?? null : null
+      // Skip if manual override already has more visits (user logged a visit locally)
+      if (currentOverride && currentOverride.visitsCompleted > vc.calendarYear) continue
+      rosterState.setVisitOverride(player.playerName, vc.calendarYear, heartbeatDate)
+    }
+  }
 }
 
 export const useHeartbeatStore = create<HeartbeatState>()(
@@ -98,8 +139,10 @@ export const useHeartbeatStore = create<HeartbeatState>()(
     (set, get) => ({
       priorities: [],
       players: [],
+      visitCounts: {},
       playerLookup: new Map(),
       urgencyLookup: new Map(),
+      visitCountLookup: new Map(),
       loading: false,
       error: null,
       lastFetchedAt: null,
@@ -108,9 +151,10 @@ export const useHeartbeatStore = create<HeartbeatState>()(
         if (get().loading) return
         set({ loading: true, error: null })
         try {
-          const [priorityRes, summaryRes] = await Promise.all([
+          const [priorityRes, summaryRes, visitCountsRes] = await Promise.all([
             fetchWithRetry(`${HEARTBEAT_BASE}/visit-priority`),
             fetchWithRetry(`${HEARTBEAT_BASE}/summary`),
+            fetchWithRetry(`${HEARTBEAT_BASE}/visit-counts`),
           ])
 
           if (!priorityRes.ok) throw new Error(`Visit priority API: ${priorityRes.status}`)
@@ -121,16 +165,28 @@ export const useHeartbeatStore = create<HeartbeatState>()(
 
           const priorities = priorityData.priorities ?? []
           const players = summaryData.players ?? []
-          const { playerLookup, urgencyLookup } = buildLookups(players, priorities)
+
+          // visit-counts returns an object keyed by player name
+          let visitCounts: Record<string, VisitCount> = {}
+          if (visitCountsRes.ok) {
+            visitCounts = await visitCountsRes.json()
+          }
+
+          const { playerLookup, urgencyLookup, visitCountLookup } = buildLookups(players, priorities, visitCounts)
 
           set({
             priorities,
             players,
+            visitCounts,
             playerLookup,
             urgencyLookup,
+            visitCountLookup,
             loading: false,
             lastFetchedAt: new Date().toISOString(),
           })
+
+          // Auto-apply visit counts to roster
+          _applyVisitCountsToRoster(visitCounts)
         } catch (e) {
           set({
             loading: false,
@@ -146,12 +202,17 @@ export const useHeartbeatStore = create<HeartbeatState>()(
       getPlayerUrgency: (playerName: string) => {
         return get().urgencyLookup.get(normalizeName(playerName))
       },
+
+      getVisitCount: (playerName: string) => {
+        return get().visitCountLookup.get(normalizeName(playerName))
+      },
     }),
     {
       name: 'sv-travel-heartbeat',
       partialize: (state) => ({
         priorities: state.priorities,
         players: state.players,
+        visitCounts: state.visitCounts,
         lastFetchedAt: state.lastFetchedAt,
       }),
       merge: (persisted, current) => {
@@ -161,13 +222,19 @@ export const useHeartbeatStore = create<HeartbeatState>()(
           ...(p ?? {}),
           players: p?.players ?? [],
           priorities: p?.priorities ?? [],
+          visitCounts: p?.visitCounts ?? {},
         }
       },
       onRehydrateStorage: () => (state) => {
         if (state) {
-          const { playerLookup, urgencyLookup } = buildLookups(state.players ?? [], state.priorities ?? [])
+          const { playerLookup, urgencyLookup, visitCountLookup } = buildLookups(state.players ?? [], state.priorities ?? [], state.visitCounts ?? {})
           state.playerLookup = playerLookup
           state.urgencyLookup = urgencyLookup
+          state.visitCountLookup = visitCountLookup
+          // Re-apply visit counts to roster on rehydration
+          if (state.visitCounts && Object.keys(state.visitCounts).length > 0) {
+            _applyVisitCountsToRoster(state.visitCounts)
+          }
         }
       },
     },
