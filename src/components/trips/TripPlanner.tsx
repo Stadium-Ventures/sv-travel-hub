@@ -5,19 +5,15 @@ import { useRosterStore } from '../../store/rosterStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { isSpringTraining } from '../../data/springTraining'
 import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
-import { resolveMaxPrepsSlug } from '../../lib/maxpreps'
-import { resolveNcaaName } from '../../data/aliases'
-import { useVenueStore } from '../../store/venueStore'
 import TripCard, { generateItineraryText, buildVenueStops, MarkVisitedChip } from './TripCard'
 import DoubleUpSection from './DoubleUpSection'
 import PlayerCoverageCard from './PlayerCoverageCard'
-import { clearScheduleCaches } from '../../lib/cacheUtils'
 import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import { getTripKey } from '../../store/tripStore'
 import type { TripStatus } from '../../store/tripStore'
 import type { RosterPlayer } from '../../types/roster'
-import { formatDate, formatDriveTime, formatTimeAgo, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
+import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
@@ -144,75 +140,43 @@ function getDayName(dateStr: string): string {
   return DAY_NAMES[new Date(dateStr + 'T12:00:00Z').getUTCDay()]!
 }
 
-const STEPS = [
-  { label: 'Load Roster', desc: 'Import players from Google Sheet' },
-  { label: 'Load Schedules', desc: 'Pull game schedules from all sources' },
-  { label: 'Set Dates', desc: 'Choose your travel window' },
-  { label: 'Generate Trips', desc: 'Build optimized trip plans' },
-] as const
-
-function WorkflowStepper({ currentStep, allComplete, onAction, step2Synthetic }: {
-  currentStep: number
-  allComplete: boolean
-  onAction?: (step: number) => void
-  step2Synthetic?: boolean
+// Data status badges — read-only indicators of what's loaded
+function DataStatusBadges({ proGames, ncaaGames, hsGames, proStale, ncaaStale, hsStale, hasHsPlayers }: {
+  proGames: any[]; ncaaGames: any[]; hsGames: any[]
+  proStale: boolean | number | null; ncaaStale: boolean | number | null; hsStale: boolean | number | null
+  hasHsPlayers: boolean
 }) {
-  if (allComplete) {
-    return (
-      <div className="mb-4 flex items-center gap-2 rounded-lg bg-accent-green/10 px-3 py-2 text-sm text-accent-green">
-        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent-green text-[11px] font-bold text-white">&#10003;</span>
-        4/4 steps complete — trip plan ready
-      </div>
-    )
-  }
-
   return (
-    <div className="mb-6 rounded-xl border border-border bg-surface p-4">
-      <div className="flex items-center justify-between">
-        {STEPS.map((step, i) => {
-          const isCompleted = i < currentStep
-          const isActive = i === currentStep
-          const isSyntheticSkip = i === 1 && step2Synthetic && isCompleted
-          return (
-            <div key={i} className="flex flex-1 items-center">
-              <div className="flex flex-col items-center">
-                <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-all ${
-                  isSyntheticSkip
-                    ? 'bg-accent-orange text-white'
-                    : isCompleted
-                      ? 'bg-accent-green text-white'
-                      : isActive
-                        ? 'bg-accent-blue text-white animate-pulse'
-                        : 'bg-gray-800 text-text-dim/50'
-                }`}>
-                  {isSyntheticSkip ? '~' : isCompleted ? '\u2713' : i + 1}
-                </div>
-                <span className={`mt-1.5 text-center text-[11px] font-medium ${
-                  isSyntheticSkip ? 'text-accent-orange' : isCompleted ? 'text-accent-green' : isActive ? 'text-accent-blue' : 'text-text-dim/50'
-                }`}>
-                  {step.label}
-                </span>
-                {isSyntheticSkip && (
-                  <span className="mt-0.5 text-center text-[9px] text-accent-orange/70">
-                    Using estimates
-                  </span>
-                )}
-                {isActive && onAction && (
-                  <button
-                    onClick={() => onAction(i)}
-                    className="mt-1 rounded-full bg-accent-blue/20 px-2.5 py-0.5 text-[10px] font-medium text-accent-blue hover:bg-accent-blue/30 transition-colors"
-                  >
-                    {i === 0 ? 'Load Now' : i === 1 ? 'Load Schedules' : i === 2 ? 'Set below ↓' : 'Generate ↓'}
-                  </button>
-                )}
-              </div>
-              {i < STEPS.length - 1 && (
-                <div className={`mx-2 h-px flex-1 ${isCompleted ? 'bg-accent-green' : 'bg-gray-800'}`} />
-              )}
-            </div>
-          )
-        })}
-      </div>
+    <div className="flex flex-wrap gap-2 text-[11px]">
+      <span className={`rounded px-2 py-0.5 ${
+        proGames.length > 0
+          ? proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
+          : 'bg-gray-800 text-text-dim/60'
+      }`}>
+        Pro: {proGames.length > 0
+          ? `${proGames.length} games${proStale ? ' (stale)' : ''}`
+          : 'will auto-load'}
+      </span>
+      <span className={`rounded px-2 py-0.5 ${
+        ncaaGames.length > 0
+          ? ncaaStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
+          : 'bg-gray-800 text-text-dim/60'
+      }`}>
+        College: {ncaaGames.length > 0
+          ? `${ncaaGames.length} games${ncaaStale ? ' (stale)' : ''}`
+          : 'will auto-load'}
+      </span>
+      {hasHsPlayers && (
+        <span className={`rounded px-2 py-0.5 ${
+          hsGames.length > 0
+            ? hsStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
+            : 'bg-gray-800 text-text-dim/60'
+        }`}>
+          HS: {hsGames.length > 0
+            ? `${hsGames.length} games${hsStale ? ' (stale)' : ''}`
+            : 'will auto-load'}
+        </span>
+      )}
     </div>
   )
 }
@@ -240,25 +204,10 @@ export default function TripPlanner() {
   const hsGames = useScheduleStore((s) => s.hsGames)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
-  const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
-  const schedulesProgress = useScheduleStore((s) => s.schedulesProgress)
-  const ncaaLoading = useScheduleStore((s) => s.ncaaLoading)
-  const ncaaProgress = useScheduleStore((s) => s.ncaaProgress)
-  const hsLoading = useScheduleStore((s) => s.hsLoading)
-  const hsProgress = useScheduleStore((s) => s.hsProgress)
   const hsFetchedAt = useScheduleStore((s) => s.hsFetchedAt)
-  const fetchProSchedules = useScheduleStore((s) => s.fetchProSchedules)
-  const fetchNcaaSchedules = useScheduleStore((s) => s.fetchNcaaSchedules)
-  const fetchHsSchedules = useScheduleStore((s) => s.fetchHsSchedules)
-  const autoAssignPlayers = useScheduleStore((s) => s.autoAssignPlayers)
-  const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
-  const autoAssignResult = useScheduleStore((s) => s.autoAssignResult)
-  const assignmentLog = useScheduleStore((s) => s.assignmentLog) ?? []
-  const playerTeamAssignments = useScheduleStore((s) => s.playerTeamAssignments)
   const players = useRosterStore((s) => s.players)
   const rosterLoading = useRosterStore((s) => s.loading)
   const rosterError = useRosterStore((s) => s.error)
-  const rosterLastFetched = useRosterStore((s) => s.lastFetchedAt)
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
   const heartbeatPriorities = useHeartbeatStore((s) => s.priorities)
   const heartbeatUrgencyActive = heartbeatPriorities.some((p) => p.visitUrgencyScore >= 25)
@@ -278,10 +227,7 @@ export default function TripPlanner() {
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
 
-  const venueState = useVenueStore((s) => s.venues)
-  const geocodeHsVenues = useVenueStore((s) => s.geocodeHsVenues)
-  const hsGeocodingProgress = useVenueStore((s) => s.hsGeocodingProgress)
-  const hsGeocodingFailedSchools = useVenueStore((s) => s.hsGeocodingFailedSchools)
+
 
   // Build player lookup
   const playerMap = useMemo(() => {
@@ -306,97 +252,13 @@ export default function TripPlanner() {
   const hasNcaaPlayers = players.some((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
   const hasHsPlayers = players.some((p) => p.level === 'HS' && p.visitsRemaining > 0)
 
-  // Check if HS players have geocoded venues
-  const hsPlayersCount = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0).length
-  const hsVenueCount = Object.values(venueState).filter((v) => v.source === 'hs-geocoded').length
-  const hsVenueMissing = hasHsPlayers && hsVenueCount === 0
 
-  const hasData = proGames.length > 0
-    || (hasStDates && hasProPlayers)
-    || (hasNcaaDates && hasNcaaPlayers)
-    || (hasHsDates && hasHsPlayers)
-  const canGenerate = hasData && players.length > 0 && !computing
+  const canGenerate = players.length > 0 && !computing
 
-  // Data freshness checks — timestamps may persist across sessions but games don't.
-  // "Needs loading" = no games in memory (regardless of timestamp).
-  // "Stale" = games loaded but > 24h ago.
-  const SIX_HOURS = 6 * 60 * 60 * 1000
   const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000
-  const proNeedsLoad = hasProPlayers && proGames.length === 0
-  const ncaaNeedsLoad = hasNcaaPlayers && ncaaGames.length === 0
-  const hsNeedsLoad = hasHsPlayers && hsGames.length === 0
   const proStale = proFetchedAt && proGames.length > 0 && (Date.now() - proFetchedAt > TWENTY_FOUR_HOURS)
   const ncaaStale = ncaaFetchedAt && ncaaGames.length > 0 && (Date.now() - ncaaFetchedAt > TWENTY_FOUR_HOURS)
   const hsStale = hsFetchedAt && hsGames.length > 0 && (Date.now() - hsFetchedAt > TWENTY_FOUR_HOURS)
-  // Show if data was fetched recently (persisted timestamp) — user can skip re-fetch
-  const proRecentlyFetched = proFetchedAt && proGames.length === 0 && (Date.now() - proFetchedAt < SIX_HOURS)
-  const ncaaRecentlyFetched = ncaaFetchedAt && ncaaGames.length === 0 && (Date.now() - ncaaFetchedAt < SIX_HOURS)
-  const hsRecentlyFetched = hsFetchedAt && hsGames.length === 0 && (Date.now() - hsFetchedAt < SIX_HOURS)
-  const showFreshnessWarning = proNeedsLoad || ncaaNeedsLoad || hsNeedsLoad || proStale || ncaaStale || hsStale
-
-  // Tier-based player orgs for loading buttons
-  const customNcaaAliasesRef = useScheduleStore((s) => s.customNcaaAliases)
-  const ncaaT1T2PlayerOrgs = useMemo(() =>
-    players.filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0 && p.tier <= 2)
-      .map((p) => ({ playerName: p.playerName, org: p.org })),
-    [players],
-  )
-  const ncaaAllPlayerOrgs = useMemo(() =>
-    players.filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
-      .map((p) => ({ playerName: p.playerName, org: p.org })),
-    [players],
-  )
-  const ncaaT1T2SchoolCount = useMemo(() => {
-    const schools = new Set<string>()
-    for (const { org } of ncaaT1T2PlayerOrgs) {
-      const canonical = resolveNcaaName(org, customNcaaAliasesRef)
-      if (canonical) schools.add(canonical)
-    }
-    return schools.size
-  }, [ncaaT1T2PlayerOrgs, customNcaaAliasesRef])
-  const ncaaAllSchoolCount = useMemo(() => {
-    const schools = new Set<string>()
-    for (const { org } of ncaaAllPlayerOrgs) {
-      const canonical = resolveNcaaName(org, customNcaaAliasesRef)
-      if (canonical) schools.add(canonical)
-    }
-    return schools.size
-  }, [ncaaAllPlayerOrgs, customNcaaAliasesRef])
-
-  const hsT1T2PlayerOrgs = useMemo(() =>
-    players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0 && p.tier <= 2)
-      .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state })),
-    [players],
-  )
-  const hsAllPlayerOrgs = useMemo(() =>
-    players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
-      .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state })),
-    [players],
-  )
-  const hsT1T2SchoolCount = useMemo(() => {
-    const schools = new Set<string>()
-    for (const { org, state } of hsT1T2PlayerOrgs) {
-      if (resolveMaxPrepsSlug(org, state)) schools.add(`${org}|${state}`)
-    }
-    return schools.size
-  }, [hsT1T2PlayerOrgs])
-  const hsAllSchoolCount = useMemo(() => {
-    const schools = new Set<string>()
-    for (const { org, state } of hsAllPlayerOrgs) {
-      if (resolveMaxPrepsSlug(org, state)) schools.add(`${org}|${state}`)
-    }
-    return schools.size
-  }, [hsAllPlayerOrgs])
-
-  // Workflow stepper — determine current step
-  const schedulesActuallyLoaded = !!proFetchedAt || !!ncaaFetchedAt || !!hsFetchedAt
-  const stepperStep = players.length === 0 ? 0
-    : (!schedulesActuallyLoaded && proGames.length === 0 && !hasStDates && !hasNcaaDates && !hasHsDates) ? 1
-    : !tripPlan ? 3
-    : 4
-  const stepperAllComplete = !!tripPlan
-  // Track which steps used synthetic-only data (skipped real schedule loading)
-  const step2Synthetic = !schedulesActuallyLoaded && (hasStDates || hasNcaaDates || hasHsDates)
 
   function handlePriorityChange(slot: 0 | 1 | 2, value: string) {
     const next = [...priorityPlayers]
@@ -492,23 +354,11 @@ export default function TripPlanner() {
 
   return (
     <div className="space-y-6">
-      {/* Workflow stepper */}
-      <WorkflowStepper
-        currentStep={stepperStep}
-        allComplete={stepperAllComplete}
-        step2Synthetic={step2Synthetic}
-        onAction={(step) => {
-          if (step === 0) fetchRoster()
-          // Steps 1 and 2 can't be directly triggered from here — user needs to go to Data Setup / adjust dates
-          if (step === 3 && canGenerate) generateTrips()
-        }}
-      />
-
       {/* Controls */}
       <div className="rounded-xl border border-border bg-surface p-5">
         <h2 className="mb-3 text-base font-semibold text-text">Trip Planner</h2>
         <p className="mb-2 text-xs text-text-dim">
-          Builds road trips from Orlando, grouping nearby players together. Trips are ranked by how many high-priority players you'd visit.
+          Set your dates and hit Generate — the app will auto-load all schedule data and build optimized road trips from Orlando.
         </p>
         <details className="mb-4">
           <summary className="cursor-pointer text-[11px] text-text-dim/60 hover:text-text-dim">How scoring works</summary>
@@ -523,309 +373,16 @@ export default function TripPlanner() {
           </ul>
         </details>
 
-        {/* Data freshness indicators */}
-        <div className="mb-4 flex flex-wrap gap-2 text-[11px]">
-          <span className={`rounded px-2 py-0.5 ${
-            proGames.length > 0
-              ? proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
-              : proRecentlyFetched ? 'bg-accent-blue/10 text-accent-blue' : 'bg-gray-800 text-text-dim/60'
-          }`}>
-            Pro games: {proGames.length > 0
-              ? `${proGames.length} loaded ${formatTimeAgo(proFetchedAt!)}${proStale ? ' — may be outdated' : ''}`
-              : proRecentlyFetched ? `fetched ${formatTimeAgo(proFetchedAt!)} — reload to use` : 'not loaded yet'}
-          </span>
-          <span className={`rounded px-2 py-0.5 ${
-            ncaaGames.length > 0
-              ? ncaaStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
-              : ncaaRecentlyFetched ? 'bg-accent-blue/10 text-accent-blue' : 'bg-gray-800 text-text-dim/60'
-          }`}>
-            College games: {ncaaGames.length > 0
-              ? `${ncaaGames.length} loaded ${formatTimeAgo(ncaaFetchedAt!)}${ncaaStale ? ' — may be outdated' : ''}`
-              : ncaaRecentlyFetched ? `fetched ${formatTimeAgo(ncaaFetchedAt!)} — reload to use` : 'not loaded yet'}
-          </span>
-          {hasHsPlayers && (
-            <span className={`rounded px-2 py-0.5 ${
-              hsGames.length > 0
-                ? hsStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
-                : hsRecentlyFetched ? 'bg-accent-blue/10 text-accent-blue' : 'bg-gray-800 text-text-dim/60'
-            }`}>
-              HS games: {hsGames.length > 0
-                ? `${hsGames.length} loaded ${formatTimeAgo(hsFetchedAt!)}${hsStale ? ' — may be outdated' : ''}`
-                : hsRecentlyFetched ? `fetched ${formatTimeAgo(hsFetchedAt!)} — reload to use` : 'not loaded yet'}
-            </span>
-          )}
+        {/* Data status badges */}
+        <div className="mb-4">
+          <DataStatusBadges
+            proGames={proGames} ncaaGames={ncaaGames} hsGames={hsGames}
+            proStale={proStale} ncaaStale={ncaaStale} hsStale={hsStale}
+            hasHsPlayers={hasHsPlayers}
+          />
         </div>
 
-        {showFreshnessWarning && (
-          <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
-            <p className="text-[11px] text-accent-orange">
-              {proNeedsLoad && (proRecentlyFetched
-                ? `Pro schedules were fetched ${formatTimeAgo(proFetchedAt!)} — reload below to use them. `
-                : 'Pro game schedules haven\'t been loaded yet. ')}
-              {proStale && 'Pro game data is more than 24 hours old. '}
-              {ncaaNeedsLoad && (ncaaRecentlyFetched
-                ? `College schedules were fetched ${formatTimeAgo(ncaaFetchedAt!)} — reload below to use them. `
-                : 'College game schedules haven\'t been loaded yet (using estimated game days until real schedules are loaded). ')}
-              {ncaaStale && 'College game data is more than 24 hours old. '}
-              {hsNeedsLoad && (hsRecentlyFetched
-                ? `HS schedules were fetched ${formatTimeAgo(hsFetchedAt!)} — reload below to use them. `
-                : hasHsPlayers && (hsVenueMissing
-                  ? 'HS school locations haven\'t been mapped yet. '
-                  : 'HS schedules haven\'t been loaded yet (using estimated game days until real schedules are loaded). '))}
-              {hsStale && 'HS game data is more than 24 hours old. '}
-              Load schedules below to enable trip generation.
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {/* Load All button — fires all pending schedule fetches + geocoding at once */}
-              {(() => {
-                const needsPro = proNeedsLoad || !!proStale
-                const needsNcaa = ncaaNeedsLoad || !!ncaaStale
-                const needsHs = hsNeedsLoad || !!hsStale
-                const sectionsNeeded = [needsPro, needsNcaa, needsHs].filter(Boolean).length
-                if (sectionsNeeded === 0) return null
-                const proTime = needsPro ? Math.max(Object.keys(playerTeamAssignments).length, players.filter(p => p.level === 'Pro').length) * 2 : 0
-                const ncaaTime = needsNcaa ? ncaaAllSchoolCount * 5 : 0
-                const hsGeoTime = needsHs && hsVenueMissing ? hsPlayersCount * 2 : 0
-                const hsSchedTime = needsHs ? hsAllSchoolCount * 5 : 0
-                const totalTime = proTime + ncaaTime + hsGeoTime + hsSchedTime
-                const anyLoading = schedulesLoading || ncaaLoading || hsLoading || !!hsGeocodingProgress || autoAssignLoading
-                return (
-                  <button
-                    onClick={async () => {
-                      const y = new Date().getFullYear()
-                      if (needsPro) {
-                        // Auto-assign players to teams first if needed
-                        if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length === 0) {
-                          await autoAssignPlayers()
-                        }
-                        // Now fetch pro schedules (assignments should exist)
-                        if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length > 0) {
-                          fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
-                        }
-                      }
-                      if (needsNcaa) fetchNcaaSchedules(ncaaAllPlayerOrgs)
-                      if (needsHs && hsVenueMissing) {
-                        const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
-                        geocodeHsVenues(hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state })))
-                      }
-                      if (needsHs) fetchHsSchedules(hsAllPlayerOrgs)
-                    }}
-                    disabled={anyLoading}
-                    className="rounded-lg bg-white px-3 py-1 text-[11px] font-medium text-gray-900 hover:bg-gray-200 disabled:opacity-50"
-                  >
-                    {anyLoading ? 'Loading...' : `Load All Schedules (~${totalTime}s)`}
-                  </button>
-                )
-              })()}
-              {(proNeedsLoad || proStale) && (
-                <>
-                  {Object.keys(playerTeamAssignments).length === 0 && (
-                    <button
-                      onClick={autoAssignPlayers}
-                      disabled={autoAssignLoading}
-                      className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
-                    >
-                      {autoAssignLoading ? 'Scanning rosters...' : '1. Match Players to Teams'}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      const y = new Date().getFullYear()
-                      fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
-                    }}
-                    disabled={schedulesLoading || Object.keys(playerTeamAssignments).length === 0}
-                    className="rounded-lg bg-accent-blue px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
-                  >
-                    {schedulesLoading ? 'Loading...' : Object.keys(playerTeamAssignments).length === 0 ? 'Match players to teams first' : `${proGames.length > 0 || proRecentlyFetched ? 'Re' : ''}load Pro Schedules`}
-                  </button>
-                </>
-              )}
-              {(ncaaNeedsLoad || ncaaStale) && (
-                <>
-                  {ncaaT1T2SchoolCount > 0 && ncaaT1T2SchoolCount < ncaaAllSchoolCount && (
-                    <button
-                      onClick={() => fetchNcaaSchedules(ncaaT1T2PlayerOrgs, { merge: true })}
-                      disabled={ncaaLoading}
-                      className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
-                    >
-                      {ncaaLoading ? 'Loading...' : `Load College T1&T2 (~${ncaaT1T2SchoolCount * 5}s)`}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => fetchNcaaSchedules(ncaaAllPlayerOrgs)}
-                    disabled={ncaaLoading}
-                    className="rounded-lg bg-accent-green px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
-                  >
-                    {ncaaLoading ? 'Loading...' : `${ncaaGames.length > 0 || ncaaRecentlyFetched ? 'Re' : ''}load All College (~${ncaaAllSchoolCount * 5}s)`}
-                  </button>
-                </>
-              )}
-              {(hsNeedsLoad || hsStale) && (
-                <>
-                  {hsVenueMissing && (
-                    <button
-                      onClick={() => {
-                        const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
-                        const schools = hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
-                        geocodeHsVenues(schools)
-                      }}
-                      disabled={!!hsGeocodingProgress}
-                      className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
-                    >
-                      {hsGeocodingProgress
-                        ? `Mapping... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
-                        : `1. Map ${hsPlayersCount} HS School Locations (~${hsPlayersCount * 2}s)`}
-                    </button>
-                  )}
-                  {hsT1T2SchoolCount > 0 && hsT1T2SchoolCount < hsAllSchoolCount && (
-                    <button
-                      onClick={() => fetchHsSchedules(hsT1T2PlayerOrgs, { merge: true })}
-                      disabled={hsLoading}
-                      className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
-                    >
-                      {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}Load HS T1&T2 (~${hsT1T2SchoolCount * 5}s)`}
-                    </button>
-                  )}
-                  {hsAllSchoolCount > 0 && (
-                    <button
-                      onClick={() => fetchHsSchedules(hsAllPlayerOrgs)}
-                      disabled={hsLoading}
-                      className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
-                    >
-                      {hsLoading ? 'Loading...' : `${hsVenueMissing ? '2. ' : ''}${hsGames.length > 0 || hsRecentlyFetched ? 'Re' : ''}load All HS (~${hsAllSchoolCount * 5}s)`}
-                    </button>
-                  )}
-                  {hsGeocodingFailedSchools.length > 0 && (
-                    <span className="text-[10px] text-accent-red">
-                      {hsGeocodingFailedSchools.length} school location(s) not found
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-            {/* Loading progress indicators */}
-            {(schedulesProgress || ncaaProgress || hsProgress) && (
-              <div className="mt-2 space-y-0.5">
-                {schedulesProgress && (
-                  <div className="text-[10px] text-text-dim">
-                    Pro: {schedulesProgress.completed}/{schedulesProgress.total} teams (~{Math.max(0, (schedulesProgress.total - schedulesProgress.completed) * 2)}s remaining)
-                  </div>
-                )}
-                {ncaaProgress && (
-                  <div className="text-[10px] text-text-dim">
-                    College: {ncaaProgress.completed}/{ncaaProgress.total} schools (~{Math.max(0, (ncaaProgress.total - ncaaProgress.completed) * 5)}s remaining)
-                  </div>
-                )}
-                {hsProgress && (
-                  <div className="text-[10px] text-text-dim">
-                    HS: {hsProgress.completed}/{hsProgress.total} schools (~{Math.max(0, (hsProgress.total - hsProgress.completed) * 5)}s remaining)
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {hsVenueMissing && !showFreshnessWarning && (
-          <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
-            <p className="text-[11px] text-accent-orange">
-              {hsPlayersCount} high school player{hsPlayersCount !== 1 ? 's' : ''} found but their school locations haven't been mapped yet.
-              Without locations, HS players won't appear in trip results.
-            </p>
-            <div className="mt-1.5">
-              <button
-                onClick={() => {
-                  const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
-                  const schools = hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
-                  geocodeHsVenues(schools)
-                }}
-                disabled={!!hsGeocodingProgress}
-                className="rounded-lg bg-accent-orange px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
-              >
-                {hsGeocodingProgress
-                  ? `Mapping... ${hsGeocodingProgress.completed}/${hsGeocodingProgress.total}`
-                  : `Map ${hsPlayersCount} HS School Locations (~${hsPlayersCount * 2}s)`}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Roster & assignment status */}
-        {rosterLastFetched && (
-          <div className={`mb-4 rounded-lg border px-3 py-1.5 ${
-            Date.now() - new Date(rosterLastFetched).getTime() > 24 * 60 * 60 * 1000
-              ? 'border-accent-orange/20 bg-accent-orange/5'
-              : 'border-border/30 bg-surface'
-          }`}>
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] text-text-dim">
-                <span className="font-medium text-text">Roster:</span>{' '}
-                {formatTimeAgo(new Date(rosterLastFetched).getTime())}
-                {Date.now() - new Date(rosterLastFetched).getTime() > 24 * 60 * 60 * 1000 && (
-                  <span className="ml-1 text-accent-orange">(stale)</span>
-                )}
-                {autoAssignResult && autoAssignResult.assigned > 0 && (
-                  <span className="ml-2 text-accent-green">· {autoAssignResult.assigned} players auto-assigned</span>
-                )}
-                {autoAssignResult && autoAssignResult.notFound.length > 0 && (
-                  <span className="ml-2 text-accent-orange">· {autoAssignResult.notFound.length} not found on MLB rosters</span>
-                )}
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={fetchRoster}
-                  disabled={rosterLoading}
-                  className="rounded bg-gray-800 px-2 py-0.5 text-[10px] font-medium text-text-dim hover:text-text hover:bg-gray-700 disabled:opacity-50"
-                >
-                  {rosterLoading ? 'Refreshing...' : 'Refresh Roster'}
-                </button>
-                <button
-                  onClick={autoAssignPlayers}
-                  disabled={autoAssignLoading || players.length === 0}
-                  className="rounded bg-gray-800 px-2 py-0.5 text-[10px] font-medium text-text-dim hover:text-text hover:bg-gray-700 disabled:opacity-50"
-                  title="Re-check MLB rosters for player assignments (trades, promotions, demotions)"
-                >
-                  {autoAssignLoading ? 'Checking...' : 'Check Roster Moves'}
-                </button>
-                <button
-                  onClick={() => { clearScheduleCaches(); window.location.reload() }}
-                  className="rounded bg-accent-orange/20 px-2 py-0.5 text-[10px] font-medium text-accent-orange hover:bg-accent-orange/30 transition-colors"
-                  title="Clears cached schedule data (D1Baseball, MaxPreps, geocoding) and reloads the page. Use this if trip results look stale or wrong."
-                >
-                  Clear Cache &amp; Reload
-                </button>
-              </div>
-            </div>
-            <p className="mt-0.5 text-[9px] text-text-dim/50">
-              Refresh Roster pulls the Google Sheet. Check Roster Moves re-queries MLB rosters. Clear Cache forces fresh schedule data.
-            </p>
-            {/* Show recent assignment changes */}
-            {assignmentLog.length > 0 && (
-              <details className="mt-1">
-                <summary className="cursor-pointer text-[10px] text-text-dim hover:text-text">
-                  {assignmentLog.length} recent assignment change{assignmentLog.length !== 1 ? 's' : ''}
-                </summary>
-                <div className="mt-1 max-h-24 overflow-y-auto text-[10px]">
-                  {assignmentLog.slice(-10).reverse().map((entry, i) => (
-                    <p key={i} className={`leading-snug ${
-                      entry.action === 'reassigned' ? 'text-accent-blue' :
-                      entry.action === 'not-found' ? 'text-accent-orange' :
-                      'text-text-dim'
-                    }`}>
-                      {entry.action === 'assigned' && `✓ ${entry.playerName} → ${entry.to}`}
-                      {entry.action === 'reassigned' && `↻ ${entry.playerName}: ${entry.from} → ${entry.to}`}
-                      {entry.action === 'not-found' && `? ${entry.playerName}: not found on any roster`}
-                      {entry.action === 'name-matched' && `≈ ${entry.playerName} → ${entry.to} (name match)`}
-                      {entry.action === 'fallback' && `↓ ${entry.playerName} → ${entry.to} (org fallback)`}
-                    </p>
-                  ))}
-                </div>
-              </details>
-            )}
-          </div>
-        )}
-
-        {/* Roster load error in Trip Planner */}
+        {/* Roster load error */}
         {rosterError && players.length === 0 && (
           <div className="mb-4 rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-2">
             <p className="text-sm text-accent-red">Failed to load roster: {rosterError}</p>
@@ -836,7 +393,6 @@ export default function TripPlanner() {
             >
               {rosterLoading ? 'Retrying...' : 'Retry'}
             </button>
-            <p className="mt-1 text-[10px] text-text-dim">Or go to the Roster tab for more details.</p>
           </div>
         )}
 

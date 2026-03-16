@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import DiagnosticsPanel from '../diagnostics/DiagnosticsPanel'
 import { clearAllData } from '../../lib/cacheUtils'
 
-export type TabId = 'roster' | 'schedule' | 'calendar' | 'trips' | 'map'
+export type TabId = 'roster' | 'calendar' | 'trips' | 'map'
 
 const TABS: { id: TabId; label: string; heading: string; description: string }[] = [
   {
@@ -11,13 +11,7 @@ const TABS: { id: TabId; label: string; heading: string; description: string }[]
     heading: 'Client Roster',
     description: 'Your full list of players to visit this year. This pulls from the Google Sheet and shows each player\'s tier, visit targets, and progress.',
   },
-  {
-    id: 'schedule',
-    label: 'Player Setup',
-    heading: 'Player Setup',
-    description: 'Connect each player to their current team so we can look up where and when they play. Once connected, the app pulls their game schedules automatically.',
-  },
-  {
+{
     id: 'calendar',
     label: 'Calendar',
     heading: 'Game Calendar',

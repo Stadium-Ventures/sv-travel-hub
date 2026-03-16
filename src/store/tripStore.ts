@@ -112,6 +112,37 @@ export const useTripStore = create<TripState>()(
       }
     }
 
+    // Auto-fetch NCAA schedules if NCAA players exist but haven't been loaded
+    const hasNcaaPlayers = players.some((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+    if (hasNcaaPlayers && scheduleState.ncaaGames.length === 0 && !scheduleState.ncaaLoading) {
+      set({ computing: true, tripPlan: null, progressStep: 'Loading College schedules...', progressDetail: '' })
+      const ncaaPlayerOrgs = players
+        .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+        .map((p) => ({ playerName: p.playerName, org: p.org }))
+      await useScheduleStore.getState().fetchNcaaSchedules(ncaaPlayerOrgs)
+      scheduleState = useScheduleStore.getState()
+    }
+
+    // Auto-geocode HS venues and fetch HS schedules
+    const hasHsPlayers = players.some((p) => p.level === 'HS' && p.visitsRemaining > 0)
+    if (hasHsPlayers) {
+      const venueState = useVenueStore.getState()
+      const hsVenueCount = Object.values(venueState.venues).filter((v: any) => v.source === 'hs-geocoded').length
+      const hsPlayerList = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+      if (hsVenueCount === 0 && hsPlayerList.length > 0) {
+        set({ computing: true, tripPlan: null, progressStep: 'Mapping HS school locations...', progressDetail: '' })
+        await useVenueStore.getState().geocodeHsVenues(
+          hsPlayerList.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
+        )
+      }
+      if (scheduleState.hsGames.length === 0 && !scheduleState.hsLoading) {
+        set({ computing: true, tripPlan: null, progressStep: 'Loading HS schedules...', progressDetail: '' })
+        const hsPlayerOrgs = hsPlayerList.map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
+        await useScheduleStore.getState().fetchHsSchedules(hsPlayerOrgs)
+        scheduleState = useScheduleStore.getState()
+      }
+    }
+
     // BLOCK: Refuse to generate if priority player schedule data is missing
     if (priorityPlayers.length > 0) {
       const missingSchedule: string[] = []
@@ -119,10 +150,10 @@ export const useTripStore = create<TripState>()(
         const player = players.find((p) => p.playerName === pName)
         if (!player) continue
         if (player.level === 'Pro' && scheduleState.proGames.length === 0) {
-          missingSchedule.push(`${pName} (Pro) — schedule data failed to load. Try clicking "Match Players to Teams" first, then "Load Pro Schedules".`)
+          missingSchedule.push(`${pName} (Pro) — schedule data failed to load automatically.`)
         }
         if (player.level === 'NCAA' && scheduleState.ncaaGames.length === 0) {
-          missingSchedule.push(`${pName} (NCAA) — no NCAA schedule data loaded.`)
+          missingSchedule.push(`${pName} (NCAA) — college schedule data failed to load automatically.`)
         }
       }
       if (missingSchedule.length > 0) {

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRosterStore } from '../../store/rosterStore'
 import type { SortField } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
+import type { AssignmentChange } from '../../store/scheduleStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
+import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '../../data/aliases'
 import { formatTimeAgo } from '../../lib/formatters'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
@@ -27,6 +29,10 @@ export default function RosterDashboard() {
   const autoAssignResult = useScheduleStore((s) => s.autoAssignResult)
   const assignPlayerToTeam = useScheduleStore((s) => s.assignPlayerToTeam)
   const affiliates = useScheduleStore((s) => s.affiliates)
+  const assignmentLog = useScheduleStore((s) => s.assignmentLog) ?? []
+  const customMlbAliases = useScheduleStore((s) => s.customMlbAliases)
+  const customNcaaAliases = useScheduleStore((s) => s.customNcaaAliases)
+  const setCustomAlias = useScheduleStore((s) => s.setCustomAlias)
 
   const heartbeatPlayers = useHeartbeatStore((s) => s.players)
   const heartbeatPriorities = useHeartbeatStore((s) => s.priorities)
@@ -125,6 +131,29 @@ export default function RosterDashboard() {
 
   const sortIndicator = (field: SortField) =>
     sortField === field ? (sortDir === 'asc' ? ' \u2191' : ' \u2193') : ''
+
+  // Unresolved org names (need alias mapping)
+  const proPlayers = players.filter((p) => p.level === 'Pro')
+  const ncaaPlayers = players.filter((p) => p.level === 'NCAA')
+  const unresolvedPro = proPlayers.filter((p) => !resolveMLBTeamId(p.org, customMlbAliases))
+  const unresolvedNcaa = ncaaPlayers.filter((p) => !resolveNcaaName(p.org, customNcaaAliases))
+  const hasUnresolved = unresolvedPro.length > 0 || unresolvedNcaa.length > 0
+
+  const mlbOrgNames = useMemo(() => {
+    const names = new Set<string>()
+    for (const key of Object.keys(MLB_ORG_IDS)) {
+      if (key.includes(' ')) names.add(key)
+    }
+    return [...names].sort()
+  }, [])
+  const ncaaSchoolNames = useMemo(() => [...Object.keys(NCAA_ALIASES)].sort(), [])
+
+  // Most recent assignment log entries (from last verify)
+  const recentLog = useMemo(() => {
+    if (assignmentLog.length === 0) return []
+    const lastTimestamp = assignmentLog[assignmentLog.length - 1]?.timestamp ?? 0
+    return assignmentLog.filter((e) => e.timestamp === lastTimestamp)
+  }, [assignmentLog])
 
   if (loading && players.length === 0) {
     return (
@@ -335,25 +364,33 @@ export default function RosterDashboard() {
             <button
               onClick={autoAssignPlayers}
               disabled={autoAssignLoading}
-              className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text disabled:opacity-50"
-              title="Auto-detect MLB/MiLB affiliate for each Pro player via roster lookups"
+              className="ml-auto flex items-center gap-1.5 rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
+              title="Check MLB/MiLB rosters and verify current affiliate assignments"
             >
               {autoAssignLoading ? (
-                <span className="h-3 w-3 animate-spin rounded-full border border-text-dim border-t-transparent" />
+                <span className="h-3 w-3 animate-spin rounded-full border border-white border-t-transparent" />
               ) : (
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                 </svg>
               )}
-              Auto-assign Affiliates
+              Verify Assignments
             </button>
           </div>
 
-          {autoAssignResult?.springTrainingEstimate && (
+          {/* Verify results panel */}
+          {recentLog.length > 0 && !autoAssignLoading && (
+            <VerifyResultsPanel
+              log={recentLog}
+              springTraining={autoAssignResult?.springTrainingEstimate ?? false}
+            />
+          )}
+
+          {autoAssignResult?.springTrainingEstimate && recentLog.length === 0 && (
             <div className="mb-3 rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-4 py-2.5">
               <p className="text-xs font-medium text-accent-orange">Spring training — MiLB rosters not yet published</p>
               <p className="mt-0.5 text-[11px] text-text-dim">
-                Affiliates are estimated from last year's assignment + one level promotion (e.g. A→High-A, AA→AAA). Players not found in last year's data default to the org's High-A team. These will auto-correct once regular season rosters are available.
+                Affiliates are estimated from last year's assignment + one level promotion. Click Verify Assignments to check current rosters.
               </p>
             </div>
           )}
@@ -460,6 +497,62 @@ export default function RosterDashboard() {
         <div className="py-10 text-center">
           <p className="text-sm text-text-dim">No players loaded yet.</p>
           <p className="mt-1 text-xs text-text-dim/60">The roster pulls automatically from the Google Sheet. Click Refresh above if it hasn't loaded.</p>
+        </div>
+      )}
+
+      {/* Data Setup — unresolved org name mapping */}
+      {hasUnresolved && (
+        <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-accent-red">
+            Unknown Team Names ({unresolvedPro.length + unresolvedNcaa.length})
+          </h3>
+          <p className="mb-3 text-xs text-text-dim">
+            These team/school names from the roster don't match any known organization. Map them below so schedules load correctly.
+          </p>
+          <div className="space-y-2">
+            {[...new Set(unresolvedPro.map((p) => p.org))].map((org) => {
+              const orgPlayers = unresolvedPro.filter((p) => p.org === org)
+              return (
+                <div key={`pro-${org}`} className="flex items-center gap-3 rounded-lg border border-accent-red/20 bg-gray-950 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-medium text-accent-red">"{org}"</span>
+                    <span className="ml-2 text-xs text-text-dim">(Pro — {orgPlayers.map((p) => p.playerName).join(', ')})</span>
+                  </div>
+                  <select
+                    className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text focus:border-accent-blue focus:outline-none"
+                    value=""
+                    onChange={(e) => { if (e.target.value) setCustomAlias('mlb', org, e.target.value) }}
+                  >
+                    <option value="">Map to MLB org...</option>
+                    {mlbOrgNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+              )
+            })}
+            {[...new Set(unresolvedNcaa.map((p) => p.org))].map((org) => {
+              const orgPlayers = unresolvedNcaa.filter((p) => p.org === org)
+              return (
+                <div key={`ncaa-${org}`} className="flex items-center gap-3 rounded-lg border border-accent-red/20 bg-gray-950 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-medium text-accent-red">"{org}"</span>
+                    <span className="ml-2 text-xs text-text-dim">(NCAA — {orgPlayers.map((p) => p.playerName).join(', ')})</span>
+                  </div>
+                  <select
+                    className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text focus:border-accent-blue focus:outline-none"
+                    value=""
+                    onChange={(e) => { if (e.target.value) setCustomAlias('ncaa', org, e.target.value) }}
+                  >
+                    <option value="">Map to NCAA school...</option>
+                    {ncaaSchoolNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -735,6 +828,65 @@ function ParseWarnings({ warnings }: { warnings: string[] }) {
       <p className="mt-1 text-[9px] text-text-dim/50">
         These values were auto-filled. Update the Google Sheet to fix them permanently.
       </p>
+    </div>
+  )
+}
+
+function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; springTraining: boolean }) {
+  const reassigned = log.filter((e) => e.action === 'reassigned')
+  const assigned = log.filter((e) => e.action === 'assigned')
+  const notFound = log.filter((e) => e.action === 'not-found')
+  const nameMatched = log.filter((e) => e.action === 'name-matched')
+  const fallback = log.filter((e) => e.action === 'fallback')
+  const confirmed = assigned.length + nameMatched.length + fallback.length
+
+  return (
+    <div className="mb-3 rounded-lg border border-border/50 bg-surface px-4 py-3">
+      <div className="mb-2 flex items-center gap-3 text-xs">
+        {confirmed > 0 && (
+          <span className="text-accent-green">{confirmed} confirmed</span>
+        )}
+        {reassigned.length > 0 && (
+          <span className="text-accent-blue">{reassigned.length} changed</span>
+        )}
+        {notFound.length > 0 && (
+          <span className="text-accent-red">{notFound.length} not found</span>
+        )}
+      </div>
+
+      {springTraining && (
+        <p className="mb-2 text-[10px] text-accent-orange">
+          Spring training — affiliates estimated from last year + one level promotion. Will auto-correct when regular season rosters publish.
+        </p>
+      )}
+
+      {reassigned.length > 0 && (
+        <div className="mb-2 space-y-1">
+          {reassigned.map((e) => (
+            <div key={e.playerName} className="flex items-center gap-2 rounded bg-accent-blue/10 px-2 py-1 text-[11px]">
+              <span className="font-medium text-accent-blue">{e.playerName}</span>
+              <span className="text-text-dim">{e.from}</span>
+              <span className="text-text-dim/50">→</span>
+              <span className="font-medium text-text">{e.to}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {notFound.length > 0 && (
+        <div className="space-y-1">
+          {notFound.map((e) => (
+            <div key={e.playerName} className="flex items-center gap-2 rounded bg-accent-red/10 px-2 py-1 text-[11px]">
+              <span className="font-medium text-accent-red">{e.playerName}</span>
+              <span className="text-text-dim">not found on any MLB/MiLB roster</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {reassigned.length === 0 && notFound.length === 0 && confirmed > 0 && (
+        <p className="text-[11px] text-accent-green">All assignments verified — no changes detected.</p>
+      )}
     </div>
   )
 }
