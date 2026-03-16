@@ -70,41 +70,46 @@ export default function PlayerCoverageCard({ players, allGames, onPlayerClick, o
 
   if (playerData.length === 0) return null
 
+  const realDataCount = playerData.length - noDataCount - estimatedCount
+
   return (
-    <div className="rounded-xl border border-border bg-surface p-5">
-      <div className="mb-3 flex items-center justify-between">
+    <details className="rounded-xl border border-border bg-surface">
+      <summary className="cursor-pointer px-5 py-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-text">
           Player Coverage
           <span className="ml-2 text-xs font-normal text-text-dim">
-            {playerData.length} players needing visits
+            {playerData.length} players
           </span>
         </h3>
         <div className="flex items-center gap-2 text-[10px]">
+          {realDataCount > 0 && (
+            <span className="rounded bg-accent-green/10 px-1.5 py-0.5 text-accent-green">
+              {realDataCount} with schedules
+            </span>
+          )}
+          {estimatedCount > 0 && (
+            <span className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-accent-orange">
+              {estimatedCount} estimated
+            </span>
+          )}
           {noDataCount > 0 && (
             <span className="rounded bg-accent-red/10 px-1.5 py-0.5 text-accent-red">
               {noDataCount} no data
             </span>
           )}
-          {estimatedCount > 0 && (
-            <>
-              <span className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-accent-orange">
-                {estimatedCount} estimated
-              </span>
-              {onLoadAll && (
-                <button
-                  onClick={onLoadAll}
-                  disabled={loadingAll}
-                  className="rounded bg-accent-blue/15 px-1.5 py-0.5 text-accent-blue hover:bg-accent-blue/25 disabled:opacity-50 transition-colors"
-                >
-                  {loadingAll ? 'Loading...' : 'Load all schedules'}
-                </button>
-              )}
-            </>
+          {onLoadAll && estimatedCount > 0 && (
+            <button
+              onClick={(e) => { e.preventDefault(); onLoadAll() }}
+              disabled={loadingAll}
+              className="rounded bg-accent-blue/15 px-1.5 py-0.5 text-accent-blue hover:bg-accent-blue/25 disabled:opacity-50 transition-colors"
+            >
+              {loadingAll ? 'Loading...' : 'Load all schedules'}
+            </button>
           )}
         </div>
-      </div>
+      </summary>
 
-      <div className="space-y-3">
+      <div className="border-t border-border px-5 py-3 space-y-3">
         {Object.entries(grouped).sort(([a], [b]) => Number(a) - Number(b)).map(([tierStr, items]) => {
           const tier = Number(tierStr)
           const isCollapsed = collapsed[tier] ?? (tier >= 3)
@@ -152,6 +157,6 @@ export default function PlayerCoverageCard({ players, allGames, onPlayerClick, o
           )
         })}
       </div>
-    </div>
+    </details>
   )
 }

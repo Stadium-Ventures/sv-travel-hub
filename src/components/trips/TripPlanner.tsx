@@ -4,7 +4,6 @@ import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import TripCard, { generateItineraryText, buildVenueStops, MarkVisitedChip } from './TripCard'
-import DoubleUpSection from './DoubleUpSection'
 import PlayerCoverageCard from './PlayerCoverageCard'
 import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
@@ -818,16 +817,6 @@ export default function TripPlanner() {
             )
           })()}
 
-          {/* Double Up Opportunities */}
-          {tripPlan.doubleUps && tripPlan.doubleUps.length > 0 && (
-            <DoubleUpSection
-              doubleUps={tripPlan.doubleUps}
-              playerMap={playerMap}
-              priorityPlayers={priorityPlayers}
-              onPlayerClick={setSelectedPlayer}
-            />
-          )}
-
           {/* Zero road trips explanation */}
           {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length > 0 && (
             <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-4 py-3">
@@ -1108,14 +1097,21 @@ export default function TripPlanner() {
                   </div>
                 )}
                 {noGames.length > 0 && (
-                  <div id="section-no-games" className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-5">
-                    <h3 className="mb-2 text-sm font-semibold text-accent-red">
-                      No Games Found ({noGames.length})
-                    </h3>
-                    <p className="mb-3 text-xs text-text-dim">
-                      No visit opportunities found for these players in the selected date range.
-                    </p>
-                    <div className="space-y-1.5">
+                  <details id="section-no-games" className="rounded-xl border border-accent-red/30 bg-accent-red/5">
+                    <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-accent-red">
+                      {noGames.length} player{noGames.length !== 1 ? 's' : ''} with no games in date range
+                      {(() => {
+                        const t1Count = noGames.filter((e) => (playerMap.get(e.name)?.tier ?? 4) === 1).length
+                        const t2Count = noGames.filter((e) => (playerMap.get(e.name)?.tier ?? 4) === 2).length
+                        if (t1Count === 0 && t2Count === 0) return null
+                        return (
+                          <span className="ml-2 text-xs font-normal text-accent-red/70">
+                            ({t1Count > 0 ? `${t1Count} T1` : ''}{t1Count > 0 && t2Count > 0 ? ', ' : ''}{t2Count > 0 ? `${t2Count} T2` : ''})
+                          </span>
+                        )
+                      })()}
+                    </summary>
+                    <div className="border-t border-accent-red/20 px-5 py-3 space-y-1.5">
                       {noGames.map((entry) => {
                         const player = playerMap.get(entry.name)
                         const tier = player?.tier ?? 4
@@ -1130,7 +1126,7 @@ export default function TripPlanner() {
                         )
                       })}
                     </div>
-                  </div>
+                  </details>
                 )}
               </>
             )

@@ -1,5 +1,4 @@
 import { useState, type ReactNode } from 'react'
-import DiagnosticsPanel from '../diagnostics/DiagnosticsPanel'
 import { clearAllData } from '../../lib/cacheUtils'
 
 export type TabId = 'roster' | 'trips' | 'map'
@@ -68,7 +67,6 @@ export default function AppShell({ children }: AppShellProps) {
         ))}
       </nav>
 
-      <DiagnosticsPanel />
       <main>{children[activeTab]}</main>
     </div>
   )

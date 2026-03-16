@@ -114,15 +114,13 @@ function DoubleUpCard({
   onPlayerClick?: (name: string) => void
 }) {
   const du = doubleUp
-  const dayDate = new Date(du.date + 'T12:00:00Z')
-  const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayDate.getUTCDay()]
   const typeInfo = TYPE_LABELS[du.type] ?? { label: du.type, color: 'bg-gray-700 text-text-dim' }
 
   return (
     <div className="rounded-lg border border-border/30 bg-gray-950/30 px-4 py-3">
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs font-semibold text-text">
-          {dayName} {formatDate(du.date)}
+          {formatDate(du.date)}
         </span>
         <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${typeInfo.color}`}>
           {typeInfo.label}

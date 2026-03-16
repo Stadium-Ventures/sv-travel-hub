@@ -247,9 +247,7 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
 
   const dayAssignments = assignStopsToDays(stops, trip.suggestedDays)
   for (const [day, dayStops] of dayAssignments) {
-    const dayDate = new Date(day + 'T12:00:00Z')
-    const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayDate.getUTCDay()]
-    text += `\n${dayName} ${formatDate(day)}:\n`
+    text += `\n${formatDate(day)}:\n`
     for (const stop of dayStops) {
       const label = stop.orgLabel && stop.orgLabel !== stop.venueName
         ? `${stop.orgLabel} — ${stop.venueName}`
@@ -463,7 +461,6 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
           {/* Day-by-day schedule — the core of the card */}
           {displayDays.map((day, dayIdx) => {
             const dayDate = new Date(day + 'T12:00:00Z')
-            const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayDate.getUTCDay()]
             const isTue = dayDate.getUTCDay() === 2
             const dayStops = dayAssignments.get(day) ?? []
 
@@ -474,7 +471,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                     Day {dayIdx + 1}
                   </span>
                   <span className={`text-xs ${isTue ? 'text-accent-blue' : 'text-text-dim'}`}>
-                    {dayName} {formatDate(day)}
+                    {formatDate(day)}
                     {isTue && ' (best day)'}
                   </span>
                   {dayStops.length >= 2 && (
