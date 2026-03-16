@@ -1298,4 +1298,4 @@ export function analyzeBestWeeks(
   return weeks.slice(0, 5)
 }
 
-export { HOME_BASE, MAX_DRIVE_MINUTES }
+export { HOME_BASE, MAX_DRIVE_MINUTES, TIER_WEIGHTS }

@@ -9,6 +9,8 @@ import { resolveMaxPrepsSlug } from '../../lib/maxpreps'
 import { resolveNcaaName } from '../../data/aliases'
 import { useVenueStore } from '../../store/venueStore'
 import TripCard, { generateItineraryText, buildVenueStops, MarkVisitedChip } from './TripCard'
+import DoubleUpSection from './DoubleUpSection'
+import PlayerCoverageCard from './PlayerCoverageCard'
 import { clearScheduleCaches } from '../../lib/cacheUtils'
 import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
@@ -1151,6 +1153,13 @@ export default function TripPlanner() {
             </div>
           )}
 
+          {/* Player Coverage — answers "where is Player X?" */}
+          <PlayerCoverageCard
+            players={players}
+            allGames={[...proGames, ...ncaaGames, ...hsGames]}
+            onPlayerClick={setSelectedPlayer}
+          />
+
           {/* Coverage stats */}
           {(() => {
             const beyondPlayers = tripPlan.unvisitablePlayers.filter((e) => e.reason.startsWith('Beyond max flight'))
@@ -1243,6 +1252,16 @@ export default function TripPlanner() {
               </div>
             )
           })()}
+
+          {/* Double Up Opportunities */}
+          {tripPlan.doubleUps && tripPlan.doubleUps.length > 0 && (
+            <DoubleUpSection
+              doubleUps={tripPlan.doubleUps}
+              playerMap={playerMap}
+              priorityPlayers={priorityPlayers}
+              onPlayerClick={setSelectedPlayer}
+            />
+          )}
 
           {/* Zero road trips explanation */}
           {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length > 0 && (

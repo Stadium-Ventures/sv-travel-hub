@@ -82,6 +82,18 @@ export interface UnvisitablePlayer {
   reason: string
 }
 
+export type DoubleUpType = 'nearby-venues' | 'same-venue-matchup' | 'tournament-cluster'
+
+export interface DoubleUp {
+  date: string
+  games: GameEvent[]
+  type: DoubleUpType
+  driveMinutesBetween: number  // 0 for same-venue
+  timeFeasible: boolean | null // null = times unknown
+  combinedValue: number        // tier-weighted score
+  playerNames: string[]
+}
+
 export interface TripPlan {
   trips: TripCandidate[]
   flyInVisits: FlyInVisit[]
@@ -94,4 +106,5 @@ export interface TripPlan {
   coveragePercent: number
   priorityResults?: PriorityResult[]
   nearMisses?: NearMiss[]
+  doubleUps?: DoubleUp[]
 }

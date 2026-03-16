@@ -438,6 +438,28 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
       {expanded && (
         <div className="mt-4 space-y-3">
 
+          {/* Confidence warning — shown at top for visibility */}
+          {hasUncertainEvents && (() => {
+            const estimatedStops = stops.filter((s) => s.confidence && s.confidence !== 'high')
+            const hasLow = estimatedStops.some((s) => s.confidence === 'low')
+            return (
+              <div className={`rounded-lg border px-3 py-1.5 ${
+                hasLow
+                  ? 'border-accent-red/20 bg-accent-red/5'
+                  : 'border-accent-orange/20 bg-accent-orange/5'
+              }`}>
+                <p className={`text-[11px] ${hasLow ? 'text-accent-red' : 'text-accent-orange'}`}>
+                  {estimatedStops.length === 1 ? '1 stop' : `${estimatedStops.length} stops`} based on estimated schedules — verify before traveling.
+                  {estimatedStops.map((s) => s.confidenceNote).filter(Boolean).length > 0 && (
+                    <span className="block mt-0.5 text-text-dim/70">
+                      {estimatedStops.map((s) => s.confidenceNote).filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </p>
+              </div>
+            )
+          })()}
+
           {/* Day-by-day schedule — the core of the card */}
           {displayDays.map((day, dayIdx) => {
             const dayDate = new Date(day + 'T12:00:00Z')
@@ -455,6 +477,11 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                     {dayName} {formatDate(day)}
                     {isTue && ' (best day)'}
                   </span>
+                  {dayStops.length >= 2 && (
+                    <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-bold text-accent-green">
+                      DOUBLE UP · {dayStops.length} games
+                    </span>
+                  )}
                   {dayIdx === 0 && trip.driveFromHomeMinutes > 0 && (
                     <span className="text-[11px] text-text-dim/60 ml-auto">
                       Drive from Orlando: ~{formatDriveTime(trip.driveFromHomeMinutes)}
@@ -622,17 +649,6 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             </div>
           </div>
 
-          {/* Confidence warning */}
-          {hasUncertainEvents && (() => {
-            const estimatedStops = stops.filter((s) => s.confidence && s.confidence !== 'high')
-            return (
-              <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
-                <p className="text-[11px] text-accent-orange">
-                  {estimatedStops.length === 1 ? '1 stop' : `${estimatedStops.length} stops`} based on estimated schedules — verify before traveling.
-                </p>
-              </div>
-            )
-          })()}
         </div>
       )}
     </div>

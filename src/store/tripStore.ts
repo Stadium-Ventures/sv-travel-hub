@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { Coordinates } from '../types/roster'
 import type { TripPlan } from '../types/schedule'
 import { generateTrips, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES } from '../lib/tripEngine'
+import { findDoubleUps } from '../lib/doubleUps'
 import type { UrgencyMap } from '../lib/tripEngine'
 import { useRosterStore } from './rosterStore'
 import { useScheduleStore } from './scheduleStore'
@@ -221,6 +222,9 @@ export const useTripStore = create<TripState>()(
         maxFlightHours,
         scheduleState.playerTeamAssignments,
       )
+      // Detect double-up opportunities across all games
+      plan.doubleUps = findDoubleUps(allGames, players, startDate, endDate)
+
       // Prune stale tripStatuses — only keep keys that match current trips
       const currentKeys = new Set(plan.trips.map(getTripKey))
       const oldStatuses = get().tripStatuses
