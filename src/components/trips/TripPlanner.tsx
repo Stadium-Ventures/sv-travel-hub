@@ -478,16 +478,30 @@ export default function TripPlanner() {
             Next week
           </button>
           <button
-            onClick={() => { const y = new Date().getFullYear(); setDateRange(`${y}-03-01`, `${y}-06-15`) }}
+            onClick={() => {
+              const now = new Date()
+              const day = now.getDay()
+              const diffToNextMon = day === 0 ? 1 : 8 - day
+              const start = new Date(now)
+              start.setDate(now.getDate() + diffToNextMon)
+              const end = new Date(start)
+              end.setDate(start.getDate() + 13) // 2 weeks
+              setDateRange(start.toISOString().split('T')[0]!, end.toISOString().split('T')[0]!)
+            }}
             className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
           >
-            Spring (Mar–Jun)
+            Next 2 weeks
           </button>
           <button
-            onClick={() => { const y = new Date().getFullYear(); setDateRange(`${y}-03-01`, `${y}-09-30`) }}
+            onClick={() => {
+              const now = new Date()
+              const end = new Date(now)
+              end.setDate(now.getDate() + 30)
+              setDateRange(now.toISOString().split('T')[0]!, end.toISOString().split('T')[0]!)
+            }}
             className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
           >
-            Full Season
+            Next 30 days
           </button>
         </div>
 
@@ -499,7 +513,18 @@ export default function TripPlanner() {
                 type="date"
                 value={startDate}
                 max={endDate}
-                onChange={(e) => setDateRange(e.target.value, endDate)}
+                onChange={(e) => {
+                  const newStart = e.target.value
+                  // Cap at 30 days
+                  const startMs = new Date(newStart).getTime()
+                  const endMs = new Date(endDate).getTime()
+                  if (endMs - startMs > 30 * 86400000) {
+                    const capped = new Date(startMs + 30 * 86400000).toISOString().split('T')[0]!
+                    setDateRange(newStart, capped)
+                  } else {
+                    setDateRange(newStart, endDate)
+                  }
+                }}
                 className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
               />
               <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
@@ -514,7 +539,18 @@ export default function TripPlanner() {
                 type="date"
                 value={endDate}
                 min={startDate}
-                onChange={(e) => setDateRange(startDate, e.target.value)}
+                onChange={(e) => {
+                  const newEnd = e.target.value
+                  // Cap at 30 days
+                  const startMs = new Date(startDate).getTime()
+                  const endMs = new Date(newEnd).getTime()
+                  if (endMs - startMs > 30 * 86400000) {
+                    const capped = new Date(endMs - 30 * 86400000).toISOString().split('T')[0]!
+                    setDateRange(capped, newEnd)
+                  } else {
+                    setDateRange(startDate, newEnd)
+                  }
+                }}
                 className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
               />
               <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">

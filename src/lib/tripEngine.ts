@@ -1035,25 +1035,6 @@ export async function generateTrips(
     }
   }
 
-  // Enrich fly-ins: check if other SV players have games nearby (within 2h drive)
-  // during the same week — creates fly-in double-up opportunities
-  for (const [, entry] of flyInWeekMap) {
-    const entryDates = [...entry.dates]
-    for (const game of eligibleGames) {
-      if (game.venue.coords.lat === 0 && game.venue.coords.lng === 0) continue
-      // Must be in the same date range
-      if (!entryDates.some((d) => Math.abs(new Date(game.date).getTime() - new Date(d).getTime()) <= 2 * 86400000)) continue
-      // Must be a different player not already in this fly-in
-      const newPlayers = game.playerNames.filter((n) => playersForFlyIns.includes(n) && !entry.players.has(n))
-      if (newPlayers.length === 0) continue
-      // Must be within 2h drive of the fly-in venue
-      const driveMin = estimateDriveMinutes(entry.venue.coords, game.venue.coords)
-      if (driveMin > 120) continue
-      // Add the nearby players to this fly-in
-      for (const name of newPlayers) entry.players.add(name)
-    }
-  }
-
   // Convert to FlyInVisit array — each entry is one week at one venue
   for (const [, entry] of flyInWeekMap) {
     const sortedDates = [...entry.dates].sort()
