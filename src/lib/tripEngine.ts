@@ -7,6 +7,7 @@ import { resolveMLBTeamId, resolveNcaaName } from '../data/aliases'
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import { D1_BASEBALL_SLUGS } from '../data/d1baseballSlugs'
 import { resolveMaxPrepsSlug } from './maxpreps'
+import { VENUE_PROXIMITY } from '../data/venueProximity'
 
 // Constants
 const HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
@@ -426,17 +427,33 @@ function coordKey(c: Coordinates): string {
   return `${c.lat.toFixed(4)},${c.lng.toFixed(4)}`
 }
 
-// Cache for inter-venue drive minutes to avoid redundant haversine calculations
-const driveMinutesCache = new Map<string, number>()
+// Look up home-to-venue drive minutes from pre-computed data, fallback to Haversine
+function lookupHomeMinutes(coords: Coordinates): number {
+  const key = coordKey(coords)
+  const entry = VENUE_PROXIMITY[key]
+  if (entry) return entry.homeMinutes
+  return estimateDriveMinutes(HOME_BASE, coords)
+}
 
-function cachedDriveMinutes(a: Coordinates, b: Coordinates): number {
-  const ka = coordKey(a), kb = coordKey(b)
-  const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`
-  const cached = driveMinutesCache.get(key)
-  if (cached !== undefined) return cached
-  const result = estimateDriveMinutes(a, b)
-  driveMinutesCache.set(key, result)
-  return result
+// Check if two venues are within maxMinutes drive using pre-computed data
+function lookupDriveMinutes(a: Coordinates, b: Coordinates): number {
+  const keyA = coordKey(a)
+  const entry = VENUE_PROXIMITY[keyA]
+  if (entry) {
+    const keyB = coordKey(b)
+    const nearby = entry.nearby.find(n => n.key === keyB)
+    if (nearby) return nearby.driveMinutes
+  }
+  // Fallback to runtime computation
+  return estimateDriveMinutes(a, b)
+}
+
+// Get set of nearby venue keys for fast filtering
+export function getNearbyVenueKeys(coords: Coordinates, maxMinutes: number): Set<string> | null {
+  const key = coordKey(coords)
+  const entry = VENUE_PROXIMITY[key]
+  if (!entry) return null
+  return new Set(entry.nearby.filter(n => n.driveMinutes <= maxMinutes).map(n => n.key))
 }
 
 // Main trip generation algorithm
@@ -518,7 +535,7 @@ export async function generateTrips(
     if (g.venue.coords.lat === 0 && g.venue.coords.lng === 0) continue
     const key = coordKey(g.venue.coords)
     if (!homeToVenue.has(key)) {
-      homeToVenue.set(key, estimateDriveMinutes(HOME_BASE, g.venue.coords))
+      homeToVenue.set(key, lookupHomeMinutes(g.venue.coords))
     }
   }
 
@@ -603,7 +620,7 @@ export async function generateTrips(
       // Inter-venue distance capped at MAX_INTER_VENUE_MINUTES (reasonable detour)
       // Also verify the nearby venue is reachable from home
       const nearbyGames = windowGames
-        .map((g) => ({ ...g, driveMinutes: cachedDriveMinutes(anchor.venue.coords, g.venue.coords) }))
+        .map((g) => ({ ...g, driveMinutes: lookupDriveMinutes(anchor.venue.coords, g.venue.coords) }))
         .filter((g) => {
           if (g.driveMinutes < 0 || g.driveMinutes > MAX_INTER_VENUE_MINUTES) return false
           // Also check that the nearby venue itself is reachable from home
@@ -669,7 +686,7 @@ export async function generateTrips(
         let interVenueDrive = 0
         let prevCoords = anchor.venue.coords
         for (const g of perm) {
-          interVenueDrive += cachedDriveMinutes(prevCoords, g.venue.coords)
+          interVenueDrive += lookupDriveMinutes(prevCoords, g.venue.coords)
           prevCoords = g.venue.coords
         }
         const lastKey = perm.length > 0
