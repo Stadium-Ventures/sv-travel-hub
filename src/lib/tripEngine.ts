@@ -1195,10 +1195,17 @@ export async function generateTrips(
       return { name, reason: 'No venue coordinates — geocoding failed' }
     }
 
-    // Check if all eligible games fall on Sundays
-    const allSundays = playerGames
-      .filter((g) => g.date >= startDate && g.date <= endDate)
-      .every((g) => new Date(g.date + 'T12:00:00Z').getUTCDay() === 0)
+    // Check if games exist but are all outside the date range
+    const gamesInRange = playerGames.filter((g) => g.date >= startDate && g.date <= endDate)
+    if (gamesInRange.length === 0) {
+      // Player has games but none in the selected dates
+      if (player.level === 'NCAA') return { name, reason: `College season may be over — games found outside ${startDate} to ${endDate}` }
+      if (player.level === 'HS') return { name, reason: `HS season may be over — games found outside ${startDate} to ${endDate}` }
+      return { name, reason: 'No games in date range' }
+    }
+
+    // Check if all in-range games fall on Sundays
+    const allSundays = gamesInRange.every((g) => new Date(g.date + 'T12:00:00Z').getUTCDay() === 0)
     if (allSundays) {
       return { name, reason: 'All games on Sundays (blackout days)' }
     }

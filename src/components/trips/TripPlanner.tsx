@@ -289,7 +289,7 @@ export default function TripPlanner() {
   }
 
   // Compute whether priority player is fly-in only — controls section ordering
-  const priorityIsFlyIn = tripPlan?.priorityResults?.some((r) => r.status === 'fly-in-only') ?? false
+
 
   // Pre-compute fly-in section so it can be rendered in reordered position
   const flyInSection = tripPlan && tripPlan.flyInVisits.length > 0 ? (() => {
@@ -827,33 +827,6 @@ export default function TripPlanner() {
                       </span>
                   }
                 </p>
-              </div>
-            )
-          })()}
-
-          {/* Priority player's BEST fly-in — shown before road trips when priority is fly-in-only */}
-          {priorityIsFlyIn && tripPlan.flyInVisits.length > 0 && (() => {
-            // Show only the priority player's best fly-in option here
-            const priorityFlyIn = tripPlan.flyInVisits.find((v) =>
-              v.playerNames.some((n) => priorityPlayers.includes(n))
-            )
-            if (!priorityFlyIn) return null
-            return (
-              <div className="rounded-xl border border-purple-500/30 bg-purple-500/5 p-4">
-                <h3 className="mb-2 text-sm font-semibold text-purple-400">
-                  Best Fly-in for Priority Player
-                </h3>
-                <FlyInCard
-                  visit={priorityFlyIn}
-                  index={1}
-                  players={players}
-                  playerMap={playerMap}
-                  priorityPlayers={priorityPlayers}
-                  copiedFlyIn={copiedFlyIn}
-                  setCopiedFlyIn={setCopiedFlyIn}
-                  onPlayerClick={setSelectedPlayer}
-                  defaultExpanded
-                />
               </div>
             )
           })()}
