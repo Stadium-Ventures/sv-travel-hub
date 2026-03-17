@@ -1189,7 +1189,7 @@ export async function generateTrips(
       if (player.tier >= 3) {
         return { name, reason: 'T3 schedule not loaded — click "Load all schedules" above' }
       }
-      return { name, reason: 'School not matched — check Roster tab for unknown team names that need mapping' }
+      return { name, reason: `School not matched (org: "${player.org}") — check Roster tab for unknown team names that need mapping` }
     }
 
     // Check if all games have zero coords (venue couldn't be geocoded)

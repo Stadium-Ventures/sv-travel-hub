@@ -6,7 +6,7 @@ import { MLB_PARENT_IDS, resolveNcaaName, resolveMLBTeamId } from '../data/alias
 import type { GameEvent } from '../types/schedule'
 import { extractVenueCoords } from '../lib/mlbApi'
 import type { D1Schedule } from '../lib/d1baseball'
-import { fetchAllD1Schedules, resolveOpponentVenue } from '../lib/d1baseball'
+import { fetchAllD1Schedules, resolveOpponentVenue, resolveOpponentVenueAsync } from '../lib/d1baseball'
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import type { MaxPrepsSchedule } from '../lib/maxpreps'
 import { fetchAllMaxPrepsSchedules } from '../lib/maxpreps'
@@ -345,6 +345,15 @@ export const useScheduleStore = create<ScheduleState>()(
           // Use spring training estimation if: before April OR if MiLB coverage is < 50%
           // (MiLB rosters aren't finalized yet even in early April)
           const isSpringTraining = monthBasedST || milbCoverage < 0.5
+          // Log spring training detection for debugging assignment issues
+          const diagST = useDiagnosticsStore.getState()
+          diagST.addIssue({
+            level: 'info',
+            source: 'pro',
+            message: isSpringTraining
+              ? `Spring training mode active (month-based: ${monthBasedST}, MiLB coverage: ${Math.round(milbCoverage * 100)}%) — using estimated assignments`
+              : `Regular season mode (MiLB coverage: ${Math.round(milbCoverage * 100)}%) — using current rosters`,
+          })
           // During spring training, ALWAYS fetch last year's rosters to estimate
           // each player's level, then promote by one level. Current MiLB rosters
           // are unreliable before April — they may have some entries but not all players.
@@ -833,6 +842,9 @@ export const useScheduleStore = create<ScheduleState>()(
           const schedulesObj: Record<string, D1Schedule> = merge ? { ...prevState.ncaaSchedules } : {}
           let droppedAwayGames = merge ? prevState.ncaaDroppedAwayGames : 0
 
+          // Collect unresolved away games for async geocoding
+          const unresolvedAway: Array<{ school: string; game: D1Schedule['games'][number]; playerNames: string[] }> = []
+
           for (const [school, schedule] of schedules) {
             schedulesObj[school] = schedule
             const playerNames = schoolToPlayers.get(school) ?? []
@@ -845,12 +857,13 @@ export const useScheduleStore = create<ScheduleState>()(
               if (game.isHome && homeVenue) {
                 venue = { name: homeVenue.venueName, coords: homeVenue.coords }
               } else if (!game.isHome) {
-                // Away game: try to resolve opponent venue
+                // Away game: try sync resolution first (fast)
                 const oppVenue = resolveOpponentVenue(game.opponent, game.opponentSlug)
                 if (oppVenue) {
                   venue = oppVenue
                 } else {
-                  droppedAwayGames++
+                  // Queue for async geocoding
+                  unresolvedAway.push({ school, game, playerNames })
                   continue
                 }
               } else {
@@ -873,6 +886,50 @@ export const useScheduleStore = create<ScheduleState>()(
                   ? 'Confirmed home game from D1Baseball'
                   : `Away game at ${game.opponent}`,
                 sourceUrl: `https://d1baseball.com/team/${schedule.slug}/schedule/`,
+              })
+            }
+          }
+
+          // Phase 2: Async geocoding for unresolved away games
+          // Process in batches with rate limiting (Nominatim: 1 req/sec)
+          if (unresolvedAway.length > 0) {
+            let geocoded = 0
+            for (const { school, game, playerNames } of unresolvedAway) {
+              const oppVenue = await resolveOpponentVenueAsync(
+                game.opponent, game.opponentSlug,
+                game.venueName, game.venueCity,
+              )
+              if (oppVenue) {
+                const d = new Date(game.date + 'T12:00:00Z')
+                const schedule = schedulesObj[school]!
+                newGames.push({
+                  id: `ncaa-d1-${school.toLowerCase().replace(/\s+/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
+                  date: game.date,
+                  dayOfWeek: d.getUTCDay(),
+                  time: game.date + 'T14:00:00Z',
+                  homeTeam: game.opponent,
+                  awayTeam: school,
+                  isHome: false,
+                  venue: oppVenue,
+                  source: 'ncaa-lookup',
+                  playerNames,
+                  confidence: 'medium',
+                  confidenceNote: `Away game at ${game.opponent} (venue geocoded)`,
+                  sourceUrl: `https://d1baseball.com/team/${schedule.slug}/schedule/`,
+                })
+                geocoded++
+              } else {
+                droppedAwayGames++
+              }
+              // Rate limit for Nominatim
+              await new Promise(r => setTimeout(r, 1200))
+            }
+            if (geocoded > 0) {
+              const diag = useDiagnosticsStore.getState()
+              diag.addIssue({
+                level: 'info',
+                source: 'ncaa',
+                message: `${geocoded} NCAA away game venue(s) discovered via geocoding`,
               })
             }
           }
@@ -976,13 +1033,18 @@ export const useScheduleStore = create<ScheduleState>()(
 
             // Look up home venue coords from venueStore (key format: hs-{org}|{city, state})
             let homeVenue: { name: string; coords: { lat: number; lng: number } } | null = null
+            const [schoolOrg] = schoolKey.split('|')
+            const normalizedSchoolOrg = (schoolOrg ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
             for (const [vKey, v] of Object.entries(venueState)) {
               if (v.source === 'hs-geocoded') {
                 const venueSchoolKey = vKey.replace(/^hs-/, '')
                 // Match on org name portion (venueStore key: "OrgName|City, State")
                 const [venueOrg] = venueSchoolKey.split('|')
-                const [schoolOrg] = schoolKey.split('|')
-                if (venueOrg?.toLowerCase() === schoolOrg?.toLowerCase()) {
+                const normalizedVenueOrg = (venueOrg ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+                // Exact match or fuzzy: one name contains the other (handles "Hebron" vs "Hebron High School")
+                if (normalizedVenueOrg === normalizedSchoolOrg ||
+                    normalizedVenueOrg.includes(normalizedSchoolOrg) ||
+                    normalizedSchoolOrg.includes(normalizedVenueOrg)) {
                   homeVenue = { name: v.name, coords: v.coords }
                   break
                 }
@@ -1000,11 +1062,13 @@ export const useScheduleStore = create<ScheduleState>()(
               })
 
               // Fallback: try matching by full key (org|state) or any venue with the school org name
-              const schoolOrg = schoolKey.split('|')[0]?.toLowerCase() ?? ''
               for (const [vKey, v] of Object.entries(venueState)) {
-                if (v.source === 'hs-geocoded' && vKey.replace(/^hs-/, '').toLowerCase().includes(schoolOrg)) {
-                  homeVenue = { name: v.name, coords: v.coords }
-                  break
+                if (v.source === 'hs-geocoded') {
+                  const normalizedVKey = vKey.replace(/^hs-/, '').toLowerCase().replace(/[^a-z0-9|]/g, '')
+                  if (normalizedVKey.includes(normalizedSchoolOrg)) {
+                    homeVenue = { name: v.name, coords: v.coords }
+                    break
+                  }
                 }
               }
               if (!homeVenue) {
@@ -1012,28 +1076,76 @@ export const useScheduleStore = create<ScheduleState>()(
               }
             }
 
-            for (const game of schedule.games) {
-              // v1: home games only
-              if (!game.isHome) continue
+            // Collect away games for async geocoding
+            const hsAwayGames: Array<{ game: typeof schedule.games[number]; schoolOrg: string }> = []
 
+            for (const game of schedule.games) {
               const d = new Date(game.date + 'T12:00:00Z')
               const [schoolOrg] = schoolKey.split('|')
 
-              newGames.push({
-                id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
-                date: game.date,
-                dayOfWeek: d.getUTCDay(),
-                time: game.time ?? game.date + 'T16:00:00Z',
-                homeTeam: schedule.teamName || schoolOrg || schoolKey,
-                awayTeam: game.opponent,
-                isHome: true,
-                venue: homeVenue,
-                source: 'hs-lookup',
-                playerNames,
-                confidence: 'high',
-                confidenceNote: 'Confirmed home game from MaxPreps',
-                sourceUrl: `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/`,
-              })
+              if (game.isHome) {
+                newGames.push({
+                  id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
+                  date: game.date,
+                  dayOfWeek: d.getUTCDay(),
+                  time: game.time ?? game.date + 'T16:00:00Z',
+                  homeTeam: schedule.teamName || schoolOrg || schoolKey,
+                  awayTeam: game.opponent,
+                  isHome: true,
+                  venue: homeVenue,
+                  source: 'hs-lookup',
+                  playerNames,
+                  confidence: 'high',
+                  confidenceNote: 'Confirmed home game from MaxPreps',
+                  sourceUrl: `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/`,
+                })
+              } else {
+                // Queue away game for geocoding
+                hsAwayGames.push({ game, schoolOrg: schoolOrg || schoolKey })
+              }
+            }
+
+            // Geocode away game venues
+            for (const { game, schoolOrg } of hsAwayGames) {
+              try {
+                const params = new URLSearchParams({
+                  q: `${game.opponent} high school baseball field`,
+                  format: 'json',
+                  limit: '1',
+                  countrycodes: 'us',
+                })
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+                  headers: { 'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures internal tool)' },
+                })
+                if (res.ok) {
+                  const results = await res.json()
+                  if (results.length > 0) {
+                    const coords = { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) }
+                    if (coords.lat >= 24.5 && coords.lat <= 49.5 && coords.lng >= -125.0 && coords.lng <= -66.5) {
+                      const d = new Date(game.date + 'T12:00:00Z')
+                      newGames.push({
+                        id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-away-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
+                        date: game.date,
+                        dayOfWeek: d.getUTCDay(),
+                        time: game.time ?? game.date + 'T16:00:00Z',
+                        homeTeam: game.opponent,
+                        awayTeam: schedule.teamName || schoolOrg,
+                        isHome: false,
+                        venue: { name: `${game.opponent} Field`, coords },
+                        source: 'hs-lookup',
+                        playerNames,
+                        confidence: 'medium',
+                        confidenceNote: `Away game at ${game.opponent} (venue geocoded)`,
+                        sourceUrl: `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/`,
+                      })
+                    }
+                  }
+                }
+              } catch {
+                // Skip if geocoding fails
+              }
+              // Rate limit for Nominatim
+              await new Promise(r => setTimeout(r, 1200))
             }
           }
 

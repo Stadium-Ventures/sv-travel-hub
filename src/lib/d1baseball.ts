@@ -13,6 +13,14 @@ export interface CorsProxy {
 
 export const CORS_PROXIES: CorsProxy[] = [
   {
+    // Own Vercel serverless proxy — most reliable, no third-party dependency
+    url: '/api/cors-proxy?url=',
+    extract: async (res) => {
+      const data = await res.json()
+      return data.contents as string
+    },
+  },
+  {
     url: 'https://api.allorigins.win/get?url=',
     extract: async (res) => {
       const data = await res.json()
@@ -306,5 +314,103 @@ export function resolveOpponentVenue(
     return { name: v.venueName, coords: v.coords }
   }
 
+  // Check dynamically discovered venue cache
+  const cached = getDiscoveredVenueCache()[opponentName.toLowerCase().trim()]
+  if (cached) {
+    return { name: cached.name, coords: cached.coords }
+  }
+
   return null
+}
+
+// --- Dynamic venue discovery for unknown NCAA opponents ---
+const VENUE_CACHE_KEY = 'sv-travel-ncaa-venue-cache'
+
+interface CachedVenue { name: string; coords: Coordinates }
+
+function getDiscoveredVenueCache(): Record<string, CachedVenue> {
+  try {
+    const raw = localStorage.getItem(VENUE_CACHE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveDiscoveredVenue(opponentName: string, venue: CachedVenue) {
+  try {
+    const cache = getDiscoveredVenueCache()
+    cache[opponentName.toLowerCase().trim()] = venue
+    localStorage.setItem(VENUE_CACHE_KEY, JSON.stringify(cache))
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
+// Geocode a venue using Nominatim based on venue name/city from D1Baseball
+async function geocodeNcaaVenue(
+  venueName: string,
+  venueCity: string,
+  opponentName: string,
+): Promise<{ name: string; coords: Coordinates } | null> {
+  // Check cache first
+  const cached = getDiscoveredVenueCache()[opponentName.toLowerCase().trim()]
+  if (cached) return cached
+
+  const queries: string[] = []
+  if (venueName && venueCity) {
+    queries.push(`${venueName}, ${venueCity}`)
+  }
+  if (opponentName) {
+    queries.push(`${opponentName} baseball field`)
+    queries.push(`${opponentName} university baseball`)
+  }
+
+  for (const q of queries) {
+    try {
+      const params = new URLSearchParams({
+        q,
+        format: 'json',
+        limit: '1',
+        countrycodes: 'us',
+      })
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+        headers: { 'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures internal tool)' },
+      })
+      if (res.status === 429) continue
+      if (!res.ok) continue
+      const results = await res.json()
+      if (results.length > 0) {
+        const coords: Coordinates = {
+          lat: parseFloat(results[0].lat),
+          lng: parseFloat(results[0].lon),
+        }
+        // Validate continental US
+        if (coords.lat >= 24.5 && coords.lat <= 49.5 && coords.lng >= -125.0 && coords.lng <= -66.5) {
+          const venue = { name: venueName || `${opponentName} Field`, coords }
+          saveDiscoveredVenue(opponentName, venue)
+          return venue
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return null
+}
+
+// Async version of resolveOpponentVenue that attempts geocoding for unknown opponents
+export async function resolveOpponentVenueAsync(
+  opponentName: string,
+  opponentSlug: string,
+  venueName: string,
+  venueCity: string,
+): Promise<{ name: string; coords: Coordinates } | null> {
+  // Try sync resolution first (fast path)
+  const syncResult = resolveOpponentVenue(opponentName, opponentSlug)
+  if (syncResult) return syncResult
+
+  // Try geocoding using D1Baseball venue data
+  return geocodeNcaaVenue(venueName, venueCity, opponentName)
 }
