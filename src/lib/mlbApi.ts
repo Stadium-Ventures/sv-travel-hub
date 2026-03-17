@@ -206,7 +206,7 @@ export async function fetchAllSchedules(
   onProgress?: (completed: number, total: number) => void,
 ): Promise<Map<number, MLBGameRaw[]>> {
   const schedules = new Map<number, MLBGameRaw[]>()
-  const concurrency = 5
+  const concurrency = 2
   let completed = 0
 
   for (let i = 0; i < teams.length; i += concurrency) {
@@ -227,6 +227,10 @@ export async function fetchAllSchedules(
     }
     completed += batch.length
     onProgress?.(completed, teams.length)
+    // Yield to browser event loop between batches
+    if (i + concurrency < teams.length) {
+      await new Promise((r) => setTimeout(r, 0))
+    }
   }
 
   return schedules

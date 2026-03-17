@@ -266,8 +266,8 @@ export async function fetchAllD1Schedules(
   const schedules = new Map<string, D1Schedule>()
   const failedSchools: string[] = []
 
-  // Fetch 3 at a time — CORS proxy latency (~1-3s) provides natural rate limiting
-  const concurrency = 3
+  // Fetch 2 at a time — reduced to prevent Page Unresponsive
+  const concurrency = 2
   for (let i = 0; i < unique.length; i += concurrency) {
     const batch = unique.slice(i, i + concurrency)
     const results = await Promise.all(batch.map((name) => fetchD1Schedule(name)))

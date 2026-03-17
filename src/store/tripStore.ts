@@ -97,32 +97,40 @@ export const useTripStore = create<TripState>()(
     // Auto-fetch pro schedules if any Pro players exist but pro games haven't been loaded
     const hasProPlayers = players.some((p) => p.level === 'Pro' && p.visitsRemaining > 0)
     if (hasProPlayers && scheduleState.proGames.length === 0 && !scheduleState.schedulesLoading) {
-      // Auto-assign first if no assignments exist
-      if (Object.keys(scheduleState.playerTeamAssignments).length === 0) {
-        set({ computing: true, tripPlan: null, progressStep: 'Auto-assigning players to teams...', progressDetail: '' })
-        await useScheduleStore.getState().autoAssignPlayers()
-        scheduleState = useScheduleStore.getState()
-      }
-      // Fetch pro schedules if assignments now exist
-      if (Object.keys(scheduleState.playerTeamAssignments).length > 0) {
-        set({ computing: true, tripPlan: null, progressStep: 'Loading Pro schedules...', progressDetail: '' })
-        const y = new Date().getFullYear()
-        await useScheduleStore.getState().fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
-        scheduleState = useScheduleStore.getState()
+      try {
+        // Auto-assign first if no assignments exist
+        if (Object.keys(scheduleState.playerTeamAssignments).length === 0) {
+          set({ computing: true, tripPlan: null, progressStep: 'Auto-assigning players to teams...', progressDetail: '' })
+          await useScheduleStore.getState().autoAssignPlayers()
+          scheduleState = useScheduleStore.getState()
+        }
+        // Fetch pro schedules if assignments now exist
+        if (Object.keys(scheduleState.playerTeamAssignments).length > 0) {
+          set({ computing: true, tripPlan: null, progressStep: 'Loading Pro schedules...', progressDetail: '' })
+          const y = new Date().getFullYear()
+          await useScheduleStore.getState().fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+          scheduleState = useScheduleStore.getState()
+        }
+      } catch (e) {
+        console.warn('Pro schedule loading failed, continuing with available data:', e)
       }
     }
 
     // Auto-fetch NCAA schedules — T1/T2 + priority players only (faster first load)
     const hasNcaaPlayers = players.some((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
     if (hasNcaaPlayers && scheduleState.ncaaGames.length === 0 && !scheduleState.ncaaLoading) {
-      const prioritySet = new Set(priorityPlayers)
-      const ncaaPlayerOrgs = players
-        .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0 && (p.tier <= 2 || prioritySet.has(p.playerName)))
-        .map((p) => ({ playerName: p.playerName, org: p.org }))
-      if (ncaaPlayerOrgs.length > 0) {
-        set({ computing: true, tripPlan: null, progressStep: 'Loading College schedules...', progressDetail: `${ncaaPlayerOrgs.length} schools (T1 & T2)` })
-        await useScheduleStore.getState().fetchNcaaSchedules(ncaaPlayerOrgs, { merge: true })
-        scheduleState = useScheduleStore.getState()
+      try {
+        const prioritySet2 = new Set(priorityPlayers)
+        const ncaaPlayerOrgs = players
+          .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0 && (p.tier <= 2 || prioritySet2.has(p.playerName)))
+          .map((p) => ({ playerName: p.playerName, org: p.org }))
+        if (ncaaPlayerOrgs.length > 0) {
+          set({ computing: true, tripPlan: null, progressStep: 'Loading College schedules...', progressDetail: `${ncaaPlayerOrgs.length} schools (T1 & T2)` })
+          await useScheduleStore.getState().fetchNcaaSchedules(ncaaPlayerOrgs, { merge: true })
+          scheduleState = useScheduleStore.getState()
+        }
+      } catch (e) {
+        console.warn('NCAA schedule loading failed, continuing with available data:', e)
       }
     }
 
