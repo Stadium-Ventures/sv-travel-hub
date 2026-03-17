@@ -158,47 +158,6 @@ function getProgressNote(step: string): string {
   return 'First run loads all schedule data. Subsequent runs are much faster.'
 }
 
-// Data status badges — read-only indicators of what's loaded
-function DataStatusBadges({ proGames, ncaaGames, hsGames, proStale, ncaaStale, hsStale, hasHsPlayers }: {
-  proGames: any[]; ncaaGames: any[]; hsGames: any[]
-  proStale: boolean | number | null; ncaaStale: boolean | number | null; hsStale: boolean | number | null
-  hasHsPlayers: boolean
-}) {
-  return (
-    <div className="flex flex-wrap gap-2 text-[11px]">
-      <span className={`rounded px-2 py-0.5 ${
-        proGames.length > 0
-          ? proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
-          : 'bg-gray-800 text-text-dim/60'
-      }`}>
-        Pro: {proGames.length > 0
-          ? `${proGames.length} games${proStale ? ' (stale)' : ''}`
-          : 'will auto-load'}
-      </span>
-      <span className={`rounded px-2 py-0.5 ${
-        ncaaGames.length > 0
-          ? ncaaStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
-          : 'bg-gray-800 text-text-dim/60'
-      }`}>
-        College: {ncaaGames.length > 0
-          ? `${ncaaGames.length} games${ncaaStale ? ' (stale)' : ''}`
-          : 'will auto-load'}
-      </span>
-      {hasHsPlayers && (
-        <span className={`rounded px-2 py-0.5 ${
-          hsGames.length > 0
-            ? hsStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
-            : 'bg-gray-800 text-text-dim/60'
-        }`}>
-          HS: {hsGames.length > 0
-            ? `${hsGames.length} games${hsStale ? ' (stale)' : ''}`
-            : 'will auto-load'}
-        </span>
-      )}
-    </div>
-  )
-}
-
 export default function TripPlanner() {
   const startDate = useTripStore((s) => s.startDate)
   const endDate = useTripStore((s) => s.endDate)
@@ -218,9 +177,10 @@ export default function TripPlanner() {
   const proGames = useScheduleStore((s) => s.proGames)
   const ncaaGames = useScheduleStore((s) => s.ncaaGames)
   const hsGames = useScheduleStore((s) => s.hsGames)
-  const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
-  const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
-  const hsFetchedAt = useScheduleStore((s) => s.hsFetchedAt)
+  const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
+  const ncaaLoading = useScheduleStore((s) => s.ncaaLoading)
+  const hsLoading = useScheduleStore((s) => s.hsLoading)
+  const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
   const players = useRosterStore((s) => s.players)
   const rosterLoading = useRosterStore((s) => s.loading)
   const rosterError = useRosterStore((s) => s.error)
@@ -263,10 +223,6 @@ export default function TripPlanner() {
 
   const canGenerate = players.length > 0 && !computing
 
-  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000
-  const proStale = proFetchedAt && proGames.length > 0 && (Date.now() - proFetchedAt > TWENTY_FOUR_HOURS)
-  const ncaaStale = ncaaFetchedAt && ncaaGames.length > 0 && (Date.now() - ncaaFetchedAt > TWENTY_FOUR_HOURS)
-  const hsStale = hsFetchedAt && hsGames.length > 0 && (Date.now() - hsFetchedAt > TWENTY_FOUR_HOURS)
 
   function handlePriorityChange(slot: 0 | 1 | 2, value: string) {
     const next = [...priorityPlayers]
@@ -390,7 +346,7 @@ export default function TripPlanner() {
       <div className="rounded-xl border border-border bg-surface p-5">
         <h2 className="mb-3 text-base font-semibold text-text">Trip Planner</h2>
         <p className="mb-2 text-xs text-text-dim">
-          Set your dates and hit Generate — the app will auto-load all schedule data and build optimized road trips from Orlando.
+          Load schedules below, then hit Generate to build optimized road trips from Orlando.
         </p>
         <details className="mb-4">
           <summary className="cursor-pointer text-[11px] text-text-dim/60 hover:text-text-dim">How scoring works</summary>
@@ -405,13 +361,72 @@ export default function TripPlanner() {
           </ul>
         </details>
 
-        {/* Data status badges */}
-        <div className="mb-4">
-          <DataStatusBadges
-            proGames={proGames} ncaaGames={ncaaGames} hsGames={hsGames}
-            proStale={proStale} ncaaStale={ncaaStale} hsStale={hsStale}
-            hasHsPlayers={hasHsPlayers}
-          />
+        {/* Schedule load buttons */}
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button
+            onClick={async () => {
+              const store = useScheduleStore.getState()
+              if (Object.keys(store.playerTeamAssignments).length === 0) {
+                await store.autoAssignPlayers()
+              }
+              if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length > 0) {
+                const y = new Date().getFullYear()
+                await store.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+              }
+            }}
+            disabled={schedulesLoading || autoAssignLoading}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              proGames.length > 0
+                ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
+                : 'bg-accent-blue text-white hover:bg-accent-blue/80'
+            } disabled:opacity-50`}
+          >
+            {schedulesLoading ? 'Loading Pro...' : proGames.length > 0 ? `Pro: ${proGames.length} games ✓` : 'Load Pro Schedules'}
+          </button>
+          <button
+            onClick={async () => {
+              const ncaaOrgs = players
+                .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+                .map((p) => ({ playerName: p.playerName, org: p.org }))
+              if (ncaaOrgs.length > 0) {
+                await useScheduleStore.getState().fetchNcaaSchedules(ncaaOrgs, { merge: true })
+              }
+            }}
+            disabled={ncaaLoading}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              ncaaGames.length > 0
+                ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
+                : 'bg-accent-green text-white hover:bg-accent-green/80'
+            } disabled:opacity-50`}
+          >
+            {ncaaLoading ? 'Loading College...' : ncaaGames.length > 0 ? `College: ${ncaaGames.length} games ✓` : 'Load College Schedules'}
+          </button>
+          {hasHsPlayers && (
+            <button
+              onClick={async () => {
+                const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+                const { useVenueStore } = await import('../../store/venueStore')
+                const venueCount = Object.values(useVenueStore.getState().venues).filter((v: any) => v.source === 'hs-geocoded').length
+                if (venueCount === 0) {
+                  await useVenueStore.getState().geocodeHsVenues(
+                    hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
+                  )
+                }
+                const hsOrgs = hsPlayers.map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
+                if (hsOrgs.length > 0) {
+                  await useScheduleStore.getState().fetchHsSchedules(hsOrgs, { merge: true })
+                }
+              }}
+              disabled={hsLoading}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                hsGames.length > 0
+                  ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
+                  : 'bg-accent-orange text-white hover:bg-accent-orange/80'
+              } disabled:opacity-50`}
+            >
+              {hsLoading ? 'Loading HS...' : hsGames.length > 0 ? `HS: ${hsGames.length} games ✓` : 'Load HS Schedules'}
+            </button>
+          )}
         </div>
 
         {/* Roster load error */}
