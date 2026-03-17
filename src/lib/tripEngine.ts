@@ -1182,13 +1182,13 @@ export async function generateTrips(
         if (!hasAssignment) {
           return { name, reason: 'Not assigned to a team — click Verify Assignments on the Roster tab' }
         }
-        return { name, reason: 'Assigned but no games loaded — team may not have started playing yet' }
+        return { name, reason: 'Schedule not published yet by MLB — MiLB schedules typically appear closer to season start' }
       }
       // For NCAA/HS: check if it's a tier issue (T3/T4 not auto-loaded)
       if (player.tier >= 3) {
         return { name, reason: 'T3 schedule not loaded — click "Load all schedules" above' }
       }
-      return { name, reason: 'No schedule data found — school may not be in our database' }
+      return { name, reason: 'School not matched — check Roster tab for unknown team names that need mapping' }
     }
 
     // Check if all games have zero coords (venue couldn't be geocoded)
