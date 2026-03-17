@@ -113,25 +113,25 @@ function buildLookups(players: HeartbeatPlayer[], priorities: HeartbeatPriority[
 
 // Apply visit counts from Heartbeat as overrides to the roster store
 // Uses calendarYear as visitsCompleted for the current year
+// Deferred to avoid calling before roster is loaded
 function _applyVisitCountsToRoster(visitCounts: Record<string, VisitCount>) {
-  // Lazy import to avoid circular dependency
-  const { useRosterStore } = require('./rosterStore')
-  const rosterState = useRosterStore.getState()
-  const players = rosterState.players
-  if (players.length === 0) return
+  // Defer to next tick so roster store is fully initialized
+  setTimeout(() => {
+    import('./rosterStore').then(({ useRosterStore }) => {
+      const rosterState = useRosterStore.getState()
+      const players = rosterState.players
+      if (players.length === 0) return
 
-  for (const vc of Object.values(visitCounts)) {
-    const player = players.find((p: any) => normalizeName(p.playerName) === normalizeName(vc.name))
-    if (!player) continue
-    // Only apply if heartbeat has data and it differs from current
-    if (vc.calendarYear > 0 || vc.lastVisitDate) {
-      const currentOverride = rosterState.visitOverrides[player.playerName]
-      const heartbeatDate = vc.lastVisitDate ? vc.lastVisitDate.split('T')[0] ?? null : null
-      // Skip if manual override already has more visits (user logged a visit locally)
-      if (currentOverride && currentOverride.visitsCompleted > vc.calendarYear) continue
-      rosterState.setVisitOverride(player.playerName, vc.calendarYear, heartbeatDate)
-    }
-  }
+      for (const vc of Object.values(visitCounts)) {
+        const player = players.find((p) => normalizeName(p.playerName) === normalizeName(vc.name))
+        if (!player) continue
+        if (vc.calendarYear > 0 || vc.lastVisitDate) {
+          const heartbeatDate = vc.lastVisitDate ? vc.lastVisitDate.split('T')[0] ?? null : null
+          rosterState.setVisitOverride(player.playerName, vc.calendarYear, heartbeatDate)
+        }
+      }
+    })
+  }, 100)
 }
 
 export const useHeartbeatStore = create<HeartbeatState>()(

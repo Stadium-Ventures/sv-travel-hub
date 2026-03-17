@@ -3,6 +3,7 @@ import { useRosterStore } from '../../store/rosterStore'
 import type { SortField } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import type { AssignmentChange } from '../../store/scheduleStore'
+import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '../../data/aliases'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
@@ -37,12 +38,18 @@ export default function RosterDashboard() {
   const [levelFilter, setLevelFilter] = useState<PlayerLevel | 'All'>('All')
   const [search, setSearch] = useState('')
 
+  const fetchHeartbeat = useHeartbeatStore((s) => s.fetchHeartbeat)
+  const heartbeatLastFetched = useHeartbeatStore((s) => s.lastFetchedAt)
+
   const initialized = useRef(false)
   useEffect(() => {
     if (initialized.current) return
     initialized.current = true
     fetchRoster()
-  }, [fetchRoster])
+    // Auto-fetch heartbeat if not loaded or stale (>1 hour)
+    const stale = !heartbeatLastFetched || (Date.now() - new Date(heartbeatLastFetched).getTime() > 3600000)
+    if (stale) fetchHeartbeat()
+  }, [fetchRoster, fetchHeartbeat, heartbeatLastFetched])
 
   const stats = useMemo(() => {
     const total = players.length

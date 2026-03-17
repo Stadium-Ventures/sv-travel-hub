@@ -681,10 +681,7 @@ export default function TripPlanner() {
                             <span className="text-text-dim">{bestFlyIn.distanceKm} mi</span>
                           </div>
                           <div className="mt-1 text-[11px] text-text-dim">
-                            {bestFlyIn.dates.slice(0, 5).map((d) => {
-                              const dt = new Date(d + 'T12:00:00Z')
-                              return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()]} ${dt.getUTCDate()}`
-                            }).join(', ')}
+                            {bestFlyIn.dates.slice(0, 5).map((d) => formatDate(d)).join(', ')}
                             {bestFlyIn.dates.length > 5 && ` +${bestFlyIn.dates.length - 5} more`}
                           </div>
                           {bestFlyIn.sourceUrl && (
@@ -938,8 +935,7 @@ export default function TripPlanner() {
                       <p className="mb-2 text-xs text-text-dim">
                         <span className="font-medium text-accent-orange">Trips #{o.idxA} and #{o.idxB}</span> overlap on{' '}
                         {o.dates.map((d) => {
-                          const dt = new Date(d + 'T12:00:00Z')
-                          return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()]} ${dt.getUTCDate()}`
+                          return formatDate(d)
                         }).join(', ')}
                       </p>
                       <div className="grid grid-cols-3 gap-2 text-[11px]">
