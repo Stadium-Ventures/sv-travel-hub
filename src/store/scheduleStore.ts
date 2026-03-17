@@ -421,14 +421,35 @@ export const useScheduleStore = create<ScheduleState>()(
               }
             }
 
+            // If player was on a complex league team and promotion logic didn't find them,
+            // assign to the org's lowest full-season affiliate (A→High-A→AA→AAA) instead of MLB
+            const wasOnComplexTeam = milbMatch && COMPLEX_LEAGUE_PATTERNS.test(milbMatch.teamName)
+            if (isSpringTraining && wasOnComplexTeam) {
+              const orgId = resolveMLBTeamId(player.org, customMlb)
+              if (orgId) {
+                // Try A (14), then High-A (13), then AA (12), then AAA (11)
+                const levelOrder = [14, 13, 12, 11]
+                let assigned = false
+                for (const sportId of levelOrder) {
+                  const affiliate = findAffiliateForSport(orgId, sportId)
+                  if (affiliate) {
+                    newAssignments[player.playerName] = affiliate
+                    assignedCount++
+                    assigned = true
+                    break
+                  }
+                }
+                if (assigned) continue
+              }
+            }
+
             // Fall back to MLB roster (40-man)
-            const mlbMatch = mlbPlayerIdToTeam.get(player.mlbPlayerId!)
-            if (mlbMatch) {
+            const mlbMatch2 = mlbPlayerIdToTeam.get(player.mlbPlayerId!)
+            if (mlbMatch2) {
               // On the 40-man roster — assign to MLB team directly.
-              // During spring training this is the right call for established MLB players.
-              // MiLB prospects who are on the 40-man will get corrected once
-              // regular season rosters publish.
-              newAssignments[player.playerName] = mlbMatch
+              // During spring training this is the right call for established MLB players
+              // who weren't found on any complex league team.
+              newAssignments[player.playerName] = mlbMatch2
               assignedCount++
             } else {
               remainingPlayers.push(player)
