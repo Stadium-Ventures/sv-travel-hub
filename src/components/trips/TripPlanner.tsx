@@ -241,7 +241,7 @@ export default function TripPlanner() {
   const [copyAllError, setCopyAllError] = useState(false)
   const [calAllError, setCalAllError] = useState(false)
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
-  const flyInLimit = 10 // Hard cap on fly-in results
+  const flyInLimit = 5 // Hard cap on fly-in results
   const [showOverlaps, setShowOverlaps] = useState(false)
   const [loadingAllSchedules, setLoadingAllSchedules] = useState(false)
 
@@ -302,6 +302,12 @@ export default function TripPlanner() {
     const visibleVisits = sortedVisits.slice(0, flyInLimit)
     const totalCount = sortedVisits.length
 
+    // Priority players whose games are all within driving range (no fly-in needed)
+    const drivablePriorityNames = priorityPlayers.filter((n) => {
+      const result = tripPlan.priorityResults?.find((r) => r.playerName === n)
+      return result && (result.status === 'included' || result.status === 'separate-trip')
+    })
+
     return (
       <div id="section-fly-in">
         <div className="mb-3 flex items-center justify-between">
@@ -322,6 +328,11 @@ export default function TripPlanner() {
             </span>
           )}
         </div>
+        {drivablePriorityNames.length > 0 && (
+          <p className="mb-3 text-xs text-text-dim">
+            {drivablePriorityNames.join(', ')} {drivablePriorityNames.length === 1 ? 'has' : 'have'} all games within driving range — no fly-in needed. Fly-in options below are for other players on the roster.
+          </p>
+        )}
         <div className="space-y-4">
           {visibleVisits.map((visit, i) => (
             <FlyInCard

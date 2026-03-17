@@ -887,17 +887,20 @@ export async function generateTrips(
   // --- Greedy selection for remaining trips ---
   // Players can appear in multiple trips until their visit quota is met.
   // Capped at MAX_ROAD_TRIPS to avoid overwhelming results.
-  // When a priority player is set, ALL road trips must include them.
+  // When priority players are set, prefer trips that include at least one of them.
   const hasPriorityFilter = priorityPlayers.length > 0
+  const drivablePriority = new Set(
+    priorityPlayers.filter((n) => priorityResults.some((r) => r.playerName === n && (r.status === 'included' || r.status === 'separate-trip'))),
+  )
   const remainingCandidates = [...candidates]
     .filter((c) => {
-      if (!hasPriorityFilter) return true
-      // ALL priority players must be in every road trip
+      if (!hasPriorityFilter || drivablePriority.size === 0) return true
+      // At least one drivable priority player must be in the trip
       const tripPlayers = new Set([
         ...c.anchorGame.playerNames,
         ...c.nearbyGames.flatMap((g) => g.playerNames),
       ])
-      return priorityPlayers.every((n) => tripPlayers.has(n))
+      return [...drivablePriority].some((n) => tripPlayers.has(n))
     })
     .sort((a, b) => b.visitValue - a.visitValue)
 
