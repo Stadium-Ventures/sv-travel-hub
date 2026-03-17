@@ -374,9 +374,17 @@ export const useScheduleStore = create<ScheduleState>()(
           const PROMOTE_SPORT: Record<number, number> = { 14: 13, 13: 12, 12: 11, 11: 11 }
 
           // Find the affiliate team for a promoted sportId within the same org
+          // Skip complex league teams (ACL/FCL/Prospects/DSL) — they don't play regular schedules
+          const COMPLEX_LEAGUE_PATTERNS = /\b(ACL|FCL|DSL|Prospects|Complex)\b/i
           function findAffiliateForSport(orgId: number, targetSportId: number): { teamId: number; sportId: number; teamName: string } | null {
-            const match = allAffiliates.find((a) => a.parentOrgId === orgId && a.sportId === targetSportId)
-            return match ? { teamId: match.teamId, sportId: match.sportId, teamName: match.teamName } : null
+            // First try to find a non-complex-league team at this level
+            const match = allAffiliates.find((a) =>
+              a.parentOrgId === orgId && a.sportId === targetSportId && !COMPLEX_LEAGUE_PATTERNS.test(a.teamName)
+            )
+            if (match) return { teamId: match.teamId, sportId: match.sportId, teamName: match.teamName }
+            // Fall back to any team at this level
+            const fallback = allAffiliates.find((a) => a.parentOrgId === orgId && a.sportId === targetSportId)
+            return fallback ? { teamId: fallback.teamId, sportId: fallback.sportId, teamName: fallback.teamName } : null
           }
 
           // Assign players: prefer MiLB roster (where they're actually playing)

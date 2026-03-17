@@ -1334,12 +1334,11 @@ function FlyInCard({
               const bestDay = visit.dates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === 2) ?? visit.dates[0]
               if (!bestDay) return null
               const bestDate = new Date(bestDay + 'T12:00:00Z')
-              const bestDayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][bestDate.getUTCDay()]
               const isTue = bestDate.getUTCDay() === 2
               return (
                 <p className="text-sm text-text">
                   <span className={`font-medium ${isTue ? 'text-accent-blue' : ''}`}>
-                    Best day: {bestDayName} {formatDate(bestDay)}
+                    Best day: {formatDate(bestDay)}
                     {isTue ? ' (Tuesday — ideal for position players)' : ''}
                   </span>
                   {visit.dates.length > 1 && (
