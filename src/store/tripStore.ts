@@ -94,7 +94,7 @@ export const useTripStore = create<TripState>()(
     const players = useRosterStore.getState().players
     let scheduleState = useScheduleStore.getState()
 
-    set({ computing: true, tripPlan: null, progressStep: 'Starting...', progressDetail: '' })
+    set({ computing: true, tripPlan: null, progressStep: 'Preparing...', progressDetail: '' })
 
     // BLOCK: Refuse to generate if priority player schedule data is missing
     if (priorityPlayers.length > 0) {
@@ -191,7 +191,10 @@ export const useTripStore = create<TripState>()(
       }
     }
 
-    set({ computing: true, tripPlan: null, progressStep: 'Starting...', progressDetail: '' })
+    set({ computing: true, tripPlan: null, progressStep: 'Analyzing games...', progressDetail: `${allGames.length} games in date range` })
+
+    // Yield to browser so React can paint the progress bar before heavy computation starts
+    await new Promise((r) => setTimeout(r, 50))
 
     try {
       const plan = await generateTrips(
