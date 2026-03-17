@@ -94,6 +94,8 @@ export const useTripStore = create<TripState>()(
     const players = useRosterStore.getState().players
     let scheduleState = useScheduleStore.getState()
 
+    set({ computing: true, tripPlan: null, progressStep: 'Starting...', progressDetail: '' })
+
     // BLOCK: Refuse to generate if priority player schedule data is missing
     if (priorityPlayers.length > 0) {
       const missingSchedule: string[] = []
@@ -101,10 +103,10 @@ export const useTripStore = create<TripState>()(
         const player = players.find((p) => p.playerName === pName)
         if (!player) continue
         if (player.level === 'Pro' && scheduleState.proGames.length === 0) {
-          missingSchedule.push(`${pName} (Pro) — schedule data failed to load automatically.`)
+          missingSchedule.push(`${pName} (Pro) — click "Load Pro Schedules" first`)
         }
         if (player.level === 'NCAA' && scheduleState.ncaaGames.length === 0) {
-          missingSchedule.push(`${pName} (NCAA) — college schedule data failed to load automatically.`)
+          missingSchedule.push(`${pName} (NCAA) — click "Load College Schedules" first`)
         }
       }
       if (missingSchedule.length > 0) {
