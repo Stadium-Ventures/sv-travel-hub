@@ -31,7 +31,11 @@ interface PlayerCardProps {
 export default function PlayerCard({ player, showAffiliate, affiliate, affiliateOptions, onAssignAffiliate }: PlayerCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [editingAffiliate, setEditingAffiliate] = useState(false)
-  const heartbeatData = useHeartbeatStore((s) => s.getPlayerData(player.playerName))
+  const heartbeatPlayers = useHeartbeatStore((s) => s.players)
+  const heartbeatData = useMemo(() => {
+    const normalized = player.playerName.trim().toLowerCase()
+    return heartbeatPlayers.find((p) => p.name.trim().toLowerCase() === normalized)
+  }, [heartbeatPlayers, player.playerName])
   const loveScore = heartbeatData?.loveScore ?? null
   const daysSinceVisit = heartbeatData?.daysSinceInPerson ?? null
 
