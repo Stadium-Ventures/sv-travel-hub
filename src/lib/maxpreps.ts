@@ -245,8 +245,9 @@ export async function fetchAllMaxPrepsSchedules(
   const schedules = new Map<string, MaxPrepsSchedule>()
   const failedSchools: string[] = []
 
-  // Fetch 3 at a time — same pattern as D1Baseball
-  const concurrency = 3
+  // Fetch 1 at a time — MaxPreps responses are large HTML, fetching
+  // multiple in parallel can cause "Page Unresponsive" in the browser
+  const concurrency = 1
   for (let i = 0; i < unique.length; i += concurrency) {
     const batch = unique.slice(i, i + concurrency)
     const results = await Promise.all(batch.map((key) => fetchMaxPrepsSchedule(key)))

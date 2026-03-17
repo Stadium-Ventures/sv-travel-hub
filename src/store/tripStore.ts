@@ -133,17 +133,22 @@ export const useTripStore = create<TripState>()(
       const venueState = useVenueStore.getState()
       const hsVenueCount = Object.values(venueState.venues).filter((v: any) => v.source === 'hs-geocoded').length
       const hsPlayerList = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0 && (p.tier <= 2 || prioritySet.has(p.playerName)))
-      if (hsVenueCount === 0 && hsPlayerList.length > 0) {
-        set({ computing: true, tripPlan: null, progressStep: 'Mapping HS school locations...', progressDetail: `${hsPlayerList.length} schools (T1 & T2)` })
-        await useVenueStore.getState().geocodeHsVenues(
-          hsPlayerList.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
-        )
-      }
-      if (scheduleState.hsGames.length === 0 && !scheduleState.hsLoading && hsPlayerList.length > 0) {
-        set({ computing: true, tripPlan: null, progressStep: 'Loading HS schedules...', progressDetail: `${hsPlayerList.length} schools (T1 & T2)` })
-        const hsPlayerOrgs = hsPlayerList.map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
-        await useScheduleStore.getState().fetchHsSchedules(hsPlayerOrgs, { merge: true })
-        scheduleState = useScheduleStore.getState()
+      try {
+        if (hsVenueCount === 0 && hsPlayerList.length > 0) {
+          set({ computing: true, tripPlan: null, progressStep: 'Mapping HS school locations...', progressDetail: `${hsPlayerList.length} schools (T1 & T2)` })
+          await useVenueStore.getState().geocodeHsVenues(
+            hsPlayerList.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
+          )
+        }
+        if (scheduleState.hsGames.length === 0 && !scheduleState.hsLoading && hsPlayerList.length > 0) {
+          set({ computing: true, tripPlan: null, progressStep: 'Loading HS schedules...', progressDetail: `${hsPlayerList.length} schools (T1 & T2)` })
+          const hsPlayerOrgs = hsPlayerList.map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
+          await useScheduleStore.getState().fetchHsSchedules(hsPlayerOrgs, { merge: true })
+          scheduleState = useScheduleStore.getState()
+        }
+      } catch (e) {
+        console.warn('HS schedule loading failed, continuing without HS data:', e)
+        // Don't block trip generation — HS players will use estimated schedules
       }
     }
 
