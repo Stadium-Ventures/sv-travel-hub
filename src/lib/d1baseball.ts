@@ -276,6 +276,10 @@ export async function fetchAllD1Schedules(
       else failedSchools.push(batch[j]!)
     }
     onProgress?.(Math.min(i + concurrency, unique.length), unique.length)
+    // Yield to browser event loop between batches to prevent "Page Unresponsive"
+    if (i + concurrency < unique.length) {
+      await new Promise((r) => setTimeout(r, 0))
+    }
   }
   return { schedules, failedSchools }
 }
