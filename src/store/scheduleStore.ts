@@ -395,9 +395,15 @@ export const useScheduleStore = create<ScheduleState>()(
             // Check current MiLB first — if found, they're playing at that level
             const milbMatch = milbPlayerIdToTeam.get(player.mlbPlayerId!)
             if (milbMatch) {
-              newAssignments[player.playerName] = milbMatch
-              assignedCount++
-              continue
+              // During spring training, skip complex league teams (ACL/FCL/Prospects)
+              // — the player is probably at a higher level and just listed there as a default
+              if (isSpringTraining && COMPLEX_LEAGUE_PATTERNS.test(milbMatch.teamName)) {
+                // Fall through to spring training promotion logic below
+              } else {
+                newAssignments[player.playerName] = milbMatch
+                assignedCount++
+                continue
+              }
             }
 
             // Spring training fallback: use last year's level, promote by 1

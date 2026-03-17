@@ -231,10 +231,6 @@ export const useHeartbeatStore = create<HeartbeatState>()(
           state.playerLookup = playerLookup
           state.urgencyLookup = urgencyLookup
           state.visitCountLookup = visitCountLookup
-          // Re-apply visit counts to roster on rehydration
-          if (state.visitCounts && Object.keys(state.visitCounts).length > 0) {
-            _applyVisitCountsToRoster(state.visitCounts)
-          }
         }
       },
     },
