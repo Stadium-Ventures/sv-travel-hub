@@ -1035,6 +1035,25 @@ export async function generateTrips(
     }
   }
 
+  // Enrich fly-ins: check if other SV players have games nearby (within 2h drive)
+  // during the same week — creates fly-in double-up opportunities
+  for (const [, entry] of flyInWeekMap) {
+    const entryDates = [...entry.dates]
+    for (const game of eligibleGames) {
+      if (game.venue.coords.lat === 0 && game.venue.coords.lng === 0) continue
+      // Must be in the same date range
+      if (!entryDates.some((d) => Math.abs(new Date(game.date).getTime() - new Date(d).getTime()) <= 2 * 86400000)) continue
+      // Must be a different player not already in this fly-in
+      const newPlayers = game.playerNames.filter((n) => playersForFlyIns.includes(n) && !entry.players.has(n))
+      if (newPlayers.length === 0) continue
+      // Must be within 2h drive of the fly-in venue
+      const driveMin = estimateDriveMinutes(entry.venue.coords, game.venue.coords)
+      if (driveMin > 120) continue
+      // Add the nearby players to this fly-in
+      for (const name of newPlayers) entry.players.add(name)
+    }
+  }
+
   // Convert to FlyInVisit array — each entry is one week at one venue
   for (const [, entry] of flyInWeekMap) {
     const sortedDates = [...entry.dates].sort()
@@ -1102,10 +1121,9 @@ export async function generateTrips(
     return b.visitValue - a.visitValue
   })
 
-  // When priority players are set, only keep fly-ins that include ALL of them
-  const finalDiverseFlyIns = hasPriorityFilter
-    ? diverseFlyIns.filter((v) => priorityPlayers.every((n) => v.playerNames.includes(n)))
-    : diverseFlyIns
+  // When priority players are set, prefer fly-ins that include them — but don't
+  // filter out all others (priority players may only appear in 1-2 fly-ins)
+  const finalDiverseFlyIns = diverseFlyIns
 
   // Replace flyInVisits with diverse set
   flyInVisits.length = 0
@@ -1162,11 +1180,15 @@ export async function generateTrips(
       if (player.level === 'Pro') {
         const hasAssignment = playerTeamAssignments && playerTeamAssignments[name]
         if (!hasAssignment) {
-          return { name, reason: 'Not assigned to a team — run Auto-assign Affiliates on the Roster tab' }
+          return { name, reason: 'Not assigned to a team — click Verify Assignments on the Roster tab' }
         }
-        return { name, reason: 'No games in date range — try including spring training dates (through March)' }
+        return { name, reason: 'Assigned but no games loaded — team may not have started playing yet' }
       }
-      return { name, reason: 'No games in date range' }
+      // For NCAA/HS: check if it's a tier issue (T3/T4 not auto-loaded)
+      if (player.tier >= 3) {
+        return { name, reason: 'T3 schedule not loaded — click "Load all schedules" above' }
+      }
+      return { name, reason: 'No schedule data found — school may not be in our database' }
     }
 
     // Check if all games have zero coords (venue couldn't be geocoded)
