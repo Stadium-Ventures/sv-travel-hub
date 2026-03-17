@@ -1155,8 +1155,8 @@ export async function generateTrips(
   flyInVisits.length = 0
   flyInVisits.push(...filteredFlyIns)
 
-  // Truly unreachable: no games at all in date range (not even fly-in)
-  const trulyUnreachableNames = playersForFlyIns.filter((n) => !flyInCovered.has(n))
+  // Truly unreachable: no games at all in date range (not even fly-in or road trip)
+  const trulyUnreachableNames = playersForFlyIns.filter((n) => !flyInCovered.has(n) && !visitedPlayers.has(n))
 
   // Compute reasons for each unreachable player
   const trulyUnreachable: UnvisitablePlayer[] = trulyUnreachableNames.map((name) => {
