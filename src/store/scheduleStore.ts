@@ -511,6 +511,13 @@ export const useScheduleStore = create<ScheduleState>()(
             assignmentLog: [...(get().assignmentLog ?? []), ...changeLog],
           })
 
+          // Re-process cached schedule data with new assignments
+          // so players appear on their correct team's games
+          const cachedSchedules = get().proSchedules
+          if (cachedSchedules && Object.keys(cachedSchedules).length > 0) {
+            get().regenerateProGames()
+          }
+
           // Diagnostics
           const diagAuto = useDiagnosticsStore.getState()
           if (notFoundNames.length > 0) {

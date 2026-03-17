@@ -1182,7 +1182,7 @@ export async function generateTrips(
         if (!hasAssignment) {
           return { name, reason: 'Not assigned to a team — click Verify Assignments on the Roster tab' }
         }
-        return { name, reason: 'Schedule not published yet by MLB — MiLB schedules typically appear closer to season start' }
+        return { name, reason: 'Assigned to team but no games loaded — try clicking Verify Assignments then re-generating' }
       }
       // For NCAA/HS: check if it's a tier issue (T3/T4 not auto-loaded)
       if (player.tier >= 3) {
