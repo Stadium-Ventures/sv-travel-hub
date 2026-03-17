@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { RosterPlayer } from '../../types/roster'
 import type { PlayerTeamAssignment } from '../../store/scheduleStore'
+import { useScheduleStore } from '../../store/scheduleStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { resolveMLBTeamId } from '../../data/aliases'
 
@@ -145,10 +146,74 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
               <Detail label="Mother" value={player.mother} />
             </div>
 
+            <ScheduleStatus playerName={player.playerName} level={player.level} affiliate={affiliate} />
           </td>
         </tr>
       )}
     </>
+  )
+}
+
+function ScheduleStatus({ playerName, level, affiliate }: {
+  playerName: string
+  level: string
+  affiliate?: PlayerTeamAssignment | null
+}) {
+  const proGames = useScheduleStore((s) => s.proGames)
+  const ncaaGames = useScheduleStore((s) => s.ncaaGames)
+  const hsGames = useScheduleStore((s) => s.hsGames)
+
+  const games = useMemo(() => {
+    const allGames = [...proGames, ...ncaaGames, ...hsGames]
+    return allGames.filter((g) => g.playerNames.includes(playerName))
+  }, [proGames, ncaaGames, hsGames, playerName])
+
+  const homeGames = games.filter((g) => g.isHome)
+  const awayGames = games.filter((g) => !g.isHome)
+  const highConfidence = games.filter((g) => g.confidence === 'high')
+  const estimated = games.filter((g) => g.confidence !== 'high')
+
+  const dateRange = games.length > 0
+    ? `${games[0]!.date} to ${games[games.length - 1]!.date}`
+    : null
+
+  // Source breakdown
+  const sources = new Set(games.map((g) => g.source))
+
+  return (
+    <div className="mt-3 rounded-lg border border-border/30 bg-gray-950/30 px-3 py-2">
+      <p className="text-xs font-medium text-text-dim mb-1.5">Schedule Data</p>
+      {level === 'Pro' && affiliate && (
+        <p className="text-[11px] text-text-dim mb-1">
+          Assigned: <span className="text-text font-medium">{affiliate.teamName}</span>
+          <span className="text-text-dim/50 ml-1">(teamId: {affiliate.teamId}, sportId: {affiliate.sportId})</span>
+        </p>
+      )}
+      {level === 'Pro' && !affiliate && (
+        <p className="text-[11px] text-accent-red mb-1">Not assigned to any team — click Verify Assignments</p>
+      )}
+      {games.length === 0 ? (
+        <p className="text-[11px] text-accent-red">No games loaded for this player</p>
+      ) : (
+        <div className="space-y-0.5 text-[11px]">
+          <p className="text-accent-green">
+            {games.length} games loaded ({homeGames.length} home, {awayGames.length} away)
+          </p>
+          {dateRange && <p className="text-text-dim">Range: {dateRange}</p>}
+          <p className="text-text-dim">
+            Source: {sources.has('mlb-api') && <span className="text-accent-green">MLB API</span>}
+            {sources.has('ncaa-lookup') && <span className="text-accent-green">D1Baseball</span>}
+            {sources.has('hs-lookup') && <span className="text-accent-green">MaxPreps</span>}
+            {highConfidence.length > 0 && <span className="text-accent-green ml-1">({highConfidence.length} verified)</span>}
+            {estimated.length > 0 && <span className="text-accent-orange ml-1">({estimated.length} estimated)</span>}
+          </p>
+          {games.length > 0 && games[0]!.sourceUrl && (
+            <a href={games[0]!.sourceUrl} target="_blank" rel="noopener noreferrer"
+              className="text-accent-blue hover:underline">Verify schedule ↗</a>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
