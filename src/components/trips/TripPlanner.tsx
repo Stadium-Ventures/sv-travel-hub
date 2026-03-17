@@ -178,8 +178,11 @@ export default function TripPlanner() {
   const ncaaGames = useScheduleStore((s) => s.ncaaGames)
   const hsGames = useScheduleStore((s) => s.hsGames)
   const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
+  const schedulesProgress = useScheduleStore((s) => s.schedulesProgress)
   const ncaaLoading = useScheduleStore((s) => s.ncaaLoading)
+  const ncaaProgress = useScheduleStore((s) => s.ncaaProgress)
   const hsLoading = useScheduleStore((s) => s.hsLoading)
+  const hsProgress = useScheduleStore((s) => s.hsProgress)
   const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
   const players = useRosterStore((s) => s.players)
   const rosterLoading = useRosterStore((s) => s.loading)
@@ -381,7 +384,9 @@ export default function TripPlanner() {
                 : 'bg-accent-blue text-white hover:bg-accent-blue/80'
             } disabled:opacity-50`}
           >
-            {schedulesLoading ? 'Loading Pro...' : proGames.length > 0 ? `Pro: ${proGames.length} games ✓` : 'Load Pro Schedules'}
+            {schedulesLoading
+              ? schedulesProgress ? `Pro: ${schedulesProgress.completed}/${schedulesProgress.total} teams...` : 'Loading Pro...'
+              : proGames.length > 0 ? `Pro: ${proGames.length} games ✓` : 'Load Pro Schedules'}
           </button>
           <button
             onClick={async () => {
@@ -399,7 +404,9 @@ export default function TripPlanner() {
                 : 'bg-accent-green text-white hover:bg-accent-green/80'
             } disabled:opacity-50`}
           >
-            {ncaaLoading ? 'Loading College...' : ncaaGames.length > 0 ? `College: ${ncaaGames.length} games ✓` : 'Load College Schedules'}
+            {ncaaLoading
+              ? ncaaProgress ? `College: ${ncaaProgress.completed}/${ncaaProgress.total} schools...` : 'Loading College...'
+              : ncaaGames.length > 0 ? `College: ${ncaaGames.length} games ✓` : 'Load College Schedules'}
           </button>
           {hasHsPlayers && (
             <button
@@ -424,7 +431,9 @@ export default function TripPlanner() {
                   : 'bg-accent-orange text-white hover:bg-accent-orange/80'
               } disabled:opacity-50`}
             >
-              {hsLoading ? 'Loading HS...' : hsGames.length > 0 ? `HS: ${hsGames.length} games ✓` : 'Load HS Schedules'}
+              {hsLoading
+                ? hsProgress ? `HS: ${hsProgress.completed}/${hsProgress.total} schools...` : 'Loading HS...'
+                : hsGames.length > 0 ? `HS: ${hsGames.length} games ✓` : 'Load HS Schedules'}
             </button>
           )}
         </div>
