@@ -890,55 +890,86 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
-          // Phase 2: Async geocoding for unresolved away games
-          // Process in batches with rate limiting (Nominatim: 1 req/sec)
+          // Phase 2: Resolve away games at unknown venues
+          // Try cached venues first (instant), then batch-geocode uncached ones
           if (unresolvedAway.length > 0) {
-            // Extend progress to include geocoding (14/14 → 14/14+N → ... → 14+N/14+N)
-            const baseCompleted = schoolToPlayers.size
-            const extendedTotal = baseCompleted + unresolvedAway.length
-            set({ ncaaProgress: { completed: baseCompleted, total: extendedTotal } })
-            let geocoded = 0
-            let geocodeIdx = 0
-            for (const { school, game, playerNames } of unresolvedAway) {
-              geocodeIdx++
-              set({ ncaaProgress: { completed: baseCompleted + geocodeIdx, total: extendedTotal } })
-              const oppVenue = await resolveOpponentVenueAsync(
-                game.opponent, game.opponentSlug,
-                game.venueName, game.venueCity,
-              )
+            const needsGeocoding: typeof unresolvedAway = []
+            // Fast pass: resolve from localStorage cache
+            for (const entry of unresolvedAway) {
+              const oppVenue = resolveOpponentVenue(entry.game.opponent, entry.game.opponentSlug)
               if (oppVenue) {
-                const d = new Date(game.date + 'T12:00:00Z')
-                const schedule = schedulesObj[school]!
+                const d = new Date(entry.game.date + 'T12:00:00Z')
                 newGames.push({
-                  id: `ncaa-d1-${school.toLowerCase().replace(/\s+/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
-                  date: game.date,
+                  id: `ncaa-d1-${entry.school.toLowerCase().replace(/\s+/g, '-')}-${entry.game.date}-${entry.game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
+                  date: entry.game.date,
                   dayOfWeek: d.getUTCDay(),
-                  time: game.date + 'T14:00:00Z',
-                  homeTeam: game.opponent,
-                  awayTeam: school,
+                  time: entry.game.date + 'T14:00:00Z',
+                  homeTeam: entry.game.opponent,
+                  awayTeam: entry.school,
                   isHome: false,
                   venue: oppVenue,
                   source: 'ncaa-lookup',
-                  playerNames,
+                  playerNames: entry.playerNames,
                   confidence: 'medium',
-                  confidenceNote: `Away game at ${game.opponent} (venue geocoded)`,
-                  sourceUrl: `https://d1baseball.com/team/${schedule.slug}/schedule/`,
+                  confidenceNote: `Away game at ${entry.game.opponent} (cached venue)`,
+                  sourceUrl: `https://d1baseball.com/team/${schedulesObj[entry.school]!.slug}/schedule/`,
                 })
-                geocoded++
               } else {
-                droppedAwayGames++
+                needsGeocoding.push(entry)
               }
-              // Rate limit for Nominatim
-              await new Promise(r => setTimeout(r, 1200))
             }
-            if (geocoded > 0) {
-              const diag = useDiagnosticsStore.getState()
-              diag.addIssue({
-                level: 'info',
-                source: 'ncaa',
-                message: `${geocoded} NCAA away game venue(s) discovered via geocoding`,
-              })
+
+            // Async geocoding only for truly unknown venues (cap at 10 to avoid long waits)
+            const geocodeBatch = needsGeocoding.slice(0, 10)
+            if (geocodeBatch.length > 0) {
+              const baseCompleted = schoolToPlayers.size
+              const extendedTotal = baseCompleted + geocodeBatch.length
+              set({ ncaaProgress: { completed: baseCompleted, total: extendedTotal } })
+              let geocoded = 0
+              let geocodeIdx = 0
+              for (const { school, game, playerNames } of geocodeBatch) {
+                geocodeIdx++
+                set({ ncaaProgress: { completed: baseCompleted + geocodeIdx, total: extendedTotal } })
+                const oppVenue = await resolveOpponentVenueAsync(
+                  game.opponent, game.opponentSlug,
+                  game.venueName, game.venueCity,
+                )
+                if (oppVenue) {
+                  const d = new Date(game.date + 'T12:00:00Z')
+                  const schedule = schedulesObj[school]!
+                  newGames.push({
+                    id: `ncaa-d1-${school.toLowerCase().replace(/\s+/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
+                    date: game.date,
+                    dayOfWeek: d.getUTCDay(),
+                    time: game.date + 'T14:00:00Z',
+                    homeTeam: game.opponent,
+                    awayTeam: school,
+                    isHome: false,
+                    venue: oppVenue,
+                    source: 'ncaa-lookup',
+                    playerNames,
+                    confidence: 'medium',
+                    confidenceNote: `Away game at ${game.opponent} (venue geocoded)`,
+                    sourceUrl: `https://d1baseball.com/team/${schedule.slug}/schedule/`,
+                  })
+                  geocoded++
+                } else {
+                  droppedAwayGames++
+                }
+                // Rate limit for Nominatim
+                await new Promise(r => setTimeout(r, 1200))
+              }
+              if (geocoded > 0) {
+                const diag = useDiagnosticsStore.getState()
+                diag.addIssue({
+                  level: 'info',
+                  source: 'ncaa',
+                  message: `${geocoded} NCAA away game venue(s) discovered via geocoding`,
+                })
+              }
             }
+            // Count remaining unresolved as dropped (will be geocoded on next load from cache)
+            droppedAwayGames += needsGeocoding.length - geocodeBatch.length
           }
 
           // Merge or replace games
