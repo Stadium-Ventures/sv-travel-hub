@@ -893,8 +893,15 @@ export const useScheduleStore = create<ScheduleState>()(
           // Phase 2: Async geocoding for unresolved away games
           // Process in batches with rate limiting (Nominatim: 1 req/sec)
           if (unresolvedAway.length > 0) {
+            // Extend progress to include geocoding (14/14 → 14/14+N → ... → 14+N/14+N)
+            const baseCompleted = schoolToPlayers.size
+            const extendedTotal = baseCompleted + unresolvedAway.length
+            set({ ncaaProgress: { completed: baseCompleted, total: extendedTotal } })
             let geocoded = 0
+            let geocodeIdx = 0
             for (const { school, game, playerNames } of unresolvedAway) {
+              geocodeIdx++
+              set({ ncaaProgress: { completed: baseCompleted + geocodeIdx, total: extendedTotal } })
               const oppVenue = await resolveOpponentVenueAsync(
                 game.opponent, game.opponentSlug,
                 game.venueName, game.venueCity,
