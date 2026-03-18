@@ -842,7 +842,21 @@ export default function TripPlanner() {
       {tripPlan && (
         <>
           {/* Priority player results */}
-          {tripPlan.priorityResults && tripPlan.priorityResults.length > 0 && (
+          {tripPlan.priorityResults && tripPlan.priorityResults.length > 0 && (() => {
+            // Sort trips same way as card list so trip numbers match
+            const prSorted = [...tripPlan.trips].sort((a, b) => {
+              if (sortBy === 'score') return (b.scoreBreakdown?.finalScore ?? b.visitValue) - (a.scoreBreakdown?.finalScore ?? a.visitValue)
+              if (sortBy === 'date') return a.anchorGame.date.localeCompare(b.anchorGame.date)
+              return 0
+            })
+            function findTripNum(playerName: string): number {
+              const idx = prSorted.findIndex((t) =>
+                t.anchorGame.playerNames.includes(playerName) ||
+                t.nearbyGames.some((g) => g.playerNames.includes(playerName))
+              )
+              return idx + 1
+            }
+            return (
             <div className="rounded-xl border border-accent-blue/30 bg-accent-blue/5 p-4">
               <h3 className="mb-2 text-sm font-semibold text-accent-blue">Priority Player Results</h3>
               <div className="space-y-3">
@@ -851,6 +865,7 @@ export default function TripPlanner() {
                   const bestFlyIn = r.status === 'fly-in-only'
                     ? tripPlan.flyInVisits.find((v) => v.playerNames.includes(r.playerName))
                     : null
+                  const tripNum = (r.status === 'included' || r.status === 'separate-trip') ? findTripNum(r.playerName) : 0
                   return (
                     <div key={r.playerName}>
                       <div className="flex items-center gap-2 text-sm">
@@ -862,8 +877,8 @@ export default function TripPlanner() {
                         }`} />
                         <span className="font-medium text-text">{r.playerName}</span>
                         <span className="text-xs text-text-dim">
-                          {r.status === 'included' && 'Included in Trip #1'}
-                          {r.status === 'separate-trip' && 'Separate trip created'}
+                          {r.status === 'included' && `Included in Trip #${tripNum}`}
+                          {r.status === 'separate-trip' && `Trip #${tripNum}`}
                           {r.status === 'fly-in-only' && 'Fly-in required'}
                           {r.status === 'unreachable' && 'Could not be reached'}
                         </span>
@@ -895,7 +910,7 @@ export default function TripPlanner() {
                 })}
               </div>
             </div>
-          )}
+            )})()}
 
           {/* Player Coverage — answers "where is Player X?" */}
           <PlayerCoverageCard
@@ -1221,38 +1236,64 @@ export default function TripPlanner() {
                     </div>
                   </div>
                 )}
-                {noGames.length > 0 && (
-                  <details id="section-no-games" className="rounded-xl border border-accent-red/30 bg-accent-red/5">
-                    <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-accent-red">
-                      {noGames.length} player{noGames.length !== 1 ? 's' : ''} with no games in date range
-                      {(() => {
-                        const t1Count = noGames.filter((e) => (playerMap.get(e.name)?.tier ?? 4) === 1).length
-                        const t2Count = noGames.filter((e) => (playerMap.get(e.name)?.tier ?? 4) === 2).length
-                        if (t1Count === 0 && t2Count === 0) return null
-                        return (
-                          <span className="ml-2 text-xs font-normal text-accent-red/70">
-                            ({t1Count > 0 ? `${t1Count} T1` : ''}{t1Count > 0 && t2Count > 0 ? ', ' : ''}{t2Count > 0 ? `${t2Count} T2` : ''})
+                {noGames.length > 0 && (() => {
+                  // Split into expected (season over) vs actionable (missing data)
+                  const seasonOver = noGames.filter((e) => e.reason.includes('season may be over'))
+                  const missingData = noGames.filter((e) => !e.reason.includes('season may be over'))
+                  const t1Count = missingData.filter((e) => (playerMap.get(e.name)?.tier ?? 4) === 1).length
+                  const t2Count = missingData.filter((e) => (playerMap.get(e.name)?.tier ?? 4) === 2).length
+
+                  return (
+                    <details id="section-no-games" className="rounded-xl border border-border/50 bg-surface">
+                      <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-text-dim">
+                        {noGames.length} player{noGames.length !== 1 ? 's' : ''} with no games in date range
+                        {(t1Count > 0 || t2Count > 0) && (
+                          <span className="ml-2 text-xs font-normal text-accent-orange">
+                            ({t1Count > 0 ? `${t1Count} T1` : ''}{t1Count > 0 && t2Count > 0 ? ', ' : ''}{t2Count > 0 ? `${t2Count} T2` : ''} need attention)
                           </span>
-                        )
-                      })()}
-                    </summary>
-                    <div className="border-t border-accent-red/20 px-5 py-3 space-y-1.5">
-                      {noGames.map((entry) => {
-                        const player = playerMap.get(entry.name)
-                        const tier = player?.tier ?? 4
-                        const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                        return (
-                          <div key={entry.name} className="flex items-center gap-2 text-sm">
-                            <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-                            <span className="font-medium text-accent-red cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
-                            <span className="text-xs text-text-dim">T{tier}</span>
-                            <span className="text-xs text-text-dim/70">— {entry.reason}</span>
+                        )}
+                      </summary>
+                      <div className="border-t border-border/30 px-5 py-3 space-y-3">
+                        {/* Actionable: missing data */}
+                        {missingData.length > 0 && (
+                          <div className="space-y-1.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-accent-orange">Missing schedule data</p>
+                            {missingData.map((entry) => {
+                              const player = playerMap.get(entry.name)
+                              const tier = player?.tier ?? 4
+                              const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                              return (
+                                <div key={entry.name} className="flex items-center gap-2 text-sm">
+                                  <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+                                  <span className="font-medium text-accent-orange cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
+                                  <span className="text-xs text-text-dim">T{tier}</span>
+                                  <span className="text-xs text-text-dim/70">— {entry.reason}</span>
+                                </div>
+                              )
+                            })}
                           </div>
-                        )
-                      })}
-                    </div>
-                  </details>
-                )}
+                        )}
+                        {/* Expected: season over */}
+                        {seasonOver.length > 0 && (
+                          <div className="space-y-1.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-text-dim/50">Season over for date range</p>
+                            {seasonOver.map((entry) => {
+                              const player = playerMap.get(entry.name)
+                              const tier = player?.tier ?? 4
+                              return (
+                                <div key={entry.name} className="flex items-center gap-2 text-sm text-text-dim/60">
+                                  <span className="h-2 w-2 rounded-full bg-gray-600" />
+                                  <span className="cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
+                                  <span className="text-xs">T{tier}</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  )
+                })()}
               </>
             )
           })()}
