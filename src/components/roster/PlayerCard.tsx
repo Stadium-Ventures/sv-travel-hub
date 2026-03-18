@@ -50,7 +50,7 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
       .sort((a, b) => a.sportId - b.sportId)
   }, [affiliateOptions, player.org])
 
-  let colSpan = 7
+  let colSpan = 6
   if (showAffiliate) colSpan++
 
   return (
@@ -129,7 +129,6 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
             <span className="text-xs text-text-dim/40">—</span>
           )}
         </td>
-        <td className="px-4 py-2.5 text-text-dim">{player.leadAgent}</td>
       </tr>
 
       {expanded && (

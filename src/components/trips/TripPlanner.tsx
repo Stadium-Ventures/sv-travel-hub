@@ -243,29 +243,56 @@ export default function TripPlanner() {
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
   const flyInLimit = 5 // Hard cap on fly-in results
   const [showOverlaps, setShowOverlaps] = useState(false)
-  const [loadingAllSchedules, setLoadingAllSchedules] = useState(false)
+  const anyScheduleLoading = schedulesLoading || ncaaLoading || hsLoading || autoAssignLoading
+  const allSchedulesLoaded = proGames.length > 0 && ncaaGames.length > 0 && (!hasHsPlayers || hsGames.length > 0)
+
+  // Auto-load schedules on mount if not already loaded
+  const schedulesInitialized = useRef(false)
+  useEffect(() => {
+    if (schedulesInitialized.current) return
+    if (players.length === 0) return // wait for roster
+    if (allSchedulesLoaded) return // already have data
+    if (anyScheduleLoading) return // already in progress
+    schedulesInitialized.current = true
+    handleLoadAllSchedules()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [players.length, allSchedulesLoaded, anyScheduleLoading])
 
   async function handleLoadAllSchedules() {
-    if (loadingAllSchedules) return
-    setLoadingAllSchedules(true)
-    try {
-      const schedStore = useScheduleStore.getState()
-      const ncaaAllOrgs = players
-        .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
-        .map((p) => ({ playerName: p.playerName, org: p.org }))
-      if (ncaaAllOrgs.length > 0) {
-        await schedStore.fetchNcaaSchedules(ncaaAllOrgs, { merge: true })
+    if (anyScheduleLoading) return
+    const schedStore = useScheduleStore.getState()
+
+    // 1. Pro: auto-assign then fetch
+    if (Object.keys(schedStore.playerTeamAssignments).length === 0) {
+      await schedStore.autoAssignPlayers()
+    }
+    if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length > 0) {
+      const y = new Date().getFullYear()
+      schedStore.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+    }
+
+    // 2. NCAA
+    const ncaaAllOrgs = players
+      .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+      .map((p) => ({ playerName: p.playerName, org: p.org }))
+    if (ncaaAllOrgs.length > 0) {
+      schedStore.fetchNcaaSchedules(ncaaAllOrgs, { merge: true })
+    }
+
+    // 3. HS (with geocoding)
+    if (hasHsPlayers) {
+      const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+      const { useVenueStore } = await import('../../store/venueStore')
+      const venueCount = Object.values(useVenueStore.getState().venues).filter((v: any) => v.source === 'hs-geocoded').length
+      if (venueCount === 0) {
+        await useVenueStore.getState().geocodeHsVenues(
+          hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
+        )
       }
-      const hsAllOrgs = players
-        .filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
-        .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
-      if (hsAllOrgs.length > 0) {
-        await schedStore.fetchHsSchedules(hsAllOrgs, { merge: true })
+      const hsOrgs = hsPlayers.map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
+      if (hsOrgs.length > 0) {
+        schedStore.fetchHsSchedules(hsOrgs, { merge: true })
       }
-      // Re-generate trips with the new data
-      await generateTrips()
-    } finally {
-      setLoadingAllSchedules(false)
     }
   }
 
@@ -375,77 +402,60 @@ export default function TripPlanner() {
           </ul>
         </details>
 
-        {/* Schedule load buttons */}
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button
-            onClick={async () => {
-              const store = useScheduleStore.getState()
-              if (Object.keys(store.playerTeamAssignments).length === 0) {
-                await store.autoAssignPlayers()
-              }
-              if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length > 0) {
-                const y = new Date().getFullYear()
-                await store.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
-              }
-            }}
-            disabled={schedulesLoading || autoAssignLoading}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              proGames.length > 0
-                ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
-                : 'bg-accent-blue text-white hover:bg-accent-blue/80'
-            } disabled:opacity-50`}
-          >
-            {schedulesLoading
-              ? schedulesProgress ? `Pro: ${schedulesProgress.completed}/${schedulesProgress.total} teams...` : 'Loading Pro...'
-              : proGames.length > 0 ? `Pro: ${proGames.length} games ✓` : 'Load Pro Schedules'}
-          </button>
-          <button
-            onClick={async () => {
-              const ncaaOrgs = players
-                .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
-                .map((p) => ({ playerName: p.playerName, org: p.org }))
-              if (ncaaOrgs.length > 0) {
-                await useScheduleStore.getState().fetchNcaaSchedules(ncaaOrgs, { merge: true })
-              }
-            }}
-            disabled={ncaaLoading}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              ncaaGames.length > 0
-                ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
-                : 'bg-accent-green text-white hover:bg-accent-green/80'
-            } disabled:opacity-50`}
-          >
-            {ncaaLoading
-              ? ncaaProgress ? `College: ${ncaaProgress.completed}/${ncaaProgress.total} schools...` : 'Loading College...'
-              : ncaaGames.length > 0 ? `College: ${ncaaGames.length} games ✓` : 'Load College Schedules'}
-          </button>
-          {hasHsPlayers && (
+        {/* Schedule status + load button */}
+        <div className="mb-4">
+          <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={async () => {
-                const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
-                const { useVenueStore } = await import('../../store/venueStore')
-                const venueCount = Object.values(useVenueStore.getState().venues).filter((v: any) => v.source === 'hs-geocoded').length
-                if (venueCount === 0) {
-                  await useVenueStore.getState().geocodeHsVenues(
-                    hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
-                  )
-                }
-                const hsOrgs = hsPlayers.map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
-                if (hsOrgs.length > 0) {
-                  await useScheduleStore.getState().fetchHsSchedules(hsOrgs, { merge: true })
-                }
-              }}
-              disabled={hsLoading}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                hsGames.length > 0
-                  ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
-                  : 'bg-accent-orange text-white hover:bg-accent-orange/80'
+              onClick={handleLoadAllSchedules}
+              disabled={anyScheduleLoading}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                allSchedulesLoaded
+                  ? 'bg-accent-green/15 text-accent-green border border-accent-green/30 hover:bg-accent-green/25'
+                  : 'bg-accent-blue text-white hover:bg-accent-blue/80'
               } disabled:opacity-50`}
             >
-              {hsLoading
-                ? hsProgress ? `HS: ${hsProgress.completed}/${hsProgress.total} schools...` : 'Loading HS...'
-                : hsGames.length > 0 ? `HS: ${hsGames.length} games ✓` : 'Load HS Schedules'}
+              {anyScheduleLoading
+                ? 'Loading Schedules...'
+                : allSchedulesLoaded ? 'Reload Schedules' : 'Load All Schedules'}
             </button>
+            {/* Inline schedule status chips */}
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              {proGames.length > 0 && (
+                <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
+                  Pro: {proGames.length} games
+                </span>
+              )}
+              {ncaaGames.length > 0 && (
+                <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
+                  College: {ncaaGames.length} games
+                </span>
+              )}
+              {hsGames.length > 0 && (
+                <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
+                  HS: {hsGames.length} games
+                </span>
+              )}
+            </div>
+          </div>
+          {/* Loading progress details */}
+          {anyScheduleLoading && (
+            <div className="mt-2 text-xs text-text-dim">
+              {schedulesLoading && (
+                <span className="mr-3">
+                  {schedulesProgress ? `Pro: ${schedulesProgress.completed}/${schedulesProgress.total} teams` : 'Pro: loading...'}
+                </span>
+              )}
+              {ncaaLoading && (
+                <span className="mr-3">
+                  {ncaaProgress ? `College: ${ncaaProgress.completed}/${ncaaProgress.total} schools` : 'College: loading...'}
+                </span>
+              )}
+              {hsLoading && (
+                <span>
+                  {hsProgress ? `HS: ${hsProgress.completed}/${hsProgress.total} schools` : 'HS: loading...'}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
@@ -775,7 +785,7 @@ export default function TripPlanner() {
             allGames={[...proGames, ...ncaaGames, ...hsGames]}
             onPlayerClick={setSelectedPlayer}
             onLoadAll={handleLoadAllSchedules}
-            loadingAll={loadingAllSchedules}
+            loadingAll={anyScheduleLoading}
           />
 
           {/* Coverage stats */}

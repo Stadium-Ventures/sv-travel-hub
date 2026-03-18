@@ -51,17 +51,7 @@ export default function RosterDashboard() {
     if (stale) fetchHeartbeat()
   }, [fetchRoster, fetchHeartbeat, heartbeatLastFetched])
 
-  const stats = useMemo(() => {
-    const total = players.length
-
-    // Per-tier breakdown (count only)
-    const tiers = [1, 2, 3, 4].map((tier) => {
-      const tierPlayers = players.filter((p) => p.tier === tier)
-      return { tier, count: tierPlayers.length }
-    }).filter((t) => t.count > 0)
-
-    return { total, tiers }
-  }, [players])
+  const playerCount = players.length
 
   const filtered = players
     .filter((p) => levelFilter === 'All' || p.level === levelFilter)
@@ -143,24 +133,33 @@ export default function RosterDashboard() {
 
   return (
     <div className="space-y-4">
-      {/* Compact summary: player count + tier breakdown */}
+      {/* Compact summary: player count + refresh */}
       <div className="rounded-xl border border-border bg-surface px-5 py-3">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <div className="flex items-center gap-4 text-sm">
-            <span className="text-text-dim">{stats.total} players</span>
+            <span className="text-text-dim">{playerCount} players</span>
           </div>
-          <div className="flex items-center gap-3 ml-auto">
-            {stats.tiers.map(({ tier, count }) => (
-              <div key={tier} className="flex items-center gap-1.5">
-                <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${
-                  tier === 1 ? 'bg-accent-blue/20 text-accent-blue' :
-                  tier === 2 ? 'bg-accent-green/20 text-accent-green' :
-                  tier === 3 ? 'bg-accent-orange/20 text-accent-orange' :
-                  'bg-gray-500/20 text-gray-400'
-                }`}>{tier}</span>
-                <span className="text-[10px] text-text-dim">{count}</span>
-              </div>
-            ))}
+          <div className="flex items-center gap-2 ml-auto">
+            {lastFetchedAt && (
+              <span className="text-xs text-text-dim/60">
+                Updated {new Date(lastFetchedAt).toLocaleTimeString()}
+              </span>
+            )}
+            <button
+              onClick={fetchRoster}
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-text-dim hover:text-text hover:border-accent-blue transition-colors disabled:opacity-50"
+              title="Refresh roster from Google Sheet"
+            >
+              {loading ? (
+                <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+              ) : (
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M20.016 4.657v4.992" />
+                </svg>
+              )}
+              Refresh
+            </button>
           </div>
         </div>
       </div>
@@ -193,11 +192,6 @@ export default function RosterDashboard() {
 
       </div>
 
-      {lastFetchedAt && (
-        <p className="text-xs text-text-dim/60">
-          Last updated: {new Date(lastFetchedAt).toLocaleTimeString()}
-        </p>
-      )}
 
       {/* Roster moves alerts */}
       {rosterMoves.length > 0 && (
@@ -321,7 +315,6 @@ export default function RosterDashboard() {
                     </th>
                     <th className="px-4 py-2.5">Last Visit</th>
                     <th className="px-4 py-2.5">Love</th>
-                    <th className="px-4 py-2.5">Agent</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -437,7 +430,6 @@ function ProTable({
             </th>
             <th className="px-4 py-2.5">Last Visit</th>
             <th className="px-4 py-2.5">Love</th>
-            <th className="px-4 py-2.5">Agent</th>
           </tr>
         </thead>
         <tbody>
