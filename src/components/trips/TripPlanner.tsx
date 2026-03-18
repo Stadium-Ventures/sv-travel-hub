@@ -158,6 +158,63 @@ function getProgressNote(step: string): string {
   return 'First run loads all schedule data. Subsequent runs are much faster.'
 }
 
+function ScheduleProgressRow({ label, loading, done, progress, detail, color }: {
+  label: string
+  loading: boolean
+  done: boolean
+  progress?: { completed: number; total: number } | null
+  detail?: string
+  color: string
+}) {
+  const pct = progress ? Math.round((progress.completed / progress.total) * 100) : 0
+  const timeRemaining = progress ? Math.max(0, (progress.total - progress.completed) * 3) : 0
+
+  return (
+    <div className="flex items-center gap-3">
+      {/* Status icon */}
+      <div className="w-3 shrink-0">
+        {done && !loading ? (
+          <svg className="h-3 w-3 text-accent-green" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        ) : loading ? (
+          <span className="block h-3 w-3 animate-spin rounded-full border-[1.5px] border-current border-t-transparent text-text-dim" />
+        ) : (
+          <span className="block h-2 w-2 rounded-full bg-gray-600 ml-0.5" />
+        )}
+      </div>
+      {/* Label + bar */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between mb-0.5">
+          <span className={`text-[11px] font-medium ${done && !loading ? 'text-accent-green' : loading ? 'text-text' : 'text-text-dim'}`}>
+            {label}
+          </span>
+          <span className="text-[10px] text-text-dim/60">
+            {done && !loading
+              ? 'Done'
+              : loading && progress
+              ? `${progress.completed}/${progress.total}${timeRemaining > 0 ? ` — ~${timeRemaining}s` : ''}`
+              : loading
+              ? (detail ?? 'Starting...')
+              : 'Pending'}
+          </span>
+        </div>
+        <div className="h-1 rounded-full bg-gray-800 overflow-hidden">
+          {done && !loading ? (
+            <div className={`h-full rounded-full ${color} w-full`} />
+          ) : loading && progress ? (
+            <div className={`h-full rounded-full ${color} transition-all duration-500`} style={{ width: `${pct}%` }} />
+          ) : loading ? (
+            <div className={`h-full rounded-full ${color} animate-pulse w-1/3`} />
+          ) : (
+            <div className="h-full rounded-full bg-gray-700 w-0" />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function TripPlanner() {
   const startDate = useTripStore((s) => s.startDate)
   const endDate = useTripStore((s) => s.endDate)
@@ -418,42 +475,54 @@ export default function TripPlanner() {
                 ? 'Loading Schedules...'
                 : allSchedulesLoaded ? 'Reload Schedules' : 'Load All Schedules'}
             </button>
-            {/* Inline schedule status chips */}
-            <div className="flex flex-wrap items-center gap-2 text-[11px]">
-              {proGames.length > 0 && (
-                <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
-                  Pro: {proGames.length} games
-                </span>
-              )}
-              {ncaaGames.length > 0 && (
-                <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
-                  College: {ncaaGames.length} games
-                </span>
-              )}
-              {hsGames.length > 0 && (
-                <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
-                  HS: {hsGames.length} games
-                </span>
-              )}
-            </div>
+            {/* Inline schedule status chips (when not loading) */}
+            {!anyScheduleLoading && (proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0) && (
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                {proGames.length > 0 && (
+                  <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
+                    Pro: {proGames.length} games
+                  </span>
+                )}
+                {ncaaGames.length > 0 && (
+                  <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
+                    College: {ncaaGames.length} games
+                  </span>
+                )}
+                {hsGames.length > 0 && (
+                  <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
+                    HS: {hsGames.length} games
+                  </span>
+                )}
+              </div>
+            )}
           </div>
-          {/* Loading progress details */}
+
+          {/* Per-source progress bars during loading */}
           {anyScheduleLoading && (
-            <div className="mt-2 text-xs text-text-dim">
-              {schedulesLoading && (
-                <span className="mr-3">
-                  {schedulesProgress ? `Pro: ${schedulesProgress.completed}/${schedulesProgress.total} teams` : 'Pro: loading...'}
-                </span>
-              )}
-              {ncaaLoading && (
-                <span className="mr-3">
-                  {ncaaProgress ? `College: ${ncaaProgress.completed}/${ncaaProgress.total} schools` : 'College: loading...'}
-                </span>
-              )}
-              {hsLoading && (
-                <span>
-                  {hsProgress ? `HS: ${hsProgress.completed}/${hsProgress.total} schools` : 'HS: loading...'}
-                </span>
+            <div className="mt-3 space-y-2">
+              <ScheduleProgressRow
+                label="Pro Schedules"
+                loading={schedulesLoading || autoAssignLoading}
+                done={proGames.length > 0}
+                progress={schedulesProgress}
+                detail={autoAssignLoading ? 'Verifying team assignments...' : undefined}
+                color="bg-accent-blue"
+              />
+              <ScheduleProgressRow
+                label="College Schedules"
+                loading={ncaaLoading}
+                done={ncaaGames.length > 0}
+                progress={ncaaProgress}
+                color="bg-accent-green"
+              />
+              {hasHsPlayers && (
+                <ScheduleProgressRow
+                  label="HS Schedules"
+                  loading={hsLoading}
+                  done={hsGames.length > 0}
+                  progress={hsProgress}
+                  color="bg-accent-orange"
+                />
               )}
             </div>
           )}

@@ -134,8 +134,8 @@ export default function RosterDashboard() {
   return (
     <div className="space-y-4">
       {/* Compact summary: player count + refresh */}
-      <div className="rounded-xl border border-border bg-surface px-5 py-3">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3">
           <div className="flex items-center gap-4 text-sm">
             <span className="text-text-dim">{playerCount} players</span>
           </div>
@@ -162,6 +162,12 @@ export default function RosterDashboard() {
             </button>
           </div>
         </div>
+        {/* Thin progress bar at bottom of summary bar */}
+        {loading && (
+          <div className="h-0.5 bg-gray-800">
+            <div className="h-full bg-accent-blue animate-pulse rounded-full w-2/3" />
+          </div>
+        )}
       </div>
 
       {/* Controls */}
@@ -257,6 +263,20 @@ export default function RosterDashboard() {
               Verify Assignments
             </button>
           </div>
+
+          {/* Verify progress bar */}
+          {autoAssignLoading && (
+            <div className="mb-3 rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-4 py-3">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-accent-blue border-t-transparent" />
+                <span className="text-xs font-medium text-text">Scanning MLB/MiLB rosters...</span>
+              </div>
+              <div className="h-1 rounded-full bg-gray-800 overflow-hidden">
+                <div className="h-full rounded-full bg-accent-blue animate-pulse w-2/3" />
+              </div>
+              <p className="mt-1 text-[10px] text-text-dim/60">Checking {grouped.Pro.length} players against active rosters (~5s)</p>
+            </div>
+          )}
 
           {/* Verify results panel */}
           {recentLog.length > 0 && !autoAssignLoading && (
