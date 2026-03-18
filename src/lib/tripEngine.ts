@@ -1187,13 +1187,20 @@ export async function generateTrips(
         if (!hasAssignment) {
           return { name, reason: 'Not assigned to a team — click Verify Assignments on the Roster tab' }
         }
-        return { name, reason: 'Assigned to team but no games loaded — try clicking Verify Assignments then re-generating' }
+        return { name, reason: 'No games loaded — try reloading schedules after verifying assignments' }
       }
-      // For NCAA/HS: check if it's a tier issue (T3/T4 not auto-loaded)
-      if (player.tier >= 3) {
-        return { name, reason: 'T3 schedule not loaded — click "Load all schedules" above' }
+      // For NCAA: check if org resolves — if it does, schedule fetch may have failed
+      if (player.level === 'NCAA') {
+        if (resolveNcaaName(player.org)) {
+          return { name, reason: `Schedule fetch may have failed for ${player.org} — try reloading schedules` }
+        }
+        return { name, reason: `School not matched (org: "${player.org}") — check Roster tab for unknown team names that need mapping` }
       }
-      return { name, reason: `School not matched (org: "${player.org}") — check Roster tab for unknown team names that need mapping` }
+      // For HS: similar check
+      if (player.level === 'HS') {
+        return { name, reason: `No HS schedule found for "${player.org}" — may need MaxPreps mapping` }
+      }
+      return { name, reason: 'No games found' }
     }
 
     // Check if all games have zero coords (venue couldn't be geocoded)
