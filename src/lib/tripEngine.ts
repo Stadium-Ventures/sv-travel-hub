@@ -1027,7 +1027,11 @@ export async function generateTrips(
     if (driveMinutes <= maxDriveMinutes && !hasPriorityPlayerNotOnTrip) continue
 
     // Key by venue coords + team + week number → one fly-in per week per venue
-    const teamName = game.isHome ? game.homeTeam : game.awayTeam
+    // Use the SV player's actual team (from roster/assignments), not the game's home/away label
+    const firstPlayer = playerMap.get(relevantPlayers[0]!)
+    const teamName = playerTeamAssignments?.[relevantPlayers[0]!]?.teamName
+      ?? firstPlayer?.org
+      ?? (game.isHome ? game.homeTeam : game.awayTeam)
     const weekNum = getWeekNumber(game.date)
     const key = `${coordKey(game.venue.coords)}|${teamName}|w${weekNum}`
     const existing = flyInWeekMap.get(key)

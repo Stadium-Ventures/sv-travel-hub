@@ -12,6 +12,7 @@ interface Props {
   playerMap: Map<string, RosterPlayer>
   defaultExpanded?: boolean
   onPlayerClick?: (playerName: string) => void
+  overlappingTrips?: number[]
 }
 
 function formatGameTime(timeStr?: string, source?: ScheduleSource): string {
@@ -271,7 +272,7 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
   return text
 }
 
-function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick }: Props) {
+function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick, overlappingTrips }: Props) {
   const stops = useMemo(() => buildVenueStops(trip, playerMap), [trip, playerMap])
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [copied, setCopied] = useState(false)
@@ -380,6 +381,11 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             {breakdown && (
               <span className="rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue" title="Trip priority score">
                 {breakdown.finalScore} pts
+              </span>
+            )}
+            {overlappingTrips && overlappingTrips.length > 0 && (
+              <span className="rounded-lg bg-accent-orange/15 px-2 py-0.5 text-xs font-medium text-accent-orange" title="Date overlap — can't do both trips">
+                Overlaps with Trip #{overlappingTrips.length === 1 ? overlappingTrips[0] : overlappingTrips.map(n => `#${n}`).join(', ')}
               </span>
             )}
           </div>

@@ -1,4 +1,4 @@
-import type { TripCandidate } from '../types/schedule'
+import type { TripCandidate, FlyInVisit } from '../types/schedule'
 import type { RosterPlayer } from '../types/roster'
 
 function formatIcsDate(dateStr: string, timeStr?: string): string {
@@ -137,6 +137,56 @@ export function generateAllTripsIcs(
     ...events,
     'END:VCALENDAR',
   ].join('\r\n')
+}
+
+export function generateFlyInIcs(
+  visit: FlyInVisit,
+  index: number,
+  playerMap: Map<string, RosterPlayer>,
+): string {
+  const startDate = visit.dates[0]!
+  const endDate = visit.dates[visit.dates.length - 1]!
+  const dayCount = visit.dates.length
+
+  const playerList = visit.playerNames.map((name) => {
+    const p = playerMap.get(name)
+    return p ? `${name} (T${p.tier})` : name
+  }).join(', ')
+
+  const venueName = visit.venue.name
+  const milesDisplay = Math.round(visit.distanceKm * 0.621).toLocaleString()
+
+  const description = [
+    `Fly-in #${index} — ${dayCount} day${dayCount !== 1 ? 's' : ''}`,
+    `Travel from Orlando: ~${visit.estimatedTravelHours}h (${milesDisplay} mi)`,
+    `Players: ${playerList}`,
+    visit.scoreBreakdown ? `Score: ${visit.scoreBreakdown.finalScore} pts` : '',
+  ].filter(Boolean).join('\\n')
+
+  // End date for DTEND;VALUE=DATE is exclusive, so add 1 day
+  const endExclusive = new Date(endDate + 'T12:00:00Z')
+  endExclusive.setUTCDate(endExclusive.getUTCDate() + 1)
+  const endExclusiveStr = endExclusive.toISOString().split('T')[0]!.replace(/-/g, '')
+
+  const uid = `sv-flyin-${index}-${startDate}-${visit.venue.coords.lat.toFixed(4)}@sv-travel-hub`
+
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//SV Travel Hub//Trip Export//EN',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTART;VALUE=DATE:${formatIcsDate(startDate)}`,
+    `DTEND;VALUE=DATE:${endExclusiveStr}`,
+    `SUMMARY:${escapeIcs(`Fly-in #${index}: ${venueName}`)}`,
+    `DESCRIPTION:${escapeIcs(description)}`,
+    `LOCATION:${escapeIcs(venueName)}`,
+    `GEO:${visit.venue.coords.lat};${visit.venue.coords.lng}`,
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ]
+
+  return lines.join('\r\n')
 }
 
 export function downloadIcs(content: string, filename: string): void {

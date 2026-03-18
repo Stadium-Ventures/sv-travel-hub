@@ -2,9 +2,10 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Coordinates } from '../types/roster'
 import type { TripPlan } from '../types/schedule'
-import { generateTrips, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES } from '../lib/tripEngine'
+import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, HOME_BASE } from '../lib/tripEngine'
 import { findDoubleUps } from '../lib/doubleUps'
 import type { UrgencyMap } from '../lib/tripEngine'
+import type { WorkerParams, WorkerMessage } from '../lib/tripEngine.worker'
 import { useRosterStore } from './rosterStore'
 import { useScheduleStore } from './scheduleStore'
 import { useVenueStore } from './venueStore'
@@ -56,6 +57,9 @@ interface TripState {
   setTripStatus: (tripKey: string, status: TripStatus | null) => void
   setSelectedTripIndex: (index: number | null) => void
 }
+
+// Track active worker for cancel support
+let activeWorker: Worker | null = null
 
 export const useTripStore = create<TripState>()(
   persist(
@@ -117,6 +121,25 @@ export const useTripStore = create<TripState>()(
           progressDetail: `Cannot generate trips — missing schedule data for priority player(s):\n${missingSchedule.join('\n')}`,
         })
         return
+      }
+    }
+
+    // Pre-flight check: warn immediately if priority players have no drivable games
+    if (priorityPlayers.length > 0) {
+      const allAvailableGames = [...scheduleState.proGames, ...scheduleState.ncaaGames, ...scheduleState.hsGames]
+      for (const pName of priorityPlayers) {
+        const playerGames = allAvailableGames.filter((g) => g.playerNames.includes(pName))
+        if (playerGames.length === 0) continue // missing schedule already handled above
+        const hasDrivable = playerGames.some((g) => {
+          if (g.venue.coords.lat === 0 && g.venue.coords.lng === 0) return false
+          return estimateDriveMinutes(HOME_BASE, g.venue.coords) <= maxDriveMinutes
+        })
+        if (!hasDrivable) {
+          const driveHours = Math.round(maxDriveMinutes / 60)
+          set({ progressDetail: `Heads up: ${pName} has no games within ${driveHours}h drive of Orlando — will check fly-in options...` })
+          // Brief pause so user sees the warning before heavy computation
+          await new Promise((r) => setTimeout(r, 1200))
+        }
       }
     }
 
@@ -193,40 +216,75 @@ export const useTripStore = create<TripState>()(
 
     set({ computing: true, tripPlan: null, progressStep: 'Analyzing games...', progressDetail: `${allGames.length} games in date range` })
 
-    // Yield to browser so React can paint the progress bar before heavy computation starts
-    await new Promise((r) => setTimeout(r, 50))
+    // Cancel any in-flight worker
+    if (activeWorker) {
+      activeWorker.terminate()
+      activeWorker = null
+    }
 
-    try {
-      const plan = await generateTrips(
-        allGames,
-        players,
-        startDate,
-        endDate,
-        (step, detail) => set({ progressStep: step, progressDetail: detail ?? '' }),
-        maxDriveMinutes,
-        priorityPlayers,
-        urgencyMap.size > 0 ? urgencyMap : undefined,
-        maxFlightHours,
-        scheduleState.playerTeamAssignments,
-      )
-      // Detect double-up opportunities across all games
-      plan.doubleUps = findDoubleUps(allGames, players, startDate, endDate)
+    // Convert urgencyMap (Map) to plain Record for worker serialization
+    const urgencyRecord: Record<string, number> = {}
+    for (const [k, v] of urgencyMap) urgencyRecord[k] = v
 
-      // Prune stale tripStatuses — only keep keys that match current trips
-      const currentKeys = new Set(plan.trips.map(getTripKey))
-      const oldStatuses = get().tripStatuses
-      const prunedStatuses: Record<string, TripStatus> = {}
-      for (const [key, status] of Object.entries(oldStatuses)) {
-        if (currentKeys.has(key)) prunedStatuses[key] = status
+    const workerParams: WorkerParams = {
+      games: allGames,
+      players,
+      startDate,
+      endDate,
+      maxDriveMinutes,
+      priorityPlayers,
+      urgencyRecord: Object.keys(urgencyRecord).length > 0 ? urgencyRecord : undefined,
+      maxFlightHours,
+      playerTeamAssignments: scheduleState.playerTeamAssignments,
+    }
+
+    const worker = new Worker(
+      new URL('../lib/tripEngine.worker.ts', import.meta.url),
+      { type: 'module' },
+    )
+    activeWorker = worker
+
+    worker.postMessage(workerParams)
+
+    worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
+      const msg = e.data
+      if (msg.type === 'progress') {
+        set({ progressStep: msg.step, progressDetail: msg.detail ?? '' })
+      } else if (msg.type === 'result') {
+        const plan = msg.plan
+        // Detect double-up opportunities across all games
+        plan.doubleUps = findDoubleUps(allGames, players, startDate, endDate)
+
+        // Prune stale tripStatuses — only keep keys that match current trips
+        const currentKeys = new Set(plan.trips.map(getTripKey))
+        const oldStatuses = get().tripStatuses
+        const prunedStatuses: Record<string, TripStatus> = {}
+        for (const [key, status] of Object.entries(oldStatuses)) {
+          if (currentKeys.has(key)) prunedStatuses[key] = status
+        }
+
+        set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '', tripStatuses: prunedStatuses })
+        worker.terminate()
+        activeWorker = null
+      } else if (msg.type === 'error') {
+        set({
+          computing: false,
+          progressStep: 'Error',
+          progressDetail: msg.message,
+        })
+        worker.terminate()
+        activeWorker = null
       }
+    }
 
-      set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '', tripStatuses: prunedStatuses })
-    } catch (e) {
+    worker.onerror = (e) => {
       set({
         computing: false,
         progressStep: 'Error',
-        progressDetail: e instanceof Error ? e.message : 'Trip generation failed',
+        progressDetail: e.message || 'Worker failed unexpectedly',
       })
+      worker.terminate()
+      activeWorker = null
     }
   },
 }),

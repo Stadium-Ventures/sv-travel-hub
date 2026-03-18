@@ -866,6 +866,21 @@ export default function TripPlanner() {
             // Number trips sequentially after sorting — #1 is always the best
             const indexedTrips = trips.map((trip, i) => ({ trip, displayIndex: i + 1 }))
 
+            // Build overlap map: for each trip index, which other trip indices overlap?
+            const overlapMap = new Map<number, number[]>()
+            for (let a = 0; a < trips.length; a++) {
+              for (let b = a + 1; b < trips.length; b++) {
+                const daysA = new Set(trips[a]!.suggestedDays)
+                const hasOverlap = trips[b]!.suggestedDays.some((d) => daysA.has(d))
+                if (hasOverlap) {
+                  const idxA = a + 1
+                  const idxB = b + 1
+                  overlapMap.set(idxA, [...(overlapMap.get(idxA) ?? []), idxB])
+                  overlapMap.set(idxB, [...(overlapMap.get(idxB) ?? []), idxA])
+                }
+              }
+            }
+
             return (
             <div id="section-road-trips">
               <div className="mb-3 flex items-center justify-between">
@@ -924,7 +939,7 @@ export default function TripPlanner() {
 
               <div className="space-y-4">
                 {indexedTrips.map(({ trip, displayIndex }, i) => (
-                  <TripCard key={`trip-${displayIndex}`} trip={trip} index={displayIndex} playerMap={playerMap} defaultExpanded={i === 0} onPlayerClick={setSelectedPlayer} />
+                  <TripCard key={`trip-${displayIndex}`} trip={trip} index={displayIndex} playerMap={playerMap} defaultExpanded={i === 0} onPlayerClick={setSelectedPlayer} overlappingTrips={overlapMap.get(displayIndex)} />
                 ))}
                 {trips.length === 0 && (
                   <p className="py-4 text-center text-sm text-text-dim">No trips match the selected filters.</p>
