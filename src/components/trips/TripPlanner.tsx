@@ -167,9 +167,9 @@ function ScheduleProgressRow({ label, loading, done, progress, detail, color }: 
   color: string
 }) {
   const pct = progress ? Math.round((progress.completed / progress.total) * 100) : 0
-  const timeRemaining = progress ? Math.max(0, (progress.total - progress.completed) * 3) : 0
-  // Treat 100% progress as effectively done (store may still be cleaning up)
-  const effectivelyDone = done || (progress != null && progress.completed >= progress.total)
+  const allFetched = progress != null && progress.completed >= progress.total
+  // Done = games loaded into store, OR all items fetched (store still post-processing)
+  const effectivelyDone = done || allFetched
 
   return (
     <div className="flex items-center gap-3">
@@ -195,7 +195,7 @@ function ScheduleProgressRow({ label, loading, done, progress, detail, color }: 
             {effectivelyDone
               ? 'Done'
               : loading && progress
-              ? `${progress.completed}/${progress.total}${timeRemaining > 0 ? ` — ~${timeRemaining}s` : ''}`
+              ? `${progress.completed}/${progress.total}`
               : loading
               ? (detail ?? 'Starting...')
               : 'Pending'}
