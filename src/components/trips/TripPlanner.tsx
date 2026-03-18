@@ -446,7 +446,7 @@ export default function TripPlanner() {
       <div className="rounded-xl border border-border bg-surface p-5">
         <h2 className="mb-3 text-base font-semibold text-text">Trip Planner</h2>
         <p className="mb-2 text-xs text-text-dim">
-          Load schedules below, then hit Generate to build optimized road trips from Orlando.
+          Schedules load automatically. Hit Generate to build optimized road trips from Orlando.
         </p>
         <details className="mb-4">
           <summary className="cursor-pointer text-[11px] text-text-dim/60 hover:text-text-dim">How scoring works</summary>
@@ -719,7 +719,7 @@ export default function TripPlanner() {
         {/* Priority players */}
         <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
           <label className="mb-2 block text-xs font-medium text-text-dim">
-            Priority Players <span className="text-text-dim/50">(optional — every trip must include ALL selected players)</span>
+            Priority Players <span className="text-text-dim/50">(optional — engine will build trips around these players first)</span>
           </label>
           <div className="flex flex-wrap items-center gap-3">
             <PlayerSearchPicker
