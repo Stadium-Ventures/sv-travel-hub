@@ -168,12 +168,14 @@ function ScheduleProgressRow({ label, loading, done, progress, detail, color }: 
 }) {
   const pct = progress ? Math.round((progress.completed / progress.total) * 100) : 0
   const timeRemaining = progress ? Math.max(0, (progress.total - progress.completed) * 3) : 0
+  // Treat 100% progress as effectively done (store may still be cleaning up)
+  const effectivelyDone = done || (progress != null && progress.completed >= progress.total)
 
   return (
     <div className="flex items-center gap-3">
       {/* Status icon */}
       <div className="w-3 shrink-0">
-        {done && !loading ? (
+        {effectivelyDone ? (
           <svg className="h-3 w-3 text-accent-green" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
@@ -186,11 +188,11 @@ function ScheduleProgressRow({ label, loading, done, progress, detail, color }: 
       {/* Label + bar */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-0.5">
-          <span className={`text-[11px] font-medium ${done && !loading ? 'text-accent-green' : loading ? 'text-text' : 'text-text-dim'}`}>
+          <span className={`text-[11px] font-medium ${effectivelyDone ? 'text-accent-green' : loading ? 'text-text' : 'text-text-dim'}`}>
             {label}
           </span>
           <span className="text-[10px] text-text-dim/60">
-            {done && !loading
+            {effectivelyDone
               ? 'Done'
               : loading && progress
               ? `${progress.completed}/${progress.total}${timeRemaining > 0 ? ` — ~${timeRemaining}s` : ''}`
@@ -200,7 +202,7 @@ function ScheduleProgressRow({ label, loading, done, progress, detail, color }: 
           </span>
         </div>
         <div className="h-1 rounded-full bg-gray-800 overflow-hidden">
-          {done && !loading ? (
+          {effectivelyDone ? (
             <div className={`h-full rounded-full ${color} w-full`} />
           ) : loading && progress ? (
             <div className={`h-full rounded-full ${color} transition-all duration-500`} style={{ width: `${pct}%` }} />
