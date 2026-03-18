@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
+import { idbStorage } from '../lib/idbStorage'
 import type { MLBAffiliate, MLBGameRaw, MLBTransaction } from '../lib/mlbApi'
 import { fetchAllAffiliates, fetchAllSchedules, fetchAllTransactions, fetchAllRosters } from '../lib/mlbApi'
 import { MLB_PARENT_IDS, resolveNcaaName, resolveMLBTeamId } from '../data/aliases'
@@ -80,6 +81,11 @@ interface ScheduleState {
   // Fetch timestamps
   proFetchedAt: number | null
   ncaaFetchedAt: number | null
+
+  // Cached coverage tracking (for incremental fetching)
+  cachedProTeamIds: number[]
+  cachedNcaaSchools: string[]
+  cachedHsSchools: string[]
 
   // Auto-assign
   autoAssignLoading: boolean
@@ -180,6 +186,10 @@ export const useScheduleStore = create<ScheduleState>()(
 
       proFetchedAt: null,
       ncaaFetchedAt: null,
+
+      cachedProTeamIds: [],
+      cachedNcaaSchools: [],
+      cachedHsSchools: [],
 
       fetchAffiliates: async (forceRefresh?: boolean) => {
         if (get().affiliatesLoading) return
@@ -678,6 +688,7 @@ export const useScheduleStore = create<ScheduleState>()(
             schedulesLoading: false,
             schedulesProgress: null,
             proFetchedAt: Date.now(),
+            cachedProTeamIds: [...teamsToFetch.keys()],
           })
 
           // Diagnostics
@@ -998,6 +1009,7 @@ export const useScheduleStore = create<ScheduleState>()(
             ncaaFetchedAt: merge ? (prevState.ncaaFetchedAt ?? Date.now()) : Date.now(),
             ncaaFailedSchools: mergedFailed,
             ncaaDroppedAwayGames: droppedAwayGames,
+            cachedNcaaSchools: [...new Set([...(merge ? prevState.cachedNcaaSchools ?? [] : []), ...schoolToPlayers.keys()])],
           })
 
           // Diagnostics
@@ -1211,6 +1223,7 @@ export const useScheduleStore = create<ScheduleState>()(
             hsProgress: null,
             hsFetchedAt: merge ? (prevState.hsFetchedAt ?? Date.now()) : Date.now(),
             hsFailedSchools: mergedFailed,
+            cachedHsSchools: [...new Set([...(merge ? prevState.cachedHsSchools ?? [] : []), ...schoolToPlayers.keys()])],
           })
 
           // Diagnostics
@@ -1235,29 +1248,46 @@ export const useScheduleStore = create<ScheduleState>()(
     }),
     {
       name: 'sv-travel-schedule',
-      version: 2,
+      version: 3,
+      storage: createJSONStorage(() => idbStorage),
       migrate: (persisted: any) => ({
-        // Keep useful settings, drop heavy game data
         playerTeamAssignments: persisted?.playerTeamAssignments ?? {},
         affiliates: persisted?.affiliates ?? [],
         customMlbAliases: persisted?.customMlbAliases ?? {},
         customNcaaAliases: persisted?.customNcaaAliases ?? {},
         rosterMoves: persisted?.rosterMoves ?? [],
         rosterMovesCheckedAt: persisted?.rosterMovesCheckedAt ?? null,
+        // Preserve cached game data across migrations
+        proGames: persisted?.proGames ?? [],
+        ncaaGames: persisted?.ncaaGames ?? [],
+        hsGames: persisted?.hsGames ?? [],
+        proFetchedAt: persisted?.proFetchedAt ?? null,
+        ncaaFetchedAt: persisted?.ncaaFetchedAt ?? null,
+        hsFetchedAt: persisted?.hsFetchedAt ?? null,
+        // Track which teams/schools are in the cache for incremental fetching
+        cachedProTeamIds: persisted?.cachedProTeamIds ?? [],
+        cachedNcaaSchools: persisted?.cachedNcaaSchools ?? [],
+        cachedHsSchools: persisted?.cachedHsSchools ?? [],
       }),
       partialize: (state) => ({
         playerTeamAssignments: state.playerTeamAssignments,
         affiliates: state.affiliates,
         customMlbAliases: state.customMlbAliases,
         customNcaaAliases: state.customNcaaAliases,
-        assignmentLog: (state.assignmentLog ?? []).slice(-50), // keep last 50 entries
+        assignmentLog: (state.assignmentLog ?? []).slice(-50),
         rosterMoves: state.rosterMoves,
         rosterMovesCheckedAt: state.rosterMovesCheckedAt,
-        // Persist fetch timestamps so we can show "Refresh" instead of auto-fetching
-        // when data was fetched recently (< 6 hours ago)
+        // Persist game data (stored in IndexedDB, no size limit)
+        proGames: state.proGames,
+        ncaaGames: state.ncaaGames,
+        hsGames: state.hsGames,
         proFetchedAt: state.proFetchedAt,
         ncaaFetchedAt: state.ncaaFetchedAt,
         hsFetchedAt: state.hsFetchedAt,
+        // Track cached coverage for incremental fetching
+        cachedProTeamIds: state.cachedProTeamIds,
+        cachedNcaaSchools: state.cachedNcaaSchools,
+        cachedHsSchools: state.cachedHsSchools,
       }),
       merge: (persisted, current) => {
         const p = persisted as any
@@ -1269,14 +1299,16 @@ export const useScheduleStore = create<ScheduleState>()(
           customMlbAliases: p?.customMlbAliases ?? {},
           customNcaaAliases: p?.customNcaaAliases ?? {},
           assignmentLog: p?.assignmentLog ?? [],
-          proGames: [],  // Always start fresh — re-fetch each session
-          ncaaGames: [], // Always start fresh — re-fetch each session
-          hsGames: [],   // Always start fresh — re-fetch each session
-          // Preserve fetch timestamps so UI can show "data fetched X hours ago, Refresh?"
-          // instead of silently re-fetching on every page load
+          // Restore cached game data (was previously cleared every session)
+          proGames: p?.proGames ?? [],
+          ncaaGames: p?.ncaaGames ?? [],
+          hsGames: p?.hsGames ?? [],
           proFetchedAt: p?.proFetchedAt ?? null,
           ncaaFetchedAt: p?.ncaaFetchedAt ?? null,
           hsFetchedAt: p?.hsFetchedAt ?? null,
+          cachedProTeamIds: p?.cachedProTeamIds ?? [],
+          cachedNcaaSchools: p?.cachedNcaaSchools ?? [],
+          cachedHsSchools: p?.cachedHsSchools ?? [],
           rosterMoves: p?.rosterMoves ?? [],
         }
       },

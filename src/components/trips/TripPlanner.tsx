@@ -302,20 +302,88 @@ export default function TripPlanner() {
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
   const flyInLimit = 5 // Hard cap on fly-in results
   const [showOverlaps, setShowOverlaps] = useState(false)
+  const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
+  const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
+  const hsFetchedAt = useScheduleStore((s) => s.hsFetchedAt)
+  const cachedProTeamIds = useScheduleStore((s) => s.cachedProTeamIds)
+  const cachedNcaaSchools = useScheduleStore((s) => s.cachedNcaaSchools)
+
   const anyScheduleLoading = schedulesLoading || ncaaLoading || hsLoading || autoAssignLoading
   const allSchedulesLoaded = proGames.length > 0 && ncaaGames.length > 0 && (!hasHsPlayers || hsGames.length > 0)
 
-  // Auto-load schedules on mount if not already loaded
+  // Compute staleness
+  const now = Date.now()
+  const STALE_THRESHOLD = 24 * 60 * 60 * 1000 // 24 hours
+  const proStale = proFetchedAt ? (now - proFetchedAt > STALE_THRESHOLD) : false
+  const ncaaStale = ncaaFetchedAt ? (now - ncaaFetchedAt > STALE_THRESHOLD) : false
+  const hsStale = hsFetchedAt ? (now - hsFetchedAt > STALE_THRESHOLD) : false
+  const anyStale = proStale || ncaaStale || hsStale
+
+  // Format relative time for cache age
+  function formatAge(ts: number | null): string {
+    if (!ts) return ''
+    const mins = Math.round((now - ts) / 60000)
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.round(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    return `${Math.round(hrs / 24)}d ago`
+  }
+
+  // Auto-load on mount: use cached data if fresh, otherwise fetch
+  // Also detect new teams/schools not in cache (roster changes)
   const schedulesInitialized = useRef(false)
   useEffect(() => {
     if (schedulesInitialized.current) return
     if (players.length === 0) return // wait for roster
-    if (allSchedulesLoaded) return // already have data
     if (anyScheduleLoading) return // already in progress
+
+    // If we have cached data, check for gaps (new players/teams not in cache)
+    if (allSchedulesLoaded) {
+      schedulesInitialized.current = true
+      // Check for new teams not in cached Pro data
+      const assignments = useScheduleStore.getState().playerTeamAssignments
+      const assignedTeamIds = new Set(Object.values(assignments).map((a) => a.teamId))
+      const cachedSet = new Set(cachedProTeamIds)
+      const missingProTeams = [...assignedTeamIds].filter((id) => !cachedSet.has(id))
+
+      // Check for new NCAA schools not in cache
+      const ncaaPlayerSchools = players
+        .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+        .map((p) => p.org)
+      const ncaaCachedSet = new Set(cachedNcaaSchools)
+      const missingNcaa = ncaaPlayerSchools.filter((org) => !ncaaCachedSet.has(org))
+
+      if (missingProTeams.length > 0 || missingNcaa.length > 0) {
+        // Incremental fetch for just the missing teams/schools
+        handleIncrementalLoad(missingProTeams, missingNcaa)
+      }
+      return
+    }
+
+    // No cached data — full load
     schedulesInitialized.current = true
     handleLoadAllSchedules()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [players.length, allSchedulesLoaded, anyScheduleLoading])
+
+  async function handleIncrementalLoad(missingProTeamIds: number[], missingNcaaOrgs: string[]) {
+    const schedStore = useScheduleStore.getState()
+    // For Pro: re-fetch will include new teams automatically since it reads current assignments
+    if (missingProTeamIds.length > 0) {
+      const y = new Date().getFullYear()
+      schedStore.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+    }
+    // For NCAA: fetch only the missing schools
+    if (missingNcaaOrgs.length > 0) {
+      const ncaaOrgs = players
+        .filter((p) => p.level === 'NCAA' && missingNcaaOrgs.includes(p.org) && p.visitsRemaining > 0)
+        .map((p) => ({ playerName: p.playerName, org: p.org }))
+      if (ncaaOrgs.length > 0) {
+        schedStore.fetchNcaaSchedules(ncaaOrgs, { merge: true })
+      }
+    }
+  }
 
   async function handleLoadAllSchedules() {
     if (anyScheduleLoading) return
@@ -481,19 +549,22 @@ export default function TripPlanner() {
             {!anyScheduleLoading && (proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0) && (
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
                 {proGames.length > 0 && (
-                  <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
-                    Pro: {proGames.length} games
+                  <span className={`rounded-full px-2 py-0.5 ${proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
+                    Pro: {proGames.length} games {proFetchedAt ? `(${formatAge(proFetchedAt)})` : ''}
                   </span>
                 )}
                 {ncaaGames.length > 0 && (
-                  <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
-                    College: {ncaaGames.length} games
+                  <span className={`rounded-full px-2 py-0.5 ${ncaaStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
+                    College: {ncaaGames.length} games {ncaaFetchedAt ? `(${formatAge(ncaaFetchedAt)})` : ''}
                   </span>
                 )}
                 {hsGames.length > 0 && (
-                  <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-accent-green">
-                    HS: {hsGames.length} games
+                  <span className={`rounded-full px-2 py-0.5 ${hsStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
+                    HS: {hsGames.length} games {hsFetchedAt ? `(${formatAge(hsFetchedAt)})` : ''}
                   </span>
+                )}
+                {anyStale && (
+                  <span className="text-[10px] text-accent-orange/70">Stale — consider reloading</span>
                 )}
               </div>
             )}
