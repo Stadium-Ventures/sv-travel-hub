@@ -29,6 +29,8 @@ export default function RosterDashboard() {
   const customMlbAliases = useScheduleStore((s) => s.customMlbAliases)
   const customNcaaAliases = useScheduleStore((s) => s.customNcaaAliases)
   const setCustomAlias = useScheduleStore((s) => s.setCustomAlias)
+  const proGames = useScheduleStore((s) => s.proGames)
+  const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
 
   const sortField = useRosterStore((s) => s.sortColumn)
   const sortDir = useRosterStore((s) => s.sortDirection)
@@ -280,10 +282,36 @@ export default function RosterDashboard() {
 
           {/* Verify results panel */}
           {recentLog.length > 0 && !autoAssignLoading && (
-            <VerifyResultsPanel
-              log={recentLog}
-              springTraining={autoAssignResult?.springTrainingEstimate ?? false}
-            />
+            <>
+              <VerifyResultsPanel
+                log={recentLog}
+                springTraining={autoAssignResult?.springTrainingEstimate ?? false}
+              />
+              {/* Stale schedules warning when assignments changed */}
+              {recentLog.some((e) => e.action === 'reassigned') && proGames.length > 0 && (
+                <div className="mb-3 rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-4 py-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-accent-orange">Assignments changed — schedules may be stale</p>
+                      <p className="mt-0.5 text-[11px] text-text-dim">
+                        Pro schedules were loaded with previous team assignments. Reload to fetch games for the updated teams.
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const store = useScheduleStore.getState()
+                        const y = new Date().getFullYear()
+                        await store.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+                      }}
+                      disabled={schedulesLoading}
+                      className="ml-4 shrink-0 rounded-lg bg-accent-orange px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"
+                    >
+                      {schedulesLoading ? 'Reloading...' : 'Reload Pro Schedules'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {autoAssignResult?.springTrainingEstimate && recentLog.length === 0 && (

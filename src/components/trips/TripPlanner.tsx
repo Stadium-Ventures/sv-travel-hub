@@ -613,19 +613,7 @@ export default function TripPlanner() {
               <input
                 type="date"
                 value={startDate}
-                max={endDate}
-                onChange={(e) => {
-                  const newStart = e.target.value
-                  // Cap at 30 days
-                  const startMs = new Date(newStart).getTime()
-                  const endMs = new Date(endDate).getTime()
-                  if (endMs - startMs > 30 * 86400000) {
-                    const capped = new Date(startMs + 30 * 86400000).toISOString().split('T')[0]!
-                    setDateRange(newStart, capped)
-                  } else {
-                    setDateRange(newStart, endDate)
-                  }
-                }}
+                onChange={(e) => setDateRange(e.target.value, endDate)}
                 className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
               />
               <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
@@ -639,19 +627,7 @@ export default function TripPlanner() {
               <input
                 type="date"
                 value={endDate}
-                min={startDate}
-                onChange={(e) => {
-                  const newEnd = e.target.value
-                  // Cap at 30 days
-                  const startMs = new Date(startDate).getTime()
-                  const endMs = new Date(newEnd).getTime()
-                  if (endMs - startMs > 30 * 86400000) {
-                    const capped = new Date(endMs - 30 * 86400000).toISOString().split('T')[0]!
-                    setDateRange(capped, newEnd)
-                  } else {
-                    setDateRange(startDate, newEnd)
-                  }
-                }}
+                onChange={(e) => setDateRange(startDate, e.target.value)}
                 className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
               />
               <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
