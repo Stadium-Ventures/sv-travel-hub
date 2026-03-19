@@ -541,12 +541,12 @@ export default function TripPlanner() {
                   : 'bg-accent-blue text-white hover:bg-accent-blue/80'
               } disabled:opacity-50`}
             >
-              {anyScheduleLoading
+              {anyScheduleLoading && !allSchedulesLoaded
                 ? 'Loading Schedules...'
                 : allSchedulesLoaded ? 'Reload Schedules' : 'Load All Schedules'}
             </button>
-            {/* Inline schedule status chips (when not loading) */}
-            {!anyScheduleLoading && (proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0) && (
+            {/* Inline schedule status chips (show when data exists, even during incremental loads) */}
+            {(proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0) && (
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
                 {proGames.length > 0 && (
                   <span className={`rounded-full px-2 py-0.5 ${proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
@@ -570,8 +570,8 @@ export default function TripPlanner() {
             )}
           </div>
 
-          {/* Per-source progress bars during loading */}
-          {anyScheduleLoading && (
+          {/* Per-source progress bars — only during active network fetches, not cached restores */}
+          {anyScheduleLoading && !allSchedulesLoaded && (
             <div className="mt-3 space-y-2">
               <ScheduleProgressRow
                 label="Pro Schedules"
