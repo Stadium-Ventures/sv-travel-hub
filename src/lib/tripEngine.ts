@@ -1094,6 +1094,7 @@ export async function generateTrips(
   // For each player, keep their best fly-in (highest score) and best Tuesday fly-in.
   // This prevents a priority player from filling all 10 result slots.
   const playerFlyInCount = new Map<string, number>()
+  const venuesSeen = new Set<string>()
   const MAX_FLYINS_PER_PLAYER = 2
   const diverseFlyIns: FlyInVisit[] = []
 
@@ -1105,6 +1106,11 @@ export async function generateTrips(
   })
 
   for (const visit of flyInVisits) {
+    // Deduplicate venues — 1 fly-in per venue (keep best score, already sorted)
+    const venueKey = `${visit.venue.coords.lat.toFixed(3)},${visit.venue.coords.lng.toFixed(3)}`
+    if (venuesSeen.has(venueKey)) continue
+    venuesSeen.add(venueKey)
+
     // Check if any player in this fly-in still has room
     const hasRoom = visit.playerNames.some((n) => {
       return (playerFlyInCount.get(n) ?? 0) < MAX_FLYINS_PER_PLAYER

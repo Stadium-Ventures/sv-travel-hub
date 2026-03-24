@@ -306,26 +306,27 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
     totalDrive += Math.round((haversineKm(lastCoords, HOME_BASE) * 1.3 / 90) * 60)
   }
 
-  // Assign stops to days, then trim leading empty days for short drives (same-day travel OK)
+  // Assign stops to days, then remove empty days (no reason to show "flex days" with no games)
   const { dayAssignments, displayDays } = useMemo(() => {
     const assignments = assignStopsToDays(stops, trip.suggestedDays)
-    let days = [...trip.suggestedDays]
-
-    // For drives ≤ 2.5h with evening games, skip empty leading "travel day"
-    // since you can drive same-day in the morning and make it for a night game
-    if (days.length > 1 && trip.driveFromHomeMinutes <= 150) {
-      while (days.length > 1) {
-        const firstDay = days[0]!
-        const firstDayStops = assignments.get(firstDay) ?? []
-        if (firstDayStops.length === 0) {
-          assignments.delete(firstDay)
-          days = days.slice(1)
-        } else break
+    // Keep only days that have games, plus the last day as "return home" if it's after a game day
+    const daysWithGames = trip.suggestedDays.filter((d) => (assignments.get(d) ?? []).length > 0)
+    let days: string[]
+    if (daysWithGames.length === 0) {
+      days = [trip.suggestedDays[0]!] // fallback
+    } else {
+      const lastGameDay = daysWithGames[daysWithGames.length - 1]!
+      const lastSuggested = trip.suggestedDays[trip.suggestedDays.length - 1]!
+      // Add a return-home day after the last game day if there's one in the original window
+      if (lastGameDay !== lastSuggested && trip.suggestedDays.indexOf(lastSuggested) > trip.suggestedDays.indexOf(lastGameDay)) {
+        days = [...daysWithGames, lastSuggested]
+      } else {
+        days = [...daysWithGames]
       }
     }
 
     return { dayAssignments: assignments, displayDays: days }
-  }, [stops, trip.suggestedDays, trip.driveFromHomeMinutes])
+  }, [stops, trip.suggestedDays])
 
   const startDate = formatDate(displayDays[0]!)
   const endDate = formatDate(displayDays[displayDays.length - 1]!)

@@ -1551,86 +1551,84 @@ function FlyInCard({
         </div>
       </div>
 
-      {/* Expanded content — simplified: one plan, not repeated per day */}
-      {expanded && (
+      {/* Expanded content — day-by-day itinerary matching road trip format */}
+      {expanded && (() => {
+        const bestDay = visit.dates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === 2) ?? visit.dates[0]!
+        const isTue = new Date(bestDay + 'T12:00:00Z').getUTCDay() === 2
+        const hasMultipleDays = visit.dates.length > 1
+        return (
         <div className="mt-4 space-y-3">
-          {/* Recommendation */}
+          {/* Day 1: Travel + Game */}
           <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
-            <div className="flex flex-wrap items-center gap-1.5 mb-2">
-              {orgLabel && orgLabel !== visit.venue.name ? (
-                <>
-                  <span className="text-sm font-semibold text-text">{orgLabel}</span>
-                  <span className="text-xs text-text-dim">{visit.venue.name}</span>
-                </>
-              ) : (
-                <span className="text-sm font-semibold text-text">{visit.venue.name}</span>
-              )}
-              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${sourceBadge.color}`}>
-                {sourceBadge.label}
-              </span>
-              {visit.confidence && visit.confidence !== 'high' && (
-                <span className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-[10px] text-accent-orange">
-                  Estimated — verify before booking
-                </span>
-              )}
-              {visit.sourceUrl && (
-                <a href={visit.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400">Verify ↗</a>
-              )}
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-purple-400">Day 1</span>
+                <span className="text-xs text-text-dim">{formatDate(bestDay)}{isTue ? ' (best day)' : ''}</span>
+              </div>
+              <span className="text-[10px] text-text-dim">Fly from Orlando · ~{visit.estimatedTravelHours}h travel</span>
             </div>
 
-            {/* Travel info inline */}
-            <p className="text-xs text-text-dim mb-2">
-              ~{visit.estimatedTravelHours}h travel from Orlando ({milesDisplay} mi) · flight + rental car
-            </p>
-
-            {/* Best date recommendation */}
-            {(() => {
-              const bestDay = visit.dates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === 2) ?? visit.dates[0]
-              if (!bestDay) return null
-              const bestDate = new Date(bestDay + 'T12:00:00Z')
-              const isTue = bestDate.getUTCDay() === 2
-              return (
-                <p className="text-sm text-text">
-                  <span className={`font-medium ${isTue ? 'text-accent-blue' : ''}`}>
-                    Best day: {formatDate(bestDay)}
-                    {isTue ? ' (Tuesday — ideal for position players)' : ''}
+            <div className="ml-4 space-y-2">
+              <div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-sm font-medium text-text">
+                    {orgLabel || visit.venue.name}
                   </span>
-                  {visit.dates.length > 1 && (
-                    <span className="text-text-dim text-xs ml-2">
-                      ({visit.dates.length} days available: {visit.dates.map(d => {
-                        const dt = new Date(d + 'T12:00:00Z')
-                        return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]
-                      }).join(', ')})
-                    </span>
+                  {orgLabel && orgLabel !== visit.venue.name && (
+                    <span className="text-[11px] text-text-dim/60">{visit.venue.name}</span>
                   )}
-                </p>
-              )
-            })()}
-
-            {/* Players */}
-            <div className="mt-2 flex flex-wrap gap-1">
-              {visit.playerNames.map((name) => {
-                const player = playerMap.get(name)
-                const tier = player?.tier ?? 4
-                const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                return (
-                  <span
-                    key={name}
-                    className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-text cursor-pointer hover:bg-accent-blue/10"
-                    onClick={(e) => { e.stopPropagation(); onPlayerClick(name) }}
-                  >
-                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
-                    {name}
-                    <span className="text-text-dim/50">T{tier}</span>
+                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${sourceBadge.color}`}>
+                    {sourceBadge.label}
                   </span>
-                )
-              })}
+                  {visit.sourceUrl && (
+                    <a href={visit.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400">Verify ↗</a>
+                  )}
+                </div>
+                {isTue && (
+                  <p className="mt-1 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>
+                )}
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {visit.playerNames.map((name) => {
+                    const player = playerMap.get(name)
+                    const tier = player?.tier ?? 4
+                    const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                    return (
+                      <span key={name} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-text cursor-pointer hover:bg-accent-blue/10"
+                        onClick={(e) => { e.stopPropagation(); onPlayerClick(name) }}>
+                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
+                        {name} <span className="text-text-dim/50">T{tier}</span>
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
-
-            {flyInWhy && (
-              <p className="mt-2 text-xs italic text-text-dim/60">{flyInWhy}</p>
-            )}
           </div>
+
+          {/* Day 2+ if multi-day */}
+          {hasMultipleDays && visit.dates.filter(d => d !== bestDay).map((d, i) => (
+            <div key={d} className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-text-dim">Day {i + 2}</span>
+                <span className="text-xs text-text-dim">{formatDate(d)}</span>
+                <span className="text-[10px] text-text-dim/50">Also available for games</span>
+              </div>
+            </div>
+          ))}
+
+          {/* Return day */}
+          <div className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-text-dim">Day {visit.dates.length + 1}</span>
+                <span className="text-xs text-text-dim/50">Fly home</span>
+              </div>
+            </div>
+          </div>
+
+          {flyInWhy && (
+            <p className="text-xs italic text-text-dim/60">{flyInWhy}</p>
+          )}
 
           {/* Actions */}
           <div className="flex flex-wrap gap-2">
@@ -1641,9 +1639,9 @@ function FlyInCard({
               {copiedFlyIn === flyInKey ? 'Copied!' : 'Copy Itinerary'}
             </button>
           </div>
-
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
