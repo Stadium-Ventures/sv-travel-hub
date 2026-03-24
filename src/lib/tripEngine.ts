@@ -938,10 +938,9 @@ export async function generateTrips(
       const efficiencyFactor = driveHours > 0 ? Math.max(0.6, 1.0 - (driveHours - 3) * 0.05) : 1.0
       rawCoverageScore = Math.round(rawCoverageScore * efficiencyFactor)
 
-      // Penalize trips that overlap with already-selected trips
-      // (you can't physically be in two places at once)
+      // Skip trips that overlap with already-selected trips — can't be in two places at once
       const overlapsExisting = selectedTrips.some(existing => tripsOverlap(existing, trip))
-      if (overlapsExisting) rawCoverageScore = Math.round(rawCoverageScore * 0.3)
+      if (overlapsExisting) { rawCoverageScore = 0 }
 
       trip.visitValue = rawCoverageScore
       trip.totalPlayersVisited = uniqueNames.length
@@ -1130,7 +1129,8 @@ export async function generateTrips(
 
   // When priority players are set, prefer fly-ins that include them — but don't
   // filter out all others (priority players may only appear in 1-2 fly-ins)
-  const finalDiverseFlyIns = diverseFlyIns
+  // Cap at 25 fly-ins — more than enough for display, saves computation
+  const finalDiverseFlyIns = diverseFlyIns.slice(0, 25)
 
   // Replace flyInVisits with diverse set
   flyInVisits.length = 0

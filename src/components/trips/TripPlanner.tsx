@@ -498,7 +498,12 @@ export default function TripPlanner() {
           </p>
         )}
         <div className="space-y-4">
-          {visibleVisits.map((visit, i) => (
+          {visibleVisits.map((visit, i) => {
+            // Detect date overlaps with other visible fly-ins
+            const overlappingIndices = visibleVisits
+              .map((other, j) => j !== i && other.dates.some(d => visit.dates.includes(d)) ? j + 1 : null)
+              .filter((x): x is number => x !== null)
+            return (
             <FlyInCard
               key={i}
               visit={visit}
@@ -506,13 +511,14 @@ export default function TripPlanner() {
               players={players}
               playerMap={playerMap}
               priorityPlayers={priorityPlayers}
-
+              dateConflicts={overlappingIndices}
               copiedFlyIn={copiedFlyIn}
               setCopiedFlyIn={setCopiedFlyIn}
               onPlayerClick={setSelectedPlayer}
               defaultExpanded={i === 0}
             />
-          ))}
+            )
+          })}
         </div>
       </div>
     )
@@ -987,7 +993,11 @@ export default function TripPlanner() {
                           const idx = sorted.findIndex((t) => t.anchorGame.playerNames.includes(n) || t.nearbyGames.some((g) => g.playerNames.includes(n)))
                           return `${n} → Trip #${idx + 1}`
                         }).join(' · ')}
-                        {prioInFlyIn.length > 0 && ` · ${prioInFlyIn.join(', ')} → Fly-in`}
+                        {prioInFlyIn.length > 0 && prioInFlyIn.map((n) => {
+                          const bestVisit = tripPlan.flyInVisits.find((v) => v.playerNames.includes(n))
+                          const bestDate = bestVisit?.dates[0]
+                          return ` · ${n} → Fly-in${bestDate ? ` (${formatDate(bestDate)})` : ''}`
+                        }).join('')}
                       </span>
                   }
                 </p>
@@ -1365,13 +1375,14 @@ function StatCard({ label, value, accent, scrollTo, hoverNames }: {
 
 function FlyInCard({
   visit, index, players, playerMap, priorityPlayers,
-  copiedFlyIn, setCopiedFlyIn, onPlayerClick, defaultExpanded,
+  dateConflicts, copiedFlyIn, setCopiedFlyIn, onPlayerClick, defaultExpanded,
 }: {
   visit: import('../../types/schedule').FlyInVisit
   index: number
   players: RosterPlayer[]
   playerMap: Map<string, RosterPlayer>
   priorityPlayers: string[]
+  dateConflicts?: number[]
   copiedFlyIn: string | null
   setCopiedFlyIn: (key: string | null) => void
   onPlayerClick: (name: string) => void
@@ -1502,6 +1513,11 @@ function FlyInCard({
             <span className="ml-2 text-xs text-text-dim/60">
               {dayCount}-day trip
             </span>
+            {dateConflicts && dateConflicts.length > 0 && (
+              <span className="ml-2 rounded bg-accent-orange/10 px-1.5 py-0.5 text-[10px] text-accent-orange">
+                Overlaps with Fly-in #{dateConflicts.join(', #')}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">

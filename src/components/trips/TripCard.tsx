@@ -394,10 +394,19 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
           </div>
           {/* Compact summary line */}
           <p className="mt-0.5 text-sm text-text-dim">
-            {dateLabel} · {allPlayers.size} player{allPlayers.size !== 1 ? 's' : ''} · {stops.length} stop{stops.length !== 1 ? 's' : ''} · ~{formatDriveTime(totalDrive)}
+            {dateLabel} · {allPlayers.size} player{allPlayers.size !== 1 ? 's' : ''} · {stops.length} stop{stops.length !== 1 ? 's' : ''} · ~{formatDriveTime(trip.driveFromHomeMinutes)} from Orlando
             {t1Names.length > 0 && (
               <span className="ml-1 text-accent-red font-medium"> · {t1Names.join(', ')}</span>
             )}
+            {breakdown && (() => {
+              const highlights: string[] = []
+              if (breakdown.tuesdayBonus) highlights.push('Tue bonus')
+              if (breakdown.pitcherMatchBonus > 0) highlights.push('pitcher start')
+              if (trip.nearbyGames.length > 0) highlights.push('multi-venue')
+              return highlights.length > 0 ? (
+                <span className="ml-1 text-[10px] text-accent-blue/70"> · {highlights.join(' + ')}</span>
+              ) : null
+            })()}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -506,6 +515,15 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                                   {stop.confidence === 'medium' ? 'Likely' : 'Unconfirmed'}
                                 </span>
                               )}
+                              {stop.awayTeam === 'Spring Training' && (() => {
+                                const gameDate = new Date(stop.dates[0] + 'T12:00:00Z')
+                                const marchEnd = new Date(gameDate.getUTCFullYear(), 2, 28) // Mar 28
+                                return gameDate >= marchEnd ? (
+                                  <span className="rounded bg-accent-red/10 px-1.5 py-0.5 text-[10px] text-accent-red">
+                                    ST ends soon — verify
+                                  </span>
+                                ) : null
+                              })()}
                               {stop.sourceUrl && (
                                 <a href={stop.sourceUrl} target="_blank" rel="noopener noreferrer"
                                   className="text-[10px] text-text-dim/50 hover:text-accent-blue">Verify ↗</a>
