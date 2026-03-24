@@ -748,6 +748,14 @@ export default function TripPlanner() {
           </div>
         </div>
 
+        {/* Trip Anchor — "I'll be in [city], who's nearby?" */}
+        <TripAnchor
+          allGames={[...proGames, ...ncaaGames, ...hsGames]}
+          playerMap={playerMap}
+          startDate={startDate}
+          endDate={endDate}
+        />
+
         {!canGenerate && !computing && players.length === 0 && (
           <p className="mt-3 text-xs text-accent-orange">Loading roster...</p>
         )}
@@ -1334,6 +1342,148 @@ function StatCard({ label, value, accent, scrollTo, hoverNames }: {
           <p className="mb-1 text-[10px] font-medium text-text-dim">{label} ({hoverNames.length})</p>
           <p className="text-[11px] text-text leading-relaxed">{hoverNames.join(', ')}</p>
         </div>
+      )}
+    </div>
+  )
+}
+
+// --- Trip Anchor: "I'll be in [city], who can I see nearby?" ---
+function TripAnchor({
+  allGames,
+  playerMap,
+  startDate,
+  endDate,
+}: {
+  allGames: import('../../types/schedule').GameEvent[]
+  playerMap: Map<string, RosterPlayer>
+  startDate: string
+  endDate: string
+}) {
+  const [anchorCity, setAnchorCity] = useState('')
+  const [anchorCoords, setAnchorCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [results, setResults] = useState<Array<{ playerName: string; venue: string; date: string; driveMin: number; org: string; tier: number }>>([])
+  const [expanded, setExpanded] = useState(false)
+  const MAX_ANCHOR_DRIVE = 180 // 3h drive from anchor point
+
+  async function handleSearch() {
+    if (!anchorCity.trim()) return
+    setSearching(true)
+    setResults([])
+    try {
+      // First check the bundled airports for quick match
+      const { MAJOR_AIRPORTS } = await import('../../data/majorAirports')
+      const cityLower = anchorCity.toLowerCase().trim()
+      const airportMatch = MAJOR_AIRPORTS.find((a) =>
+        a.name.toLowerCase().includes(cityLower) || a.code.toLowerCase() === cityLower
+      )
+
+      let coords: { lat: number; lng: number }
+      if (airportMatch) {
+        coords = airportMatch.coords
+      } else {
+        // Geocode via Nominatim
+        const params = new URLSearchParams({ q: `${anchorCity}, USA`, format: 'json', limit: '1' })
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+          headers: { 'User-Agent': 'SVTravelHub/1.0' },
+        })
+        const data = await res.json()
+        if (!data.length) { setSearching(false); return }
+        coords = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
+      }
+
+      setAnchorCoords(coords)
+
+      // Find all games within driving range of this anchor during the date range
+      const { estimateDriveMinutes } = await import('../../lib/tripEngine')
+      const nearby: typeof results = []
+      const seen = new Set<string>() // dedupe by player+date
+
+      for (const game of allGames) {
+        if (game.date < startDate || game.date > endDate) continue
+        if (game.venue.coords.lat === 0) continue
+
+        const driveMin = estimateDriveMinutes(coords, game.venue.coords)
+        if (driveMin > MAX_ANCHOR_DRIVE) continue
+
+        for (const name of game.playerNames) {
+          const key = `${name}|${game.date}`
+          if (seen.has(key)) continue
+          seen.add(key)
+
+          const player = playerMap.get(name)
+          if (!player) continue
+
+          nearby.push({
+            playerName: name,
+            venue: game.venue.name,
+            date: game.date,
+            driveMin: Math.round(driveMin),
+            org: player.org,
+            tier: player.tier,
+          })
+        }
+      }
+
+      // Sort by date, then tier
+      nearby.sort((a, b) => a.date.localeCompare(b.date) || a.tier - b.tier)
+      setResults(nearby)
+      setExpanded(true)
+    } catch (err) {
+      console.warn('Anchor search failed:', err)
+    }
+    setSearching(false)
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
+      <label className="mb-2 block text-xs font-medium text-text-dim">
+        Trip Anchor <span className="text-text-dim/50">(optional — "I'll be in [city], who's nearby?")</span>
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={anchorCity}
+          onChange={(e) => setAnchorCity(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSearch() }}
+          placeholder="Enter a city (e.g., Boston, Atlanta, Nashville...)"
+          className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text placeholder:text-text-dim/50 focus:border-accent-blue focus:outline-none"
+        />
+        <button
+          onClick={handleSearch}
+          disabled={searching || !anchorCity.trim()}
+          className="rounded-lg bg-purple-500/20 px-3 py-1.5 text-sm font-medium text-purple-400 hover:bg-purple-500/30 disabled:opacity-50"
+        >
+          {searching ? 'Searching...' : 'Find Players'}
+        </button>
+        {results.length > 0 && (
+          <button onClick={() => { setResults([]); setAnchorCity(''); setExpanded(false) }} className="text-xs text-text-dim hover:text-text">Clear</button>
+        )}
+      </div>
+
+      {expanded && results.length > 0 && (
+        <div className="mt-3 rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
+          <p className="mb-2 text-xs text-text-dim">
+            <span className="font-medium text-purple-400">{results.length} player-games</span> within 3h drive of {anchorCity}
+            {anchorCoords && <span className="text-text-dim/50"> ({anchorCoords.lat.toFixed(1)}, {anchorCoords.lng.toFixed(1)})</span>}
+          </p>
+          <div className="max-h-48 overflow-y-auto space-y-1">
+            {results.slice(0, 30).map((r, i) => (
+              <div key={i} className="flex items-center gap-2 text-[11px]">
+                <span className="w-20 text-text-dim">{formatDate(r.date)}</span>
+                <span className={`h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[r.tier] ?? 'bg-gray-500'}`} />
+                <span className="font-medium text-text">{r.playerName}</span>
+                <span className="text-text-dim/60">{r.org}</span>
+                <span className="ml-auto text-text-dim/50">~{Math.floor(r.driveMin / 60)}h {r.driveMin % 60}m</span>
+              </div>
+            ))}
+          </div>
+          {results.length > 30 && <p className="mt-1 text-[10px] text-text-dim/50">{results.length - 30} more...</p>}
+        </div>
+      )}
+
+      {expanded && results.length === 0 && !searching && anchorCity && (
+        <p className="mt-2 text-xs text-text-dim">No players found within 3h drive of {anchorCity} during this date range.</p>
       )}
     </div>
   )
