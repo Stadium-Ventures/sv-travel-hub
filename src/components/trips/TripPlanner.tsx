@@ -75,6 +75,13 @@ function PlayerSearchPicker({
 
   const selectedPlayer = players.find((p) => p.playerName === value)
 
+  // Auto-clear stale selection (player no longer eligible)
+  useEffect(() => {
+    if (value && !selectedPlayer) {
+      onChange('')
+    }
+  }, [value, selectedPlayer, onChange])
+
   return (
     <div ref={containerRef} className="relative min-w-[220px]">
       {value && selectedPlayer ? (
@@ -100,7 +107,7 @@ function PlayerSearchPicker({
         />
       )}
 
-      {open && !value && (
+      {open && !selectedPlayer && (
         <div className="absolute left-0 top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-border bg-surface shadow-lg">
           {grouped.length === 0 && (
             <p className="px-3 py-2 text-xs text-text-dim">No players match "{search}"</p>
