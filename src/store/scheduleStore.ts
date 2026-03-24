@@ -939,8 +939,10 @@ export const useScheduleStore = create<ScheduleState>()(
               }
             }
 
-            // Async geocoding only for truly unknown venues (cap at 10 to avoid long waits)
-            const geocodeBatch = needsGeocoding.slice(0, 10)
+            // Async geocoding only for truly unknown venues — skip on first load
+            // (bundled data + NCAA_VENUES covers most cases; geocode on reload)
+            const MAX_GEOCODE = merge ? 10 : 0
+            const geocodeBatch = needsGeocoding.slice(0, MAX_GEOCODE)
             if (geocodeBatch.length > 0) {
               const baseCompleted = schoolToPlayers.size
               const extendedTotal = baseCompleted + geocodeBatch.length
