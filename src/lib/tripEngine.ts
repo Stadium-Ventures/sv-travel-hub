@@ -1068,8 +1068,156 @@ export async function generateTrips(
     }
   }
 
-  // Convert to FlyInVisit array — each entry is one week at one venue
+  // --- Fly-in Combo Builder ---
+  // Cluster distant venues that are drivable from each other, then build
+  // multi-stop fly-in itineraries (fly to hub, drive between venues, fly home).
+  const comboVenuesUsed = new Set<string>() // track venues claimed by combos
+
+  // Group flyInWeekMap entries by week number
+  const entriesByWeek = new Map<number, typeof flyInWeekMap extends Map<string, infer V> ? Array<{ key: string; entry: V }> : never>()
+  for (const [key, entry] of flyInWeekMap) {
+    const weekEntries = entriesByWeek.get(entry.weekNum) ?? []
+    weekEntries.push({ key, entry })
+    entriesByWeek.set(entry.weekNum, weekEntries)
+  }
+
+  // For each week, find venue clusters (venues within 3h drive of each other)
+  const MAX_COMBO_INTER_VENUE = 180 // 3h drive between fly-in combo stops
+  for (const [, weekEntries] of entriesByWeek) {
+    if (weekEntries.length < 2) continue // need 2+ venues to form a combo
+
+    // Build adjacency: which venues are drivable from which
+    const venues = weekEntries.map(({ key, entry }) => ({
+      key,
+      entry,
+      coordKey: coordKey(entry.venue.coords),
+    }))
+
+    // Simple greedy clustering: for each unvisited venue, find all reachable neighbors
+    const visited = new Set<number>()
+    for (let i = 0; i < venues.length; i++) {
+      if (visited.has(i)) continue
+      const cluster = [i]
+      visited.add(i)
+
+      // Find all venues reachable from any venue in the cluster
+      for (let ci = 0; ci < cluster.length; ci++) {
+        const clusterVenue = venues[cluster[ci]!]!
+        for (let j = 0; j < venues.length; j++) {
+          if (visited.has(j)) continue
+          const drive = lookupDriveMinutes(clusterVenue.entry.venue.coords, venues[j]!.entry.venue.coords)
+          if (drive <= MAX_COMBO_INTER_VENUE) {
+            cluster.push(j)
+            visited.add(j)
+          }
+        }
+      }
+
+      if (cluster.length < 2) continue // single-venue, handle as regular fly-in
+
+      // Build combo fly-in from this cluster (max 3 stops for a 3-day trip)
+      const clusterVenues = cluster.slice(0, 3).map((idx) => venues[idx]!)
+
+      // Find best anchor date across all cluster venues (prefer Tuesday)
+      const allDates = new Set<string>()
+      for (const v of clusterVenues) {
+        for (const d of v.entry.dates) allDates.add(d)
+      }
+      const sortedDates = [...allDates].sort()
+      const bestDate = sortedDates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY) ?? sortedDates[0]!
+      const tripWindow = getTripWindow(bestDate)
+
+      // Assign one venue per day within the trip window
+      const stops: import('../types/schedule').FlyInStop[] = []
+      const usedDays = new Set<string>()
+      const allPlayerNames = new Set<string>()
+
+      // Sort cluster venues by player value (most valuable first)
+      clusterVenues.sort((a, b) => b.entry.players.size - a.entry.players.size)
+
+      for (const v of clusterVenues) {
+        // Find best available day for this venue (prefer matching dates, then any trip day)
+        const venueDates = [...v.entry.dates].sort()
+        const matchingDay = tripWindow.find(d => venueDates.includes(d) && !usedDays.has(d))
+          ?? tripWindow.find(d => !usedDays.has(d))
+        if (!matchingDay) continue
+
+        usedDays.add(matchingDay)
+        const prevStop = stops[stops.length - 1]
+        const driveFromPrev = prevStop
+          ? lookupDriveMinutes(prevStop.venue.coords, v.entry.venue.coords)
+          : 0
+
+        const playerNames = [...v.entry.players]
+        for (const n of playerNames) allPlayerNames.add(n)
+
+        stops.push({
+          venue: v.entry.venue,
+          playerNames,
+          date: matchingDay,
+          driveMinutesFromPrev: driveFromPrev,
+          source: v.entry.source,
+          isHome: v.entry.isHome,
+          sourceUrl: v.entry.sourceUrl,
+          confidence: v.entry.confidence,
+          teamLabel: v.entry.teamLabel,
+        })
+
+        comboVenuesUsed.add(v.coordKey)
+      }
+
+      if (stops.length < 2) continue // couldn't build a multi-stop combo
+
+      // Sort stops by date
+      stops.sort((a, b) => a.date.localeCompare(b.date))
+      // Recalculate inter-stop drives after sorting
+      for (let si = 1; si < stops.length; si++) {
+        stops[si]!.driveMinutesFromPrev = lookupDriveMinutes(
+          stops[si - 1]!.venue.coords, stops[si]!.venue.coords,
+        )
+      }
+
+      const totalInterDrive = stops.reduce((sum, s) => sum + s.driveMinutesFromPrev, 0)
+      const comboPlayerNames = [...allPlayerNames]
+      const isTuesday = new Date(bestDate + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY
+      const comboBreakdown = computeScoreBreakdown(comboPlayerNames, playerMap, isTuesday, urgencyMap, [])
+      // Combo bonus: 20% per additional stop
+      const comboMultiplier = 1 + (0.2 * (stops.length - 1))
+      comboBreakdown.finalScore = Math.round(comboBreakdown.finalScore * comboMultiplier)
+
+      // Use first stop as primary venue, find nearest airport to centroid
+      const centroidLat = stops.reduce((s, st) => s + st.venue.coords.lat, 0) / stops.length
+      const centroidLng = stops.reduce((s, st) => s + st.venue.coords.lng, 0) / stops.length
+
+      const hubCoords = { lat: centroidLat, lng: centroidLng }
+      const distFromOrlando = haversineKm(HOME_BASE, hubCoords)
+
+      flyInVisits.push({
+        playerNames: comboPlayerNames,
+        venue: stops[0]!.venue, // primary venue
+        dates: stops.map(s => s.date),
+        distanceKm: Math.round(distFromOrlando),
+        estimatedTravelHours: estimateFlightHours(distFromOrlando),
+        visitValue: comboBreakdown.finalScore,
+        scoreBreakdown: comboBreakdown,
+        source: stops[0]!.source,
+        isHome: stops[0]!.isHome,
+        sourceUrl: stops[0]!.sourceUrl,
+        confidence: stops.some(s => s.confidence !== 'high') ? 'medium' : 'high',
+        teamLabel: stops[0]!.teamLabel,
+        isCombo: true,
+        stops,
+        totalDriveMinutes: totalInterDrive,
+      })
+
+      for (const n of allPlayerNames) flyInCovered.add(n)
+    }
+  }
+
+  // Convert remaining single-venue entries to FlyInVisit array (skip venues already in combos)
   for (const [, entry] of flyInWeekMap) {
+    const venueCoordKey = coordKey(entry.venue.coords)
+    if (comboVenuesUsed.has(venueCoordKey)) continue // already in a combo
     const sortedDates = [...entry.dates].sort()
     // Trim to a 3-day trip window centered on the best day (prefer Tuesday)
     const bestDate = sortedDates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY) ?? sortedDates[0]!

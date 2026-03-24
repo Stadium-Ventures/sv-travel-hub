@@ -1499,6 +1499,11 @@ function FlyInCard({
             <h3 className="text-base font-semibold text-text">
               Fly-in #{index}
             </h3>
+            {visit.isCombo && (
+              <span className="rounded-lg bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-400">
+                {visit.stops?.length ?? 0} stops · {visit.totalDriveMinutes ? formatDriveTime(visit.totalDriveMinutes) + ' driving' : ''}
+              </span>
+            )}
           </div>
           <p className="mt-0.5 text-sm text-text-dim">
             {dateLabel}
@@ -1543,11 +1548,101 @@ function FlyInCard({
         </div>
       </div>
 
-      {/* Expanded content — day-by-day itinerary matching road trip format */}
+      {/* Expanded content — day-by-day itinerary */}
       {expanded && (() => {
         const bestDay = visit.dates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === 2) ?? visit.dates[0]!
         const isTue = new Date(bestDay + 'T12:00:00Z').getUTCDay() === 2
         const hasMultipleDays = visit.dates.length > 1
+
+        // Combo trip: multi-stop fly-in with driving between venues
+        if (visit.isCombo && visit.stops && visit.stops.length > 1) {
+          const comboStops = visit.stops
+          return (
+          <div className="mt-4 space-y-3">
+            {/* Natural language summary */}
+            <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
+              Fly from Orlando (~{visit.estimatedTravelHours}h).
+              {comboStops.map((s, i) => {
+                const names = s.playerNames.map((n) => {
+                  const p = playerMap.get(n)
+                  return p ? `${n} (${p.org})` : n
+                }).join(', ')
+                const drive = i > 0 && s.driveMinutesFromPrev > 0
+                  ? ` Drive ${formatDriveTime(s.driveMinutesFromPrev)} to`
+                  : ''
+                return ` ${formatDate(s.date)}:${drive} see ${names} at ${s.teamLabel || s.venue.name}.`
+              }).join('')}
+              {' '}Fly home after.
+            </p>
+
+            {/* Day-by-day stops */}
+            {comboStops.map((stop, i) => {
+              const dayDate = new Date(stop.date + 'T12:00:00Z')
+              const isTueDay = dayDate.getUTCDay() === 2
+              return (
+              <div key={i} className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-purple-400">Day {i + 1}</span>
+                    <span className="text-xs text-text-dim">{formatDate(stop.date)}{isTueDay ? ' (best day)' : ''}</span>
+                    {i > 0 && stop.driveMinutesFromPrev > 0 && (
+                      <span className="text-[11px] text-accent-blue font-medium">
+                        {formatDriveTime(stop.driveMinutesFromPrev)} drive from previous stop
+                      </span>
+                    )}
+                  </div>
+                  {i === 0 && <span className="text-[10px] text-text-dim">Fly from Orlando · ~{visit.estimatedTravelHours}h</span>}
+                </div>
+                <div className="ml-4">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-sm font-medium text-text">{stop.teamLabel || stop.venue.name}</span>
+                    {stop.teamLabel && stop.teamLabel !== stop.venue.name && (
+                      <span className="text-[11px] text-text-dim/60">{stop.venue.name}</span>
+                    )}
+                    {stop.sourceUrl && (
+                      <a href={stop.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400">Verify ↗</a>
+                    )}
+                  </div>
+                  {isTueDay && <p className="mt-0.5 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>}
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {stop.playerNames.map((name) => {
+                      const player = playerMap.get(name)
+                      const tier = player?.tier ?? 4
+                      const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                      return (
+                        <span key={name} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-text cursor-pointer hover:bg-accent-blue/10"
+                          onClick={(e) => { e.stopPropagation(); onPlayerClick(name) }}>
+                          <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
+                          {name} <span className="text-text-dim/50">{TIER_LABELS[tier] ?? ''}</span>
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+              )
+            })}
+
+            {/* Return day */}
+            <div className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-text-dim">Day {comboStops.length + 1}</span>
+                <span className="text-xs text-text-dim/50">Fly home</span>
+              </div>
+            </div>
+
+            {flyInWhy && <p className="text-xs italic text-text-dim/60">{flyInWhy}</p>}
+
+            <div className="flex flex-wrap gap-2">
+              <button onClick={handleCopy} className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors">
+                {copiedFlyIn === flyInKey ? 'Copied!' : 'Copy Itinerary'}
+              </button>
+            </div>
+          </div>
+          )
+        }
+
+        // Single-venue fly-in (existing behavior)
         return (
         <div className="mt-4 space-y-3">
           {/* Natural language summary */}

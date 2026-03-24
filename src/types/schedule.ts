@@ -55,9 +55,22 @@ export interface PriorityResult {
   reason?: string
 }
 
+export interface FlyInStop {
+  venue: { name: string; coords: Coordinates }
+  playerNames: string[]
+  date: string
+  driveMinutesFromPrev: number
+  source: ScheduleSource
+  isHome: boolean
+  sourceUrl?: string
+  confidence?: VisitConfidence
+  teamLabel?: string
+  gameTime?: string
+}
+
 export interface FlyInVisit {
   playerNames: string[]
-  venue: { name: string; coords: Coordinates }
+  venue: { name: string; coords: Coordinates } // primary venue (or hub center for combos)
   dates: string[]
   distanceKm: number
   estimatedTravelHours: number // flight + airport overhead
@@ -68,6 +81,11 @@ export interface FlyInVisit {
   sourceUrl?: string
   confidence?: VisitConfidence
   teamLabel?: string // the team whose schedule these games belong to
+  // Combo trip fields (fly-in + drive to nearby venues)
+  isCombo?: boolean
+  stops?: FlyInStop[]
+  hubAirport?: string // e.g. "ATL"
+  totalDriveMinutes?: number // inter-venue driving within the combo
 }
 
 export interface NearMiss {
