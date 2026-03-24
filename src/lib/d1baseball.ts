@@ -1,4 +1,5 @@
 import { D1_BASEBALL_SLUGS } from '../data/d1baseballSlugs'
+import { BUNDLED_NCAA_SCHEDULES } from '../data/ncaaSchedules.generated'
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import { resolveNcaaName } from '../data/aliases'
 import type { Coordinates } from '../types/roster'
@@ -222,7 +223,13 @@ export async function discoverD1Slug(schoolName: string): Promise<string | null>
 // Fetch schedule for a single school
 export async function fetchD1Schedule(
   canonicalName: string,
+  opts?: { forceRefresh?: boolean },
 ): Promise<D1Schedule | null> {
+  // Check bundled static data first (instant, no network)
+  if (!opts?.forceRefresh && BUNDLED_NCAA_SCHEDULES[canonicalName]) {
+    return BUNDLED_NCAA_SCHEDULES[canonicalName]!
+  }
+
   let slug: string | undefined = D1_BASEBALL_SLUGS[canonicalName]
   if (!slug) {
     const discovered = await discoverD1Slug(canonicalName)
@@ -269,6 +276,7 @@ export interface D1FetchResult {
 export async function fetchAllD1Schedules(
   schoolNames: string[],
   onProgress?: (completed: number, total: number) => void,
+  opts?: { forceRefresh?: boolean },
 ): Promise<D1FetchResult> {
   const unique = [...new Set(schoolNames)]
   const schedules = new Map<string, D1Schedule>()
@@ -278,7 +286,7 @@ export async function fetchAllD1Schedules(
   const concurrency = 2
   for (let i = 0; i < unique.length; i += concurrency) {
     const batch = unique.slice(i, i + concurrency)
-    const results = await Promise.all(batch.map((name) => fetchD1Schedule(name)))
+    const results = await Promise.all(batch.map((name) => fetchD1Schedule(name, opts)))
     for (let j = 0; j < batch.length; j++) {
       if (results[j]) schedules.set(batch[j]!, results[j]!)
       else failedSchools.push(batch[j]!)

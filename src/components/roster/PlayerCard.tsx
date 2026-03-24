@@ -96,7 +96,14 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
                 onClick={() => setEditingAffiliate(true)}
                 title="Click to change affiliate"
               >
-                {affiliate ? affiliate.teamName : <span className="text-text-dim/40">— assign —</span>}
+                {affiliate ? (
+                  <>
+                    {affiliate.teamName}
+                    {affiliate.source === 'estimated' && (
+                      <span className="ml-1 text-[9px] text-accent-orange" title="Estimated from last year + promotion">~est</span>
+                    )}
+                  </>
+                ) : <span className="text-text-dim/40">— assign —</span>}
               </button>
             )}
           </td>

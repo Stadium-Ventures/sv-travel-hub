@@ -527,17 +527,19 @@ function ParseWarnings({ warnings }: { warnings: string[] }) {
 
 function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; springTraining: boolean }) {
   const reassigned = log.filter((e) => e.action === 'reassigned')
-  const assigned = log.filter((e) => e.action === 'assigned')
   const notFound = log.filter((e) => e.action === 'not-found')
-  const nameMatched = log.filter((e) => e.action === 'name-matched')
-  const fallback = log.filter((e) => e.action === 'fallback')
-  const confirmed = assigned.length + nameMatched.length + fallback.length
+  const assignments = useScheduleStore((s) => s.playerTeamAssignments)
+  const confirmedCount = Object.values(assignments).filter((a) => a.source === 'milb-roster' || a.source === 'mlb-roster').length
+  const estimatedCount = Object.values(assignments).filter((a) => a.source === 'estimated').length
 
   return (
     <div className="mb-3 rounded-lg border border-border/50 bg-surface px-4 py-3">
       <div className="mb-2 flex items-center gap-3 text-xs">
-        {confirmed > 0 && (
-          <span className="text-accent-green">{confirmed} confirmed</span>
+        {confirmedCount > 0 && (
+          <span className="text-accent-green">{confirmedCount} confirmed</span>
+        )}
+        {estimatedCount > 0 && (
+          <span className="text-accent-orange">{estimatedCount} estimated</span>
         )}
         {reassigned.length > 0 && (
           <span className="text-accent-blue">{reassigned.length} changed</span>
@@ -547,9 +549,9 @@ function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; 
         )}
       </div>
 
-      {springTraining && (
+      {springTraining && estimatedCount > 0 && (
         <p className="mb-2 text-[10px] text-accent-orange">
-          Spring training — affiliates estimated from last year + one level promotion. Will auto-correct when regular season rosters publish.
+          Some affiliates estimated from last year + one level promotion. Will auto-correct when regular season rosters publish.
         </p>
       )}
 
@@ -577,8 +579,11 @@ function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; 
         </div>
       )}
 
-      {reassigned.length === 0 && notFound.length === 0 && confirmed > 0 && (
-        <p className="text-[11px] text-accent-green">All assignments verified — no changes detected.</p>
+      {reassigned.length === 0 && notFound.length === 0 && confirmedCount > 0 && estimatedCount === 0 && (
+        <p className="text-[11px] text-accent-green">All assignments verified from current rosters — no changes detected.</p>
+      )}
+      {reassigned.length === 0 && notFound.length === 0 && confirmedCount > 0 && estimatedCount > 0 && (
+        <p className="text-[11px] text-text-dim">{confirmedCount} from current rosters, {estimatedCount} estimated. Re-verify after opening day for full accuracy.</p>
       )}
     </div>
   )

@@ -303,21 +303,18 @@ export default function TripPlanner() {
   const flyInLimit = 5 // Hard cap on fly-in results
   const [showOverlaps, setShowOverlaps] = useState(false)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
-  const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
-  const hsFetchedAt = useScheduleStore((s) => s.hsFetchedAt)
   const cachedProTeamIds = useScheduleStore((s) => s.cachedProTeamIds)
   const cachedNcaaSchools = useScheduleStore((s) => s.cachedNcaaSchools)
 
   const anyScheduleLoading = schedulesLoading || ncaaLoading || hsLoading || autoAssignLoading
   const allSchedulesLoaded = proGames.length > 0 && ncaaGames.length > 0 && (!hasHsPlayers || hsGames.length > 0)
 
-  // Compute staleness
+  // Compute staleness — only pro schedules can go stale (live-fetched from MLB API).
+  // NCAA and HS schedules are bundled as static data and don't expire.
   const now = Date.now()
   const STALE_THRESHOLD = 24 * 60 * 60 * 1000 // 24 hours
   const proStale = proFetchedAt ? (now - proFetchedAt > STALE_THRESHOLD) : false
-  const ncaaStale = ncaaFetchedAt ? (now - ncaaFetchedAt > STALE_THRESHOLD) : false
-  const hsStale = hsFetchedAt ? (now - hsFetchedAt > STALE_THRESHOLD) : false
-  const anyStale = proStale || ncaaStale || hsStale
+  const anyStale = proStale
 
   // Format relative time for cache age
   function formatAge(ts: number | null): string {
@@ -554,13 +551,13 @@ export default function TripPlanner() {
                   </span>
                 )}
                 {ncaaGames.length > 0 && (
-                  <span className={`rounded-full px-2 py-0.5 ${ncaaStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
-                    College: {ncaaGames.length} games {ncaaFetchedAt ? `(${formatAge(ncaaFetchedAt)})` : ''}
+                  <span className="rounded-full px-2 py-0.5 bg-accent-green/10 text-accent-green">
+                    College: {ncaaGames.length} games (bundled)
                   </span>
                 )}
                 {hsGames.length > 0 && (
-                  <span className={`rounded-full px-2 py-0.5 ${hsStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
-                    HS: {hsGames.length} games {hsFetchedAt ? `(${formatAge(hsFetchedAt)})` : ''}
+                  <span className="rounded-full px-2 py-0.5 bg-accent-green/10 text-accent-green">
+                    HS: {hsGames.length} games (bundled)
                   </span>
                 )}
                 {anyStale && (

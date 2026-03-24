@@ -1051,13 +1051,13 @@ export default function MapView() {
             </span>
           )}
           {ncaaFetchedAt && (
-            <span className={`rounded px-2 py-0.5 ${ncaaFetchedAt && (Date.now() - ncaaFetchedAt > 24 * 60 * 60 * 1000) ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
-              College: loaded {formatTimeAgo(ncaaFetchedAt)}
+            <span className="rounded px-2 py-0.5 bg-accent-green/10 text-accent-green">
+              College: bundled
             </span>
           )}
           {hsFetchedAt && (
-            <span className={`rounded px-2 py-0.5 ${hsFetchedAt && (Date.now() - hsFetchedAt > 24 * 60 * 60 * 1000) ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
-              HS: loaded {formatTimeAgo(hsFetchedAt)}
+            <span className="rounded px-2 py-0.5 bg-accent-green/10 text-accent-green">
+              HS: bundled
             </span>
           )}
           <button

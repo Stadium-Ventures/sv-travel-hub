@@ -1,4 +1,5 @@
 import { MAXPREPS_SLUGS } from '../data/maxprepsSlugs'
+import { BUNDLED_HS_SCHEDULES } from '../data/hsSchedules.generated'
 import { fetchWithCorsProxy } from './d1baseball'
 
 const CACHE_KEY = 'sv-travel-maxpreps-cache'
@@ -190,7 +191,13 @@ export async function discoverMaxPrepsSlug(org: string, state: string): Promise<
 // Fetch schedule for a single school by org|state key
 export async function fetchMaxPrepsSchedule(
   orgStateKey: string,
+  opts?: { forceRefresh?: boolean },
 ): Promise<MaxPrepsSchedule | null> {
+  // Check bundled static data first (instant, no network)
+  if (!opts?.forceRefresh && BUNDLED_HS_SCHEDULES[orgStateKey]) {
+    return BUNDLED_HS_SCHEDULES[orgStateKey]!
+  }
+
   const [org, state] = orgStateKey.split('|')
   if (!org || !state) return null
 
@@ -240,6 +247,7 @@ export interface MaxPrepsFetchResult {
 export async function fetchAllMaxPrepsSchedules(
   keys: string[],
   onProgress?: (completed: number, total: number) => void,
+  opts?: { forceRefresh?: boolean },
 ): Promise<MaxPrepsFetchResult> {
   const unique = [...new Set(keys)]
   const schedules = new Map<string, MaxPrepsSchedule>()
@@ -250,7 +258,7 @@ export async function fetchAllMaxPrepsSchedules(
   const concurrency = 1
   for (let i = 0; i < unique.length; i += concurrency) {
     const batch = unique.slice(i, i + concurrency)
-    const results = await Promise.all(batch.map((key) => fetchMaxPrepsSchedule(key)))
+    const results = await Promise.all(batch.map((key) => fetchMaxPrepsSchedule(key, opts)))
     for (let j = 0; j < batch.length; j++) {
       if (results[j]) schedules.set(batch[j]!, results[j]!)
       else failedSchools.push(batch[j]!)

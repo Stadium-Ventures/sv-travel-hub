@@ -19,6 +19,8 @@ export interface PlayerTeamAssignment {
   teamId: number
   sportId: number
   teamName: string
+  /** How this assignment was determined */
+  source?: 'milb-roster' | 'mlb-roster' | 'estimated' | 'manual'
 }
 
 // Activity log entry — tracks visible changes for transparency
@@ -89,7 +91,7 @@ interface ScheduleState {
 
   // Auto-assign
   autoAssignLoading: boolean
-  autoAssignResult: { assigned: number; notFound: string[]; error?: string; springTrainingEstimate?: boolean } | null
+  autoAssignResult: { assigned: number; confirmed: number; estimated: number; notFound: string[]; error?: string; springTrainingEstimate?: boolean } | null
 
   // Actions
   fetchAffiliates: (forceRefresh?: boolean) => Promise<void>
@@ -100,8 +102,8 @@ interface ScheduleState {
   fetchProSchedules: (startDate: string, endDate: string) => Promise<void>
   regenerateProGames: () => void
   checkRosterMoves: () => Promise<void>
-  fetchNcaaSchedules: (playerOrgs: Array<{ playerName: string; org: string }>, opts?: { merge?: boolean }) => Promise<void>
-  fetchHsSchedules: (playerOrgs: Array<{ playerName: string; org: string; state: string }>, opts?: { merge?: boolean }) => Promise<void>
+  fetchNcaaSchedules: (playerOrgs: Array<{ playerName: string; org: string }>, opts?: { merge?: boolean; forceRefresh?: boolean }) => Promise<void>
+  fetchHsSchedules: (playerOrgs: Array<{ playerName: string; org: string; state: string }>, opts?: { merge?: boolean; forceRefresh?: boolean }) => Promise<void>
 }
 
 function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[]): GameEvent | null {
@@ -208,7 +210,7 @@ export const useScheduleStore = create<ScheduleState>()(
         set((state) => ({
           playerTeamAssignments: {
             ...state.playerTeamAssignments,
-            [playerName]: assignment,
+            [playerName]: { ...assignment, source: 'manual' },
           },
         }))
       },
@@ -260,7 +262,7 @@ export const useScheduleStore = create<ScheduleState>()(
         )
 
         if (proPlayers.length === 0 && proPlayersWithoutId.length === 0) {
-          set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, notFound: [] } })
+          set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, confirmed: 0, estimated: 0, notFound: [] } })
           return
         }
 
@@ -276,7 +278,7 @@ export const useScheduleStore = create<ScheduleState>()(
         }
 
         if (parentOrgIds.size === 0) {
-          set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, notFound: [...proPlayers, ...proPlayersWithoutId].map((p) => p.playerName) } })
+          set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, confirmed: 0, estimated: 0, notFound: [...proPlayers, ...proPlayersWithoutId].map((p) => p.playerName) } })
           return
         }
 
@@ -419,7 +421,7 @@ export const useScheduleStore = create<ScheduleState>()(
               if (isSpringTraining && COMPLEX_LEAGUE_PATTERNS.test(milbMatch.teamName)) {
                 // Fall through to spring training promotion logic below
               } else {
-                newAssignments[player.playerName] = milbMatch
+                newAssignments[player.playerName] = { ...milbMatch, source: 'milb-roster' }
                 assignedCount++
                 continue
               }
@@ -433,7 +435,7 @@ export const useScheduleStore = create<ScheduleState>()(
                 const orgId = resolveMLBTeamId(player.org, customMlb)
                 const promoted = orgId ? findAffiliateForSport(orgId, promotedSportId) : null
                 if (promoted) {
-                  newAssignments[player.playerName] = promoted
+                  newAssignments[player.playerName] = { ...promoted, source: 'estimated' }
                   assignedCount++
                   continue
                 }
@@ -452,7 +454,7 @@ export const useScheduleStore = create<ScheduleState>()(
                 for (const sportId of levelOrder) {
                   const affiliate = findAffiliateForSport(orgId, sportId)
                   if (affiliate) {
-                    newAssignments[player.playerName] = affiliate
+                    newAssignments[player.playerName] = { ...affiliate, source: 'estimated' }
                     assignedCount++
                     assigned = true
                     break
@@ -468,7 +470,7 @@ export const useScheduleStore = create<ScheduleState>()(
               // On the 40-man roster — assign to MLB team directly.
               // During spring training this is the right call for established MLB players
               // who weren't found on any complex league team.
-              newAssignments[player.playerName] = mlbMatch2
+              newAssignments[player.playerName] = { ...mlbMatch2, source: 'mlb-roster' }
               assignedCount++
             } else {
               remainingPlayers.push(player)
@@ -505,14 +507,14 @@ export const useScheduleStore = create<ScheduleState>()(
                   const orgId = resolveMLBTeamId(player.org, customMlb)
                   const highA = orgId ? findAffiliateForSport(orgId, 13) : null
                   if (highA) {
-                    newAssignments[player.playerName] = highA
+                    newAssignments[player.playerName] = { ...highA, source: 'estimated' }
                     assignedCount++
                     const idx = notFoundNames.indexOf(player.playerName)
                     if (idx >= 0) notFoundNames.splice(idx, 1)
                     continue
                   }
                 }
-                newAssignments[player.playerName] = match
+                newAssignments[player.playerName] = { ...match, source: match.sportId === 1 ? 'mlb-roster' : 'milb-roster' }
                 assignedCount++
                 // Remove from notFoundNames if present
                 const idx = notFoundNames.indexOf(player.playerName)
@@ -547,7 +549,13 @@ export const useScheduleStore = create<ScheduleState>()(
           set({
             playerTeamAssignments: newAssignments,
             autoAssignLoading: false,
-            autoAssignResult: { assigned: assignedCount, notFound: notFoundNames, springTrainingEstimate: isSpringTraining },
+            autoAssignResult: {
+              assigned: assignedCount,
+              confirmed: Object.values(newAssignments).filter((a) => a.source === 'milb-roster' || a.source === 'mlb-roster').length,
+              estimated: Object.values(newAssignments).filter((a) => a.source === 'estimated').length,
+              notFound: notFoundNames,
+              springTrainingEstimate: isSpringTraining,
+            },
             assignmentLog: [...(get().assignmentLog ?? []), ...changeLog],
           })
 
@@ -572,7 +580,7 @@ export const useScheduleStore = create<ScheduleState>()(
           const msg = e instanceof Error ? e.message : 'Unknown error'
           set({
             autoAssignLoading: false,
-            autoAssignResult: { assigned: 0, notFound: [...proPlayers, ...proPlayersWithoutId].map((p) => p.playerName), error: msg },
+            autoAssignResult: { assigned: 0, confirmed: 0, estimated: 0, notFound: [...proPlayers, ...proPlayersWithoutId].map((p) => p.playerName), error: msg },
           })
           console.error('Auto-assign failed:', e)
         }
@@ -815,7 +823,7 @@ export const useScheduleStore = create<ScheduleState>()(
           console.error('Failed to check roster moves:', e)
         }
       },
-      fetchNcaaSchedules: async (playerOrgs, { merge = false } = {}) => {
+      fetchNcaaSchedules: async (playerOrgs, { merge = false, forceRefresh = false } = {}) => {
         if (get().ncaaLoading) return
         // Resolve each player's org to a canonical NCAA school name
         const customNcaa = get().customNcaaAliases
@@ -846,6 +854,7 @@ export const useScheduleStore = create<ScheduleState>()(
           const { schedules, failedSchools } = await fetchAllD1Schedules(
             [...schoolToPlayers.keys()],
             (completed, total) => set({ ncaaProgress: { completed, total } }),
+            { forceRefresh },
           )
 
           // Convert D1 games to GameEvents
@@ -1038,7 +1047,7 @@ export const useScheduleStore = create<ScheduleState>()(
           })
         }
       },
-      fetchHsSchedules: async (playerOrgs, { merge = false } = {}) => {
+      fetchHsSchedules: async (playerOrgs, { merge = false, forceRefresh = false } = {}) => {
         if (get().hsLoading) return
 
         // Group players by org|state key — include all schools (slug discovery
@@ -1068,6 +1077,7 @@ export const useScheduleStore = create<ScheduleState>()(
           const { schedules, failedSchools } = await fetchAllMaxPrepsSchedules(
             [...schoolToPlayers.keys()],
             (completed, total) => set({ hsProgress: { completed, total } }),
+            { forceRefresh },
           )
 
           // Convert MaxPreps games to GameEvents — home games only
