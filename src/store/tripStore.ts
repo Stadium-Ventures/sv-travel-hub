@@ -290,12 +290,14 @@ export const useTripStore = create<TripState>()(
 }),
     {
       name: 'sv-travel-trips',
-      version: 4,
+      version: 5,
       migrate: (persisted: any) => ({
         // Keep settings, drop computed trip data
         startDate: persisted?.startDate ?? defaultStart(),
         endDate: persisted?.endDate ?? defaultEnd(),
-        maxDriveMinutes: persisted?.maxDriveMinutes ?? MAX_DRIVE_MINUTES,
+        // v5: bump default drive time from 180 (3h) → 240 (4h).
+        // Migrate users who had the old default; keep custom values.
+        maxDriveMinutes: persisted?.maxDriveMinutes === 180 ? MAX_DRIVE_MINUTES : (persisted?.maxDriveMinutes ?? MAX_DRIVE_MINUTES),
         maxFlightHours: persisted?.maxFlightHours ?? 4,
         priorityPlayers: persisted?.priorityPlayers ?? [],
         tripStatuses: persisted?.tripStatuses ?? {},

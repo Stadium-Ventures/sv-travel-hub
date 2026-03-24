@@ -11,7 +11,7 @@ import { VENUE_PROXIMITY } from '../data/venueProximity'
 
 // Constants
 const HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
-const MAX_DRIVE_MINUTES = 180 // 3 hours one-way
+const MAX_DRIVE_MINUTES = 240 // 4 hours one-way — a 4h drive beats a flight + hotel
 const MAX_INTER_VENUE_MINUTES = 120 // max detour between stops on multi-venue trip
 const MAX_TOTAL_DRIVE_MINUTES = 600 // 10h total round-trip driving cap for a 3-day trip
 const MAX_ROAD_TRIPS = 8 // cap greedy selection — raised to surface more trip options
