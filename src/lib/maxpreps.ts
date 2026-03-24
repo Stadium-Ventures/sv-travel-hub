@@ -19,6 +19,7 @@ export interface MaxPrepsSchedule {
   teamName: string   // Full name from MaxPreps (e.g. "Hebron Hawks")
   games: MaxPrepsGame[]
   fetchedAt: number
+  homeVenue?: { name: string; lat: number; lng: number } // bundled venue coords
 }
 
 // Cached schedules in localStorage

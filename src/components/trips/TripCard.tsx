@@ -51,6 +51,7 @@ function getOrgLabel(
   awayTeam: string,
   playerNames: string[],
   playerMap: Map<string, RosterPlayer>,
+  _isHome?: boolean,
 ): string {
   if (awayTeam === 'Spring Training') {
     for (const name of playerNames) {
@@ -66,6 +67,8 @@ function getOrgLabel(
     }
     return homeTeam
   }
+  // For pro/NCAA: show the venue's home team (where the game is)
+  // but indicate it's an away game via the badge, not the label
   return homeTeam
 }
 
@@ -96,7 +99,7 @@ export function buildVenueStops(trip: TripCandidate, playerMap: Map<string, Rost
   const anchorKey = `${trip.anchorGame.venue.coords.lat.toFixed(4)},${trip.anchorGame.venue.coords.lng.toFixed(4)}`
   const anchorOrg = getOrgLabel(
     trip.anchorGame.source, trip.anchorGame.homeTeam, trip.anchorGame.awayTeam,
-    trip.anchorGame.playerNames, playerMap,
+    trip.anchorGame.playerNames, playerMap, trip.anchorGame.isHome,
   )
   venueMap.set(anchorKey, {
     venueName: trip.anchorGame.venue.name,
@@ -127,7 +130,7 @@ export function buildVenueStops(trip: TripCandidate, playerMap: Map<string, Rost
       }
       if (!existing.dates.includes(game.date)) existing.dates.push(game.date)
     } else {
-      const org = getOrgLabel(game.source, game.homeTeam, game.awayTeam, game.playerNames, playerMap)
+      const org = getOrgLabel(game.source, game.homeTeam, game.awayTeam, game.playerNames, playerMap, game.isHome)
       venueMap.set(key, {
         venueName: game.venue.name,
         venueKey: key,

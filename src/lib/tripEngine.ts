@@ -14,7 +14,7 @@ const HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
 const MAX_DRIVE_MINUTES = 180 // 3 hours one-way
 const MAX_INTER_VENUE_MINUTES = 120 // max detour between stops on multi-venue trip
 const MAX_TOTAL_DRIVE_MINUTES = 600 // 10h total round-trip driving cap for a 3-day trip
-const MAX_ROAD_TRIPS = 5 // cap greedy selection to avoid overwhelming results
+const MAX_ROAD_TRIPS = 8 // cap greedy selection — raised to surface more trip options
 const ANCHOR_DAY = 2 // Tuesday (0=Sun, 2=Tue)
 
 // Confidence multipliers: high-confidence games are worth more
@@ -548,7 +548,7 @@ export async function generateTrips(
   // Build trip candidates — any day can anchor a trip
   // Deduplicate: only evaluate each venue once per week
   const candidates: TripCandidate[] = []
-  const seenVenueWeeks = new Set<string>()
+  const seenVenueWeeks = new Map<string, number>()
   const nearMisses: NearMiss[] = []
   const nearMissSeen = new Set<string>() // dedupe by player+venue
 
@@ -580,11 +580,13 @@ export async function generateTrips(
         continue
       }
 
-      // Deduplicate: same venue within same week → skip
+      // Deduplicate: limit to 2 candidates per venue per week to reduce noise
+      // while still allowing Tuesday vs non-Tuesday options at the same venue
       const weekNum = getWeekNumber(anchorDay)
       const venueWeekKey = `${anchorKey}-w${weekNum}`
-      if (seenVenueWeeks.has(venueWeekKey)) continue
-      seenVenueWeeks.add(venueWeekKey)
+      const venueWeekCount = seenVenueWeeks.get(venueWeekKey) ?? 0
+      if (venueWeekCount >= 2) continue
+      seenVenueWeeks.set(venueWeekKey, venueWeekCount + 1)
 
       const window = getTripWindow(anchorDay)
 

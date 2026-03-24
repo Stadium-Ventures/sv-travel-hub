@@ -217,6 +217,57 @@ async function scrapeNcaaSchedules(): Promise<Record<string, D1Schedule>> {
 }
 
 // ---------------------------------------------------------------------------
+// Geocode an HS school's home venue using Nominatim
+// ---------------------------------------------------------------------------
+async function geocodeHsVenue(
+  teamName: string,
+  slug: string,
+): Promise<{ name: string; lat: number; lng: number } | null> {
+  // Extract city/state from the slug: "fl/orlando/timber-creek-wolves" → "Orlando, FL"
+  const slugParts = slug.split('/')
+  const state = slugParts[0]?.toUpperCase() ?? ''
+  const city = slugParts[1]?.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) ?? ''
+
+  // Extract just the school name without mascot: "Etowah Eagles" → "Etowah"
+  const schoolBase = teamName.replace(/\s+(High School|Prep|Academy|Christian|Episcopal).*$/i, '')
+
+  const queries = [
+    `${teamName}, ${city}, ${state}`,
+    `${schoolBase} High School, ${city}, ${state}`,
+    `${city}, ${state}`,
+  ]
+
+  for (const q of queries) {
+    try {
+      const params = new URLSearchParams({
+        q,
+        format: 'json',
+        limit: '1',
+        countrycodes: 'us',
+      })
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+        headers: { 'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures schedule generator)' },
+      })
+      if (!res.ok) continue
+      const results = await res.json() as Array<{ lat: string; lon: string; display_name: string }>
+      if (results.length > 0) {
+        const lat = parseFloat(results[0]!.lat)
+        const lng = parseFloat(results[0]!.lon)
+        // Validate continental US
+        if (lat >= 24.5 && lat <= 49.5 && lng >= -125.0 && lng <= -66.5) {
+          return { name: `${teamName} Field`, lat, lng }
+        }
+      }
+    } catch {
+      continue
+    }
+    // Rate limit Nominatim
+    await sleep(1200)
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // Scrape all HS schedules
 // ---------------------------------------------------------------------------
 async function scrapeHsSchedules(): Promise<Record<string, MaxPrepsSchedule>> {
@@ -224,6 +275,7 @@ async function scrapeHsSchedules(): Promise<Record<string, MaxPrepsSchedule>> {
   const results: Record<string, MaxPrepsSchedule> = {}
   const now = Date.now()
   let totalGames = 0
+  let geocodedCount = 0
 
   console.log(`\nScraping ${entries.length} HS schedules from MaxPreps...\n`)
 
@@ -237,9 +289,13 @@ async function scrapeHsSchedules(): Promise<Record<string, MaxPrepsSchedule>> {
       const html = await fetchWithRetry(url)
       const { teamName, games } = parseMaxPrepsHtml(html, org)
 
-      results[key] = { school: key, slug, teamName, games, fetchedAt: now }
+      // Geocode home venue
+      const homeVenue = await geocodeHsVenue(teamName, slug)
+      if (homeVenue) geocodedCount++
+
+      results[key] = { school: key, slug, teamName, games, fetchedAt: now, homeVenue: homeVenue ?? undefined }
       totalGames += games.length
-      console.log(` ${games.length} games (${teamName})`)
+      console.log(` ${games.length} games (${teamName})${homeVenue ? ` [${homeVenue.lat.toFixed(2)},${homeVenue.lng.toFixed(2)}]` : ' [no venue]'}`)
     } catch (err) {
       console.log(` FAILED: ${err instanceof Error ? err.message : err}`)
     }
@@ -248,7 +304,7 @@ async function scrapeHsSchedules(): Promise<Record<string, MaxPrepsSchedule>> {
     if (i < entries.length - 1) await sleep(1000)
   }
 
-  console.log(`\nHS: ${Object.keys(results).length}/${entries.length} schools, ${totalGames} total games`)
+  console.log(`\nHS: ${Object.keys(results).length}/${entries.length} schools, ${totalGames} total games, ${geocodedCount} venues geocoded`)
   return results
 }
 

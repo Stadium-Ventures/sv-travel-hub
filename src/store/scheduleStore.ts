@@ -1091,11 +1091,20 @@ export const useScheduleStore = create<ScheduleState>()(
             schedulesObj[schoolKey] = schedule
             const playerNames = schoolToPlayers.get(schoolKey) ?? []
 
-            // Look up home venue coords from venueStore (key format: hs-{org}|{city, state})
+            // Look up home venue coords — check bundled coords first, then venueStore
             let homeVenue: { name: string; coords: { lat: number; lng: number } } | null = null
             const [schoolOrg] = schoolKey.split('|')
+
+            // Use bundled venue coords if available (from generateSchedules.ts geocoding)
+            if (schedule.homeVenue) {
+              homeVenue = {
+                name: schedule.homeVenue.name,
+                coords: { lat: schedule.homeVenue.lat, lng: schedule.homeVenue.lng },
+              }
+            }
+
             const normalizedSchoolOrg = (schoolOrg ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
-            for (const [vKey, v] of Object.entries(venueState)) {
+            if (!homeVenue) for (const [vKey, v] of Object.entries(venueState)) {
               if (v.source === 'hs-geocoded') {
                 const venueSchoolKey = vKey.replace(/^hs-/, '')
                 // Match on org name portion (venueStore key: "OrgName|City, State")

@@ -549,11 +549,16 @@ function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; 
         )}
       </div>
 
-      {springTraining && estimatedCount > 0 && (
-        <p className="mb-2 text-[10px] text-accent-orange">
-          Some affiliates estimated from last year + one level promotion. Will auto-correct when regular season rosters publish.
-        </p>
-      )}
+      {springTraining && estimatedCount > 0 && (() => {
+        const estimatedNames = Object.entries(assignments)
+          .filter(([, a]) => a.source === 'estimated')
+          .map(([name, a]) => `${name} → ${a.teamName}`)
+        return (
+          <p className="mb-2 text-[10px] text-accent-orange">
+            Estimated from last year + one level promotion: {estimatedNames.join(', ')}. Will auto-correct when regular season rosters publish.
+          </p>
+        )
+      })()}
 
       {reassigned.length > 0 && (
         <div className="mb-2 space-y-1">
