@@ -452,77 +452,8 @@ export default function TripPlanner() {
     }
   }
 
-  // Compute whether priority player is fly-in only — controls section ordering
-
-
-  // Pre-compute fly-in section so it can be rendered in reordered position
-  const flyInSection = tripPlan && tripPlan.flyInVisits.length > 0 ? (() => {
-    const sortedVisits = [...tripPlan.flyInVisits].sort((a, b) => {
-      const aHasPriority = a.playerNames.some((n) => priorityPlayers.includes(n)) ? 1 : 0
-      const bHasPriority = b.playerNames.some((n) => priorityPlayers.includes(n)) ? 1 : 0
-      if (aHasPriority !== bHasPriority) return bHasPriority - aHasPriority
-      return b.visitValue - a.visitValue
-    })
-    const visibleVisits = sortedVisits.slice(0, flyInLimit)
-    const totalCount = sortedVisits.length
-
-    // Priority players whose games are all within driving range (no fly-in needed)
-    const drivablePriorityNames = priorityPlayers.filter((n) => {
-      const result = tripPlan.priorityResults?.find((r) => r.playerName === n)
-      return result && (result.status === 'included' || result.status === 'separate-trip')
-    })
-
-    return (
-      <div id="section-fly-in">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-purple-400">
-              Fly-in Visits
-              <span className="ml-2 text-xs font-normal text-text-dim">
-                Beyond driving range — requires flight
-              </span>
-            </h3>
-            <p className="text-[10px] text-text-dim/60">
-              Estimated travel = flight + 1h airport + ground transport
-            </p>
-          </div>
-          {totalCount > flyInLimit && (
-            <span className="text-[11px] text-text-dim">
-              Top {flyInLimit} of {totalCount}
-            </span>
-          )}
-        </div>
-        {drivablePriorityNames.length > 0 && (
-          <p className="mb-3 text-xs text-text-dim">
-            {drivablePriorityNames.join(', ')} {drivablePriorityNames.length === 1 ? 'has' : 'have'} all games within driving range — no fly-in needed. Fly-in options below are for other players on the roster.
-          </p>
-        )}
-        <div className="space-y-4">
-          {visibleVisits.map((visit, i) => {
-            // Detect date overlaps with other visible fly-ins
-            const overlappingIndices = visibleVisits
-              .map((other, j) => j !== i && other.dates.some(d => visit.dates.includes(d)) ? j + 1 : null)
-              .filter((x): x is number => x !== null)
-            return (
-            <FlyInCard
-              key={i}
-              visit={visit}
-              index={i + 1}
-              players={players}
-              playerMap={playerMap}
-              priorityPlayers={priorityPlayers}
-              dateConflicts={overlappingIndices}
-              copiedFlyIn={copiedFlyIn}
-              setCopiedFlyIn={setCopiedFlyIn}
-              onPlayerClick={setSelectedPlayer}
-              defaultExpanded={i === 0}
-            />
-            )
-          })}
-        </div>
-      </div>
-    )
-  })() : null
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // Fly-in section removed — fly-ins are now in the unified "Your Trips" list
 
   return (
     <div className="space-y-6">
@@ -953,11 +884,10 @@ export default function TripPlanner() {
 
             return (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-              <StatCard label="Road Trips" value={tripPlan.trips.length} scrollTo="section-road-trips" hoverNames={roadTripPlayerNames} />
+              <StatCard label="Total Trips" value={tripPlan.trips.length + Math.min(tripPlan.flyInVisits.length, flyInLimit)} scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
               <div title={`${allTripPlayerNames.length} of your ${totalEligible} players appear in at least one trip option.`}>
                 <StatCard label="Players in Trips" value={allTripPlayerNames.length} accent="blue" scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
               </div>
-              <StatCard label="Fly-in Visits" value={tripPlan.flyInVisits.length} scrollTo="section-fly-in" hoverNames={flyInPlayerNames} />
               <div title={`What percentage of players who still need visits appear in at least one trip`}>
                 <StatCard label="Players Reached" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
               </div>
@@ -1015,43 +945,53 @@ export default function TripPlanner() {
             </div>
           )}
 
-          {/* Road trip cards */}
-          {tripPlan.trips.length > 0 && (() => {
-            // Tag each trip with its original index before sorting
-            let trips = [...tripPlan.trips]
+          {/* Unified trip list — road trips and fly-ins sorted together */}
+          {(tripPlan.trips.length > 0 || tripPlan.flyInVisits.length > 0) && (() => {
+            // Build unified list: each item has a type, sort date, and the original data
+            type UnifiedItem =
+              | { type: 'road'; trip: typeof tripPlan.trips[0]; sortDate: string }
+              | { type: 'flyin'; visit: typeof tripPlan.flyInVisits[0]; sortDate: string }
 
-            trips.sort((a, b) => {
-              if (sortBy === 'score') return (b.scoreBreakdown?.finalScore ?? b.visitValue) - (a.scoreBreakdown?.finalScore ?? a.visitValue)
-              if (sortBy === 'date') return a.anchorGame.date.localeCompare(b.anchorGame.date)
-              return 0
-            })
+            const unified: UnifiedItem[] = [
+              ...tripPlan.trips.map((trip) => ({
+                type: 'road' as const,
+                trip,
+                sortDate: trip.anchorGame.date,
+              })),
+              ...tripPlan.flyInVisits.slice(0, flyInLimit).map((visit) => ({
+                type: 'flyin' as const,
+                visit,
+                sortDate: visit.dates[0] ?? '',
+              })),
+            ]
 
-            // Number trips sequentially after sorting — #1 is always the best
-            const indexedTrips = trips.map((trip, i) => ({ trip, displayIndex: i + 1 }))
-
-            // Build overlap map: for each trip index, which other trip indices overlap?
-            const overlapMap = new Map<number, number[]>()
-            for (let a = 0; a < trips.length; a++) {
-              for (let b = a + 1; b < trips.length; b++) {
-                const daysA = new Set(trips[a]!.suggestedDays)
-                const hasOverlap = trips[b]!.suggestedDays.some((d) => daysA.has(d))
-                if (hasOverlap) {
-                  const idxA = a + 1
-                  const idxB = b + 1
-                  overlapMap.set(idxA, [...(overlapMap.get(idxA) ?? []), idxB])
-                  overlapMap.set(idxB, [...(overlapMap.get(idxB) ?? []), idxA])
-                }
-              }
+            // Sort by date (chronological), or by score (road trips first by value, then fly-ins)
+            if (sortBy === 'date') {
+              unified.sort((a, b) => a.sortDate.localeCompare(b.sortDate))
+            } else {
+              unified.sort((a, b) => {
+                const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : (a.visit.visitValue)
+                const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : (b.visit.visitValue)
+                return scoreB - scoreA
+              })
             }
+
+            // Number trips sequentially
+            let tripNum = 0
+            let flyInNum = 0
+            const numbered = unified.map((item) => ({
+              ...item,
+              displayIndex: item.type === 'road' ? ++tripNum : ++flyInNum,
+            }))
 
             return (
             <div id="section-road-trips">
               <div className="mb-3 flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-text">
-                    Road Trips
+                    Your Trips
                     <span className="ml-2 text-xs font-normal text-text-dim">
-                      within {Math.floor(maxDriveMinutes / 60)}h drive of Orlando
+                      {tripPlan.trips.length} drives + {Math.min(tripPlan.flyInVisits.length, flyInLimit)} fly-ins
                     </span>
                   </h3>
                 </div>
@@ -1101,11 +1041,37 @@ export default function TripPlanner() {
               </div>
 
               <div className="space-y-4">
-                {indexedTrips.map(({ trip, displayIndex }, i) => (
-                  <TripCard key={`trip-${displayIndex}`} trip={trip} index={displayIndex} playerMap={playerMap} defaultExpanded={i === 0} onPlayerClick={setSelectedPlayer} overlappingTrips={overlapMap.get(displayIndex)} />
-                ))}
-                {trips.length === 0 && (
-                  <p className="py-4 text-center text-sm text-text-dim">No trips match the selected filters.</p>
+                {numbered.map((item, i) => {
+                  if (item.type === 'road') {
+                    return (
+                      <TripCard
+                        key={`road-${item.displayIndex}`}
+                        trip={item.trip}
+                        index={item.displayIndex}
+                        playerMap={playerMap}
+                        defaultExpanded={i === 0}
+                        onPlayerClick={setSelectedPlayer}
+                      />
+                    )
+                  } else {
+                    return (
+                      <FlyInCard
+                        key={`flyin-${item.displayIndex}`}
+                        visit={item.visit}
+                        index={item.displayIndex}
+                        players={players}
+                        playerMap={playerMap}
+                        priorityPlayers={priorityPlayers}
+                        copiedFlyIn={copiedFlyIn}
+                        setCopiedFlyIn={setCopiedFlyIn}
+                        onPlayerClick={setSelectedPlayer}
+                        defaultExpanded={i === 0 && tripPlan.trips.length === 0}
+                      />
+                    )
+                  }
+                })}
+                {unified.length === 0 && (
+                  <p className="py-4 text-center text-sm text-text-dim">No trips generated for the selected date range.</p>
                 )}
               </div>
             </div>
@@ -1223,7 +1189,7 @@ export default function TripPlanner() {
           )}
 
           {/* Fly-in visits — all options */}
-          {flyInSection}
+          {/* Fly-ins are now merged into the unified trip list above */}
 
           {/* Truly unreachable players (no games at all) — with reasons */}
           {(() => {
@@ -1497,11 +1463,12 @@ function FlyInCard({
           <div className="flex items-center gap-2">
             <span className={`text-text-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
             <h3 className="text-base font-semibold text-text">
-              Fly-in #{index}
+              Trip #{index}
+              <span className="ml-1.5 text-xs font-normal text-purple-400">fly</span>
             </h3>
-            {visit.isCombo && (
+            {visit.isCombo && visit.stops && visit.stops.length > 1 && (
               <span className="rounded-lg bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-400">
-                {visit.stops?.length ?? 0} stops · {visit.totalDriveMinutes ? formatDriveTime(visit.totalDriveMinutes) + ' driving' : ''}
+                {visit.stops.length} stops{visit.totalDriveMinutes ? ` · ${formatDriveTime(visit.totalDriveMinutes)} driving` : ''}
               </span>
             )}
           </div>

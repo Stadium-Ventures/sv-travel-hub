@@ -630,13 +630,13 @@ export async function generateTrips(
           const homeToNearby = homeToVenue.get(nearbyHomeKey) ?? Infinity
           if (homeToNearby > maxDriveMinutes * 1.5) return false
           // Time conflict check: if both games are on the same day and have known times,
-          // ensure there's enough travel time between them (game ~3h + drive between venues)
-          if (g.date === anchor.date && g.time && anchor.time && g.driveMinutes > 15) {
+          // ensure there's enough gap to attend both (game ~2.5h + drive between venues)
+          if (g.date === anchor.date && g.time && anchor.time) {
             const anchorTime = new Date(anchor.time).getTime()
             const nearbyTime = new Date(g.time).getTime()
             if (!isNaN(anchorTime) && !isNaN(nearbyTime)) {
               const gapMinutes = Math.abs(nearbyTime - anchorTime) / 60000
-              const minGap = 180 + g.driveMinutes // ~3h for a game + travel between venues
+              const minGap = 150 + Math.max(g.driveMinutes, 15) // ~2.5h for a game + travel
               if (gapMinutes < minGap) return false // Can't physically attend both
             }
           }

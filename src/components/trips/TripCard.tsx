@@ -421,7 +421,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className={`text-text-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
-            <h3 className="text-base font-semibold text-text">Trip #{index}</h3>
+            <h3 className="text-base font-semibold text-text">Trip #{index} <span className="text-xs font-normal text-accent-green">drive</span></h3>
           </div>
           {/* Plain-English summary */}
           <p className="mt-0.5 text-sm text-text-dim">
