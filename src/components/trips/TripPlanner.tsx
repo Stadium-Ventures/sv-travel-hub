@@ -311,7 +311,6 @@ export default function TripPlanner() {
   const [showOverlaps, setShowOverlaps] = useState(false)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const cachedProTeamIds = useScheduleStore((s) => s.cachedProTeamIds)
-  const cachedNcaaSchools = useScheduleStore((s) => s.cachedNcaaSchools)
 
   const anyScheduleLoading = schedulesLoading || ncaaLoading || hsLoading || autoAssignLoading
   const allSchedulesLoaded = proGames.length > 0 && ncaaGames.length > 0 && (!hasHsPlayers || hsGames.length > 0)
@@ -351,16 +350,23 @@ export default function TripPlanner() {
       const cachedSet = new Set(cachedProTeamIds)
       const missingProTeams = [...assignedTeamIds].filter((id) => !cachedSet.has(id))
 
-      // Check for new NCAA schools not in cache
-      const ncaaPlayerSchools = players
+      // Always re-run HS + NCAA schedule conversion on startup — bundled data is
+      // instant and ensures venue coords from the latest generation are used.
+      const hsOrgs = players
+        .filter((p) => p.level === 'HS' && p.visitsRemaining > 0 && p.state)
+        .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
+      if (hsOrgs.length > 0) {
+        useScheduleStore.getState().fetchHsSchedules(hsOrgs)
+      }
+      const ncaaAllOrgs = players
         .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
-        .map((p) => p.org)
-      const ncaaCachedSet = new Set(cachedNcaaSchools)
-      const missingNcaa = ncaaPlayerSchools.filter((org) => !ncaaCachedSet.has(org))
+        .map((p) => ({ playerName: p.playerName, org: p.org }))
+      if (ncaaAllOrgs.length > 0) {
+        useScheduleStore.getState().fetchNcaaSchedules(ncaaAllOrgs)
+      }
 
-      if (missingProTeams.length > 0 || missingNcaa.length > 0) {
-        // Incremental fetch for just the missing teams/schools
-        handleIncrementalLoad(missingProTeams, missingNcaa)
+      if (missingProTeams.length > 0) {
+        handleIncrementalLoad(missingProTeams, [])
       }
       return
     }
