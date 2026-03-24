@@ -338,6 +338,46 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
   // Build concise summary
   const t1Names = [...allPlayers].filter((n) => playerMap.get(n)?.tier === 1)
 
+  // Natural language trip summary
+  const tripSummary = useMemo(() => {
+    const gameDays = displayDays.filter((d) => (dayAssignments.get(d) ?? []).length > 0)
+    const parts: string[] = []
+
+    // Opening: drive from Orlando
+    parts.push(`Drive ~${formatDriveTime(trip.driveFromHomeMinutes)} from Orlando.`)
+
+    // Each game day
+    for (const day of gameDays) {
+      const dayStops = dayAssignments.get(day) ?? []
+      if (dayStops.length === 0) continue
+      const dayName = formatDate(day)
+
+      if (dayStops.length === 1) {
+        const s = dayStops[0]!
+        const playerDescs = s.players.map((n) => {
+          const p = playerMap.get(n)
+          return p ? `${n} (${p.org})` : n
+        })
+        parts.push(`${dayName}: See ${playerDescs.join(' and ')} at ${s.orgLabel || s.venueName}.`)
+      } else {
+        const stopDescs = dayStops.map((s) => {
+          const names = s.players.map((n) => playerMap.get(n)?.playerName ?? n).join(', ')
+          const drive = s.driveFromPrev > 0 ? ` (${formatDriveTime(s.driveFromPrev)} drive between)` : ''
+          return `${names} at ${s.orgLabel || s.venueName}${drive}`
+        })
+        parts.push(`${dayName}: See ${stopDescs.join(', then ')}.`)
+      }
+    }
+
+    // Return drive
+    if (lastStop) {
+      const returnMin = Math.round((haversineKm(parseVenueKey(lastStop.venueKey), HOME_BASE) * 1.3 / 90) * 60)
+      parts.push(`Drive ~${formatDriveTime(returnMin)} home.`)
+    }
+
+    return parts.join(' ')
+  }, [displayDays, dayAssignments, trip.driveFromHomeMinutes, stops, playerMap, lastStop])
+
   const [scoreOpen, setScoreOpen] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const [calError, setCalError] = useState(false)
@@ -408,6 +448,11 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
       {expanded && (
         <div className="mt-4 space-y-3">
 
+          {/* Natural language summary */}
+          <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
+            {tripSummary}
+          </p>
+
           {/* Confidence warning — shown at top for visibility */}
           {hasUncertainEvents && (() => {
             const estimatedStops = stops.filter((s) => s.confidence && s.confidence !== 'high')
@@ -472,13 +517,13 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                       const gameTime = formatGameTime(stop.gameTime, stop.source)
                       return (
                         <div key={stop.venueKey} className="flex items-start gap-2.5">
-                          {/* Drive connector */}
+                          {/* Drive connector between stops */}
                           {stopIdx > 0 && stop.driveFromPrev > 0 && (
-                            <span className="text-[10px] text-text-dim/50 mt-1 shrink-0 w-12 text-right">
-                              {formatDriveTime(stop.driveFromPrev)}
+                            <span className="text-[11px] text-accent-blue font-medium mt-1 shrink-0 w-16 text-right" title="Drive time between venues">
+                              {formatDriveTime(stop.driveFromPrev)} →
                             </span>
                           )}
-                          {stopIdx === 0 && <span className="w-12 shrink-0" />}
+                          {stopIdx === 0 && <span className="w-16 shrink-0" />}
 
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1.5">

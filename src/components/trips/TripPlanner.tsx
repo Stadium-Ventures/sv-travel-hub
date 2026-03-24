@@ -1550,6 +1550,17 @@ function FlyInCard({
         const hasMultipleDays = visit.dates.length > 1
         return (
         <div className="mt-4 space-y-3">
+          {/* Natural language summary */}
+          <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
+            Fly from Orlando to {visit.venue.name} (~{visit.estimatedTravelHours}h travel, {milesDisplay} mi).
+            {' '}See {visit.playerNames.map((n) => {
+              const p = playerMap.get(n)
+              return p ? `${n} (${p.org})` : n
+            }).join(' and ')} on {formatDate(bestDay)}{isTue ? ' (Tuesday — best day for position players)' : ''}.
+            {hasMultipleDays ? ` ${visit.dates.length} days of games available.` : ''}
+            {' '}Fly home after.
+          </p>
+
           {/* Day 1: Travel + Game */}
           <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
             <div className="flex items-center justify-between mb-2">
