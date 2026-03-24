@@ -894,17 +894,21 @@ export async function generateTrips(
   const drivablePriority = new Set(
     priorityPlayers.filter((n) => priorityResults.some((r) => r.playerName === n && (r.status === 'included' || r.status === 'separate-trip'))),
   )
+  // Sort candidates by priority players first, then by score.
+  // Don't filter out non-priority candidates — just boost priority ones to the top.
   const remainingCandidates = [...candidates]
-    .filter((c) => {
-      if (!hasPriorityFilter || drivablePriority.size === 0) return true
-      // At least one drivable priority player must be in the trip
-      const tripPlayers = new Set([
-        ...c.anchorGame.playerNames,
-        ...c.nearbyGames.flatMap((g) => g.playerNames),
-      ])
-      return [...drivablePriority].some((n) => tripPlayers.has(n))
+    .sort((a, b) => {
+      // Priority-containing trips first
+      if (hasPriorityFilter && drivablePriority.size > 0) {
+        const aHasPriority = [...drivablePriority].some((n) =>
+          a.anchorGame.playerNames.includes(n) || a.nearbyGames.some((g) => g.playerNames.includes(n)))
+        const bHasPriority = [...drivablePriority].some((n) =>
+          b.anchorGame.playerNames.includes(n) || b.nearbyGames.some((g) => g.playerNames.includes(n)))
+        if (aHasPriority && !bHasPriority) return -1
+        if (!aHasPriority && bHasPriority) return 1
+      }
+      return b.visitValue - a.visitValue
     })
-    .sort((a, b) => b.visitValue - a.visitValue)
 
   // Track selected trip date ranges for overlap detection
   function getTripDateRange(trip: TripCandidate): Set<string> {
@@ -923,6 +927,14 @@ export async function generateTrips(
     if (++greedyIterCount % 50 === 0) {
       await new Promise(r => setTimeout(r, 0)) // yield to browser
     }
+    // Remove candidates that overlap with already-selected trips
+    for (let i = remainingCandidates.length - 1; i >= 0; i--) {
+      const overlaps = selectedTrips.some(existing => tripsOverlap(existing, remainingCandidates[i]!))
+      if (overlaps) remainingCandidates.splice(i, 1)
+    }
+
+    if (remainingCandidates.length === 0) break
+
     // Rescore remaining candidates based on unsaturated player value
     for (const trip of remainingCandidates) {
       const tripPlayerNames = [
@@ -937,10 +949,6 @@ export async function generateTrips(
       const driveHours = trip.totalDriveMinutes / 60
       const efficiencyFactor = driveHours > 0 ? Math.max(0.6, 1.0 - (driveHours - 3) * 0.05) : 1.0
       rawCoverageScore = Math.round(rawCoverageScore * efficiencyFactor)
-
-      // Skip trips that overlap with already-selected trips — can't be in two places at once
-      const overlapsExisting = selectedTrips.some(existing => tripsOverlap(existing, trip))
-      if (overlapsExisting) { rawCoverageScore = 0 }
 
       trip.visitValue = rawCoverageScore
       trip.totalPlayersVisited = uniqueNames.length

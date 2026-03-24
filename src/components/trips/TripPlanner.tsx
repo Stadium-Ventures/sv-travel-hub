@@ -1210,7 +1210,7 @@ export default function TripPlanner() {
                     <div key={i} className="flex items-center gap-2 text-sm">
                       <span className={`h-2 w-2 rounded-full ${dotColor}`} />
                       <span className="font-medium text-text cursor-pointer hover:text-yellow-400 transition-colors" onClick={() => setSelectedPlayer(nm.playerName)}>{nm.playerName}</span>
-                      <span className="text-xs text-text-dim">T{tier}</span>
+                      <span className="text-xs text-text-dim">{TIER_LABELS[tier] ?? ''}</span>
                       <span className="text-xs text-text-dim">@ {nm.venue}</span>
                       <span className="ml-auto text-xs text-yellow-400">
                         +{nm.overBy}m over limit ({formatDriveTime(nm.driveMinutes)} drive)
@@ -1248,7 +1248,7 @@ export default function TripPlanner() {
                           <div key={entry.name} className="flex items-center gap-2 text-sm">
                             <span className={`h-2 w-2 rounded-full ${dotColor}`} />
                             <span className="font-medium text-accent-orange cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
-                            <span className="text-xs text-text-dim">T{tier}</span>
+                            <span className="text-xs text-text-dim">{TIER_LABELS[tier] ?? ''}</span>
                             <span className="text-xs text-text-dim/70">— {entry.reason}</span>
                           </div>
                         )
@@ -1286,7 +1286,7 @@ export default function TripPlanner() {
                                 <div key={entry.name} className="flex items-center gap-2 text-sm">
                                   <span className={`h-2 w-2 rounded-full ${dotColor}`} />
                                   <span className="font-medium text-accent-orange cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
-                                  <span className="text-xs text-text-dim">T{tier}</span>
+                                  <span className="text-xs text-text-dim">{TIER_LABELS[tier] ?? ''}</span>
                                   <span className="text-xs text-text-dim/70">— {entry.reason}</span>
                                 </div>
                               )
@@ -1304,7 +1304,7 @@ export default function TripPlanner() {
                                 <div key={entry.name} className="flex items-center gap-2 text-sm text-text-dim/60">
                                   <span className="h-2 w-2 rounded-full bg-gray-600" />
                                   <span className="cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
-                                  <span className="text-xs">T{tier}</span>
+                                  <span className="text-xs">{TIER_LABELS[tier] ?? ''}</span>
                                 </div>
                               )
                             })}
@@ -1499,14 +1499,6 @@ function FlyInCard({
             <h3 className="text-base font-semibold text-text">
               Fly-in #{index}
             </h3>
-            {breakdown && (
-              <span
-                className="rounded-lg bg-purple-500/10 px-2 py-0.5 text-xs font-bold text-purple-400"
-                title="Single-venue score — fly-ins cover 1 venue vs road trips which chain multiple"
-              >
-                {breakdown.finalScore} pts
-              </span>
-            )}
           </div>
           <p className="mt-0.5 text-sm text-text-dim">
             {dateLabel}
@@ -1596,7 +1588,7 @@ function FlyInCard({
                       <span key={name} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-text cursor-pointer hover:bg-accent-blue/10"
                         onClick={(e) => { e.stopPropagation(); onPlayerClick(name) }}>
                         <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
-                        {name} <span className="text-text-dim/50">T{tier}</span>
+                        {name} <span className="text-text-dim/50">{TIER_LABELS[tier] ?? ''}</span>
                       </span>
                     )
                   })}

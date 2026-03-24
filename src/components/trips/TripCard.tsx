@@ -28,7 +28,7 @@ function getVisitContext(source: ScheduleSource, isHome: boolean, awayTeam: stri
   color: string
 } {
   if (awayTeam === 'Spring Training') {
-    return { label: 'ST', color: 'bg-accent-orange/15 text-accent-orange' }
+    return { label: 'Spring Training', color: 'bg-accent-orange/15 text-accent-orange' }
   }
   if (source === 'mlb-api') {
     return isHome
@@ -275,7 +275,7 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
   return text
 }
 
-function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick, overlappingTrips }: Props) {
+function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick, overlappingTrips: _overlappingTrips }: Props) {
   const stops = useMemo(() => buildVenueStops(trip, playerMap), [trip, playerMap])
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [copied, setCopied] = useState(false)
@@ -382,32 +382,13 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
           <div className="flex items-center gap-2">
             <span className={`text-text-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
             <h3 className="text-base font-semibold text-text">Trip #{index}</h3>
-            {breakdown && (
-              <span className="rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue" title="Trip priority score">
-                {breakdown.finalScore} pts
-              </span>
-            )}
-            {overlappingTrips && overlappingTrips.length > 0 && (
-              <span className="rounded-lg bg-accent-orange/15 px-2 py-0.5 text-xs font-medium text-accent-orange" title="Date overlap — can't do both trips">
-                Overlaps with Trip #{overlappingTrips.length === 1 ? overlappingTrips[0] : overlappingTrips.map(n => `#${n}`).join(', ')}
-              </span>
-            )}
           </div>
-          {/* Compact summary line */}
+          {/* Plain-English summary */}
           <p className="mt-0.5 text-sm text-text-dim">
-            {dateLabel} · {allPlayers.size} player{allPlayers.size !== 1 ? 's' : ''} · {stops.length} stop{stops.length !== 1 ? 's' : ''} · ~{formatDriveTime(trip.driveFromHomeMinutes)} from Orlando
+            {dateLabel} · {allPlayers.size} player{allPlayers.size !== 1 ? 's' : ''} · ~{formatDriveTime(trip.driveFromHomeMinutes)} drive from Orlando
             {t1Names.length > 0 && (
               <span className="ml-1 text-accent-red font-medium"> · {t1Names.join(', ')}</span>
             )}
-            {breakdown && (() => {
-              const highlights: string[] = []
-              if (breakdown.tuesdayBonus) highlights.push('Tue bonus')
-              if (breakdown.pitcherMatchBonus > 0) highlights.push('pitcher start')
-              if (trip.nearbyGames.length > 0) highlights.push('multi-venue')
-              return highlights.length > 0 ? (
-                <span className="ml-1 text-[10px] text-accent-blue/70"> · {highlights.join(' + ')}</span>
-              ) : null
-            })()}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -544,7 +525,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                                   >
                                     <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
                                     {name}
-                                    <span className="text-text-dim/50">T{tier}</span>
+                                    <span className="text-text-dim/50">{TIER_LABELS[tier] ?? ''}</span>
                                   </span>
                                 )
                               })}
@@ -590,7 +571,6 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
               >
                 <span className={`transition-transform text-[9px] ${scoreOpen ? 'rotate-90' : ''}`}>&#9654;</span>
                 Score Details
-                <span className="text-text-dim/40">({breakdown.finalScore} pts)</span>
               </button>
               {scoreOpen && (
                 <div className="mt-1.5 grid grid-cols-2 gap-x-6 gap-y-0.5 text-[11px] text-text-dim/70 pl-3">
