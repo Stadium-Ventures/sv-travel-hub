@@ -270,7 +270,7 @@ export default function TripPlanner() {
   }, [players.length, rosterLoading, fetchRoster])
 
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
-  const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly'>('all')
+  const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly' | 'multi'>('all')
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
 
 
@@ -965,6 +965,7 @@ export default function TripPlanner() {
                   { key: 'all', label: 'All' },
                   { key: 'drive', label: '🚗 Drives' },
                   { key: 'fly', label: '✈️ Flights' },
+                  { key: 'multi', label: '👥 2+ Players' },
                 ] as const).map(({ key, label }) => (
                   <button
                     key={key}
@@ -982,6 +983,15 @@ export default function TripPlanner() {
                 {numbered.filter((item) => {
                   if (tripFilter === 'drive') return item.type === 'road'
                   if (tripFilter === 'fly') return item.type === 'flyin'
+                  if (tripFilter === 'multi') {
+                    // Show only trips with 2+ players
+                    if (item.type === 'road') {
+                      const playerSet = new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)])
+                      return playerSet.size >= 2
+                    } else {
+                      return item.visit.playerNames.length >= 2
+                    }
+                  }
                   return true
                 }).map((item, i) => {
                   if (item.type === 'road') {
