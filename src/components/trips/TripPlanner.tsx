@@ -322,16 +322,7 @@ export default function TripPlanner() {
   const proStale = proFetchedAt ? (now - proFetchedAt > STALE_THRESHOLD) : false
   const anyStale = proStale
 
-  // Format relative time for cache age
-  function formatAge(ts: number | null): string {
-    if (!ts) return ''
-    const mins = Math.round((now - ts) / 60000)
-    if (mins < 1) return 'just now'
-    if (mins < 60) return `${mins}m ago`
-    const hrs = Math.round(mins / 60)
-    if (hrs < 24) return `${hrs}h ago`
-    return `${Math.round(hrs / 24)}d ago`
-  }
+  // (formatAge removed — schedule badges simplified)
 
   // Auto-load on mount: use cached data if fresh, otherwise fetch
   // Also detect new teams/schools not in cache (roster changes)
@@ -442,60 +433,29 @@ export default function TripPlanner() {
       {/* Controls */}
       <div className="rounded-xl border border-border bg-surface p-5">
         <h2 className="mb-3 text-base font-semibold text-text">Trip Planner</h2>
-        <p className="mb-2 text-xs text-text-dim">
-          Schedules load automatically. Hit Generate to build optimized road trips from Orlando.
-        </p>
-        <details className="mb-4">
-          <summary className="cursor-pointer text-[11px] text-text-dim/60 hover:text-text-dim">How scoring works</summary>
-          <ul className="mt-1.5 ml-4 list-disc space-y-0.5 text-[11px] text-text-dim">
-            <li><strong>Must-see (Tier 1)</strong> = 5 pts per visit remaining</li>
-            <li><strong>High priority (Tier 2)</strong> = 3 pts per visit remaining</li>
-            <li><strong>Standard (Tier 3)</strong> = 1 pt per visit remaining</li>
-            <li><strong>Tuesday bonus</strong> — +20% because MiLB position players are most accessible on Tuesdays</li>
-            <li><strong>Pitcher start bonus</strong> — extra points when a starting pitcher you follow is scheduled to pitch</li>
-            <li><strong>Sundays skipped</strong> — typically travel/rest days</li>
-            <li><strong>Max 3-day trips</strong></li>
-          </ul>
-        </details>
 
-        {/* Schedule status + load button */}
+        {/* Schedule status — minimal */}
         <div className="mb-4">
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={handleLoadAllSchedules}
-              disabled={anyScheduleLoading}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                allSchedulesLoaded
-                  ? 'bg-accent-green/15 text-accent-green border border-accent-green/30 hover:bg-accent-green/25'
-                  : 'bg-accent-blue text-white hover:bg-accent-blue/80'
-              } disabled:opacity-50`}
-            >
-              {anyScheduleLoading && !allSchedulesLoaded
-                ? 'Loading Schedules...'
-                : allSchedulesLoaded ? 'Reload Schedules' : 'Load All Schedules'}
-            </button>
-            {/* Inline schedule status chips (show when data exists, even during incremental loads) */}
-            {(proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0) && (
-              <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                {proGames.length > 0 && (
-                  <span className={`rounded-full px-2 py-0.5 ${proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'}`}>
-                    Pro: {proGames.length} games {proFetchedAt ? `(${formatAge(proFetchedAt)})` : ''}
-                  </span>
-                )}
-                {ncaaGames.length > 0 && (
-                  <span className="rounded-full px-2 py-0.5 bg-accent-green/10 text-accent-green">
-                    College: {ncaaGames.length} games (bundled)
-                  </span>
-                )}
-                {hsGames.length > 0 && (
-                  <span className="rounded-full px-2 py-0.5 bg-accent-green/10 text-accent-green">
-                    HS: {hsGames.length} games (bundled)
-                  </span>
-                )}
-                {anyStale && (
-                  <span className="text-[10px] text-accent-orange/70">Stale — consider reloading</span>
-                )}
-              </div>
+            {!allSchedulesLoaded && !anyScheduleLoading && (
+              <button
+                onClick={handleLoadAllSchedules}
+                className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/80"
+              >
+                Load Schedules
+              </button>
+            )}
+            {anyScheduleLoading && !allSchedulesLoaded && (
+              <span className="flex items-center gap-2 text-xs text-text-dim">
+                <span className="h-3 w-3 animate-spin rounded-full border border-accent-blue border-t-transparent" />
+                Loading game data...
+              </span>
+            )}
+            {allSchedulesLoaded && !anyScheduleLoading && (
+              <span className="text-[10px] text-accent-green/60">
+                Game data loaded
+                {anyStale && <button onClick={handleLoadAllSchedules} className="ml-2 text-accent-orange hover:underline">refresh</button>}
+              </span>
             )}
           </div>
 
@@ -730,13 +690,7 @@ export default function TripPlanner() {
           </div>
         </div>
 
-        {/* Trip Anchor — "I'll be in [city], who's nearby?" */}
-        <TripAnchor
-          allGames={[...proGames, ...ncaaGames, ...hsGames]}
-          playerMap={playerMap}
-          startDate={startDate}
-          endDate={endDate}
-        />
+        {/* Trip Anchor moved below results */}
 
         {!canGenerate && !computing && players.length === 0 && (
           <p className="mt-3 text-xs text-accent-orange">Loading roster...</p>
@@ -1269,6 +1223,14 @@ export default function TripPlanner() {
         </>
       )}
 
+      {/* Trip Anchor — "Already have a trip planned?" */}
+      <TripAnchor
+        allGames={[...proGames, ...ncaaGames, ...hsGames]}
+        playerMap={playerMap}
+        startDate={startDate}
+        endDate={endDate}
+      />
+
       {/* Player schedule drill-down panel */}
       {selectedPlayer && (
         <PlayerSchedulePanel
@@ -1501,6 +1463,60 @@ function TripAnchor({
               )
             })}
           </div>
+
+          {/* Build a trip suggestion from anchor */}
+          {playerEntries.length > 0 && (() => {
+            // Find the best 3-day window — the dates where the most players have games
+            const allDates = new Map<string, Set<string>>() // date → set of player names
+            for (const [name, info] of playerEntries) {
+              for (const d of info.dates) {
+                const existing = allDates.get(d)
+                if (existing) existing.add(name)
+                else allDates.set(d, new Set([name]))
+              }
+            }
+            // Score each date by number of players
+            const scoredDates = [...allDates.entries()]
+              .map(([d, players]) => ({ date: d, players: [...players], count: players.size }))
+              .sort((a, b) => b.count - a.count)
+
+            const bestDate = scoredDates[0]
+            if (!bestDate) return null
+
+            // Find 2 more dates within 3 days that cover different players
+            const bestDateObj = new Date(bestDate.date + 'T12:00:00Z')
+            const windowDates = scoredDates.filter(d => {
+              const diff = Math.abs(new Date(d.date + 'T12:00:00Z').getTime() - bestDateObj.getTime()) / 86400000
+              return diff <= 2 && diff > 0
+            }).slice(0, 2)
+
+            const tripDates = [bestDate, ...windowDates].sort((a, b) => a.date.localeCompare(b.date))
+            const allTripPlayers = new Set(tripDates.flatMap(d => d.players))
+
+            return (
+              <div className="mt-3 rounded-lg border border-accent-blue/30 bg-accent-blue/5 px-4 py-3">
+                <p className="text-xs font-medium text-accent-blue mb-2">
+                  Suggested trip from {anchorCity}
+                </p>
+                <div className="space-y-1.5">
+                  {tripDates.map((d, i) => (
+                    <div key={d.date} className="text-[11px]">
+                      <span className="font-medium text-text">Day {i + 1} · {formatDate(d.date)}:</span>
+                      <span className="text-text-dim ml-1">
+                        See {d.players.map(n => {
+                          const info = byPlayer.get(n)
+                          return info ? `${n} (${info.org}, ~${formatDriveTime(info.driveMin)})` : n
+                        }).join(', ')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] text-text-dim/60">
+                  {allTripPlayers.size} player{allTripPlayers.size !== 1 ? 's' : ''} in {tripDates.length} day{tripDates.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+            )
+          })()}
         </div>
         )
       })()}
