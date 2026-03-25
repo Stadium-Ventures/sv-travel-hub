@@ -1705,6 +1705,14 @@ function FlyInCard({
                     {stop.teamLabel && stop.teamLabel !== stop.venue.name && (
                       <span className="text-[11px] text-text-dim/60">{stop.venue.name}</span>
                     )}
+                    {stop.gameTime && (() => {
+                      const d = new Date(stop.gameTime)
+                      return !isNaN(d.getTime()) ? (
+                        <span className="text-[11px] text-text-dim/60">
+                          {d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })} ET
+                        </span>
+                      ) : null
+                    })()}
                     {stop.sourceUrl && (
                       <a href={stop.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400">Verify ↗</a>
                     )}

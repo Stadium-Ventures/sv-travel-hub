@@ -45,14 +45,27 @@ export function haversineKm(a: Coordinates, b: Coordinates): number {
 }
 
 // Estimate drive time in minutes from straight-line distance
-// Short distances (<300km): 1.2x detour, 95 km/h avg (calibrated for Florida)
-// Long distances (>300km): 1.4x detour, 90 km/h avg (highways + rest stops)
+// Uses a gradual detour factor that increases with distance:
+//   <200km: 1.2x (local/regional, calibrated for Florida)
+//   200-600km: linear ramp from 1.2x to 1.35x
+//   >600km: 1.4x (cross-region, accounts for route indirection)
 export function estimateDriveMinutes(a: Coordinates, b: Coordinates): number {
   const km = haversineKm(a, b)
-  if (km > 300) {
-    return Math.round((km * 1.4 / 90) * 60)
+  let detourFactor: number
+  let avgSpeed: number
+  if (km <= 200) {
+    detourFactor = 1.2
+    avgSpeed = 95
+  } else if (km <= 600) {
+    // Linear ramp: 1.2 at 200km → 1.35 at 600km
+    const t = (km - 200) / 400
+    detourFactor = 1.2 + t * 0.15
+    avgSpeed = 95 - t * 5 // 95 → 90
+  } else {
+    detourFactor = 1.4
+    avgSpeed = 88
   }
-  return Math.round((km * 1.2 / 95) * 60)
+  return Math.round((km * detourFactor / avgSpeed) * 60)
 }
 
 // Estimate total travel time for a fly-in visit (hours)
