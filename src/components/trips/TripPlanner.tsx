@@ -1464,59 +1464,42 @@ function TripAnchor({
             })}
           </div>
 
-          {/* Build a trip suggestion from anchor */}
-          {playerEntries.length > 0 && (() => {
-            // Find the best 3-day window — the dates where the most players have games
-            const allDates = new Map<string, Set<string>>() // date → set of player names
-            for (const [name, info] of playerEntries) {
-              for (const d of info.dates) {
-                const existing = allDates.get(d)
-                if (existing) existing.add(name)
-                else allDates.set(d, new Set([name]))
-              }
-            }
-            // Score each date by number of players
-            const scoredDates = [...allDates.entries()]
-              .map(([d, players]) => ({ date: d, players: [...players], count: players.size }))
-              .sort((a, b) => b.count - a.count)
-
-            const bestDate = scoredDates[0]
-            if (!bestDate) return null
-
-            // Find 2 more dates within 3 days that cover different players
-            const bestDateObj = new Date(bestDate.date + 'T12:00:00Z')
-            const windowDates = scoredDates.filter(d => {
-              const diff = Math.abs(new Date(d.date + 'T12:00:00Z').getTime() - bestDateObj.getTime()) / 86400000
-              return diff <= 2 && diff > 0
-            }).slice(0, 2)
-
-            const tripDates = [bestDate, ...windowDates].sort((a, b) => a.date.localeCompare(b.date))
-            const allTripPlayers = new Set(tripDates.flatMap(d => d.players))
-
-            return (
-              <div className="mt-3 rounded-lg border border-accent-blue/30 bg-accent-blue/5 px-4 py-3">
-                <p className="text-xs font-medium text-accent-blue mb-2">
-                  Suggested trip from {anchorCity}
-                </p>
-                <div className="space-y-1.5">
-                  {tripDates.map((d, i) => (
-                    <div key={d.date} className="text-[11px]">
-                      <span className="font-medium text-text">Day {i + 1} · {formatDate(d.date)}:</span>
-                      <span className="text-text-dim ml-1">
-                        See {d.players.map(n => {
-                          const info = byPlayer.get(n)
-                          return info ? `${n} (${info.org}, ~${formatDriveTime(info.driveMin)})` : n
-                        }).join(', ')}
-                      </span>
+          {/* Trip suggestion from anchor — one line per UNIQUE player */}
+          {playerEntries.length > 0 && (
+            <div className="mt-3 rounded-lg border border-accent-blue/30 bg-accent-blue/5 px-4 py-3">
+              <p className="text-xs font-medium text-accent-blue mb-2">
+                While you're near {anchorCity}:
+              </p>
+              <div className="space-y-1.5">
+                {playerEntries.map(([name, info]) => {
+                  const sortedDates = info.dates.sort()
+                  const dateList = sortedDates.slice(0, 3).map(d => formatDate(d))
+                  return (
+                    <div key={name} className="text-[11px]">
+                      <span className={`inline-block h-1.5 w-1.5 rounded-full mr-1 ${TIER_DOT_COLORS[info.tier] ?? 'bg-gray-500'}`} />
+                      <span className="font-medium text-text">{name}</span>
+                      <span className="text-text-dim"> ({info.org})</span>
+                      <span className="text-text-dim"> · ~{formatDriveTime(info.driveMin)} drive</span>
+                      <span className="text-text-dim/60"> · {dateList.join(', ')}{sortedDates.length > 3 ? ` +${sortedDates.length - 3} more` : ''}</span>
                     </div>
-                  ))}
-                </div>
-                <p className="mt-2 text-[10px] text-text-dim/60">
-                  {allTripPlayers.size} player{allTripPlayers.size !== 1 ? 's' : ''} in {tripDates.length} day{tripDates.length !== 1 ? 's' : ''}
-                </p>
+                  )
+                })}
               </div>
-            )
-          })()}
+              {playerEntries.length > 1 && (
+                <p className="mt-2 text-[10px] text-text-dim/60">
+                  Best day to see multiple players: {(() => {
+                    // Find dates where most players overlap
+                    const dateCounts = new Map<string, number>()
+                    for (const [, info] of playerEntries) {
+                      for (const d of info.dates) dateCounts.set(d, (dateCounts.get(d) ?? 0) + 1)
+                    }
+                    const best = [...dateCounts.entries()].sort((a, b) => b[1] - a[1])[0]
+                    return best ? `${formatDate(best[0])} (${best[1]} players)` : 'varies'
+                  })()}
+                </p>
+              )}
+            </div>
+          )}
         </div>
         )
       })()}
