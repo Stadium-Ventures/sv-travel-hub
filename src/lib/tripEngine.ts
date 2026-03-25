@@ -1199,9 +1199,9 @@ export async function generateTrips(
 
       if (stops.length < 2) continue // couldn't build a multi-stop combo
 
-      // Sort stops by date
+      // Sort stops by date and recalculate ALL inter-stop drives
       stops.sort((a, b) => a.date.localeCompare(b.date))
-      // Recalculate inter-stop drives after sorting
+      stops[0]!.driveMinutesFromPrev = 0 // first stop has no previous
       for (let si = 1; si < stops.length; si++) {
         stops[si]!.driveMinutesFromPrev = lookupDriveMinutes(
           stops[si - 1]!.venue.coords, stops[si]!.venue.coords,
@@ -1247,6 +1247,8 @@ export async function generateTrips(
 
   // Convert remaining single-venue entries to FlyInVisit array (skip venues already in combos)
   for (const [, entry] of flyInWeekMap) {
+    // Always count players as covered even if venue is in a combo
+    for (const name of entry.players) flyInCovered.add(name)
     const venueCoordKey = coordKey(entry.venue.coords)
     if (comboVenuesUsed.has(venueCoordKey)) continue // already in a combo
     const sortedDates = [...entry.dates].sort()

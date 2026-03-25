@@ -1429,44 +1429,46 @@ function TripAnchor({
       </div>
 
       {expanded && results.length > 0 && (() => {
-        // Group results by date, show unique players per date
-        const byDate = new Map<string, typeof results>()
-        const seenPlayerDates = new Set<string>()
+        // Group by player — show each player once with their game count and next dates
+        const byPlayer = new Map<string, { dates: string[]; org: string; tier: number; driveMin: number; venue: string }>()
         for (const r of results) {
-          const key = `${r.playerName}|${r.date}`
-          if (seenPlayerDates.has(key)) continue
-          seenPlayerDates.add(key)
-          const existing = byDate.get(r.date) ?? []
-          existing.push(r)
-          byDate.set(r.date, existing)
+          const existing = byPlayer.get(r.playerName)
+          if (existing) {
+            if (!existing.dates.includes(r.date)) existing.dates.push(r.date)
+          } else {
+            byPlayer.set(r.playerName, { dates: [r.date], org: r.org, tier: r.tier, driveMin: r.driveMin, venue: r.venue })
+          }
         }
-        const uniquePlayers = new Set(results.map(r => r.playerName))
-        const dateEntries = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(0, 15)
+        // Sort by tier, then by number of games
+        const playerEntries = [...byPlayer.entries()].sort(([, a], [, b]) => a.tier - b.tier || b.dates.length - a.dates.length)
 
         return (
         <div className="mt-3 rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
           <p className="mb-3 text-xs text-text-dim">
-            <span className="font-medium text-purple-400">{uniquePlayers.size} players</span> within 3h drive of {anchorCity}
+            <span className="font-medium text-purple-400">{playerEntries.length} players</span> within 3h drive of {anchorCity}
           </p>
           <div className="max-h-64 overflow-y-auto space-y-2">
-            {dateEntries.map(([date, dayResults]) => (
-              <div key={date}>
-                <p className="text-[11px] font-medium text-text-dim mb-0.5">{formatDate(date)}</p>
-                <div className="ml-3 space-y-0.5">
-                  {dayResults.slice(0, 5).map((r, i) => (
-                    <div key={i} className="flex items-center gap-2 text-[11px]">
-                      <span className={`h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[r.tier] ?? 'bg-gray-500'}`} />
-                      <span className="font-medium text-text">{r.playerName}</span>
-                      <span className="text-text-dim/60">{r.org}</span>
-                      <span className="ml-auto text-text-dim/50">~{formatDriveTime(r.driveMin)}</span>
+            {playerEntries.map(([name, info]) => {
+              const sortedDates = info.dates.sort()
+              const nextDates = sortedDates.slice(0, 4).map(d => formatDate(d))
+              return (
+                <div key={name} className="flex items-start gap-2 text-[11px]">
+                  <span className={`mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ${TIER_DOT_COLORS[info.tier] ?? 'bg-gray-500'}`} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-text">{name}</span>
+                      <span className="text-text-dim/60">{info.org}</span>
+                      <span className="ml-auto text-text-dim/50">~{formatDriveTime(info.driveMin)} drive</span>
                     </div>
-                  ))}
-                  {dayResults.length > 5 && <p className="text-[10px] text-text-dim/40">+{dayResults.length - 5} more</p>}
+                    <p className="text-[10px] text-text-dim/60">
+                      {info.dates.length} game{info.dates.length !== 1 ? 's' : ''} nearby: {nextDates.join(', ')}
+                      {info.dates.length > 4 && ` +${info.dates.length - 4} more`}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
-          {byDate.size > 15 && <p className="mt-1 text-[10px] text-text-dim/50">Showing first 15 dates of {byDate.size}</p>}
         </div>
         )
       })()}
