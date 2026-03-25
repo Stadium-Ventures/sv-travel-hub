@@ -1669,16 +1669,16 @@ function FlyInCard({
           <div className="mt-4 space-y-3">
             {/* Natural language summary */}
             <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
-              Fly from Orlando (~{visit.estimatedTravelHours}h).
+              {formatDate(comboStops[0]!.date)} – {formatDate(comboStops[comboStops.length - 1]!.date)}: Fly from Orlando (~{Math.round(visit.estimatedTravelHours - 3)}h flight).
               {comboStops.map((s, i) => {
                 const names = s.playerNames.map((n) => {
                   const p = playerMap.get(n)
                   return p ? `${n} (${p.org})` : n
                 }).join(', ')
                 const drive = i > 0 && s.driveMinutesFromPrev > 0
-                  ? ` Drive ${formatDriveTime(s.driveMinutesFromPrev)} to`
+                  ? ` Drive ${formatDriveTime(s.driveMinutesFromPrev)},`
                   : ''
-                return ` ${formatDate(s.date)}:${drive} see ${names} at ${s.teamLabel || s.venue.name}.`
+                return ` Day ${i + 1}:${drive} see ${names} at ${s.teamLabel || s.venue.name}.`
               }).join('')}
               {' '}Fly home after.
             </p>
@@ -1763,12 +1763,11 @@ function FlyInCard({
         <div className="mt-4 space-y-3">
           {/* Natural language summary */}
           <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
-            Fly from Orlando to {visit.venue.name} (~{visit.estimatedTravelHours}h travel, {milesDisplay} mi).
-            {' '}See {visit.playerNames.map((n) => {
+            {formatDate(bestDay)}{hasMultipleDays ? ` – ${formatDate(visit.dates[visit.dates.length - 1]!)}` : ''}:
+            {' '}Fly from Orlando (~{Math.round(visit.estimatedTravelHours - 3)}h flight) to see {visit.playerNames.map((n) => {
               const p = playerMap.get(n)
               return p ? `${n} (${p.org})` : n
-            }).join(' and ')} on {formatDate(bestDay)}{isTue ? ' (Tuesday — best day for position players)' : ''}.
-            {hasMultipleDays ? ` ${visit.dates.length} days of games available.` : ''}
+            }).join(' and ')} at {visit.venue.name}{isTue ? ' (Tuesday — best day for position players)' : ''}.
             {' '}Fly home after.
           </p>
 

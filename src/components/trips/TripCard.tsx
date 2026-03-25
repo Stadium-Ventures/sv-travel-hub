@@ -343,8 +343,13 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
     const gameDays = displayDays.filter((d) => (dayAssignments.get(d) ?? []).length > 0)
     const parts: string[] = []
 
-    // Opening: drive from Orlando
-    parts.push(`Drive ~${formatDriveTime(trip.driveFromHomeMinutes)} from Orlando.`)
+    // Opening: date range + drive from Orlando
+    const firstDay = gameDays[0]
+    const lastDay = gameDays[gameDays.length - 1]
+    const dateRange = firstDay && lastDay && firstDay !== lastDay
+      ? `${formatDate(firstDay)} – ${formatDate(lastDay)}`
+      : firstDay ? formatDate(firstDay) : ''
+    parts.push(`${dateRange}: Drive ~${formatDriveTime(trip.driveFromHomeMinutes)} from Orlando.`)
 
     // Each game day
     for (const day of gameDays) {
