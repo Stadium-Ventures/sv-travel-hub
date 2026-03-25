@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
-import TripCard, { generateItineraryText, buildVenueStops } from './TripCard'
+import TripCard from './TripCard'
 import PlayerCoverageCard from './PlayerCoverageCard'
-import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
+// ICS export removed from main UI — kept in individual trip cards
+// import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
@@ -265,8 +266,8 @@ export default function TripPlanner() {
     }
   }, [players.length, rosterLoading, fetchRoster])
 
-  const [copiedAll, setCopiedAll] = useState(false)
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
+  const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly'>('all')
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
 
 
@@ -304,8 +305,6 @@ export default function TripPlanner() {
     setPriorityPlayers([...new Set(next.filter(Boolean))])
   }
 
-  const [copyAllError, setCopyAllError] = useState(false)
-  const [calAllError, setCalAllError] = useState(false)
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
   const flyInLimit = 5 // Hard cap on fly-in results
   const [showOverlaps, setShowOverlaps] = useState(false)
@@ -433,24 +432,6 @@ export default function TripPlanner() {
     }
   }
 
-  async function handleCopyAllTrips() {
-    if (!tripPlan) return
-    try {
-      const texts: string[] = []
-      for (let i = 0; i < tripPlan.trips.length; i++) {
-        const trip = tripPlan.trips[i]!
-        const stops = buildVenueStops(trip, playerMap)
-        texts.push(generateItineraryText(trip, i + 1, stops, playerMap))
-      }
-      await navigator.clipboard.writeText(texts.join('\n---\n\n'))
-      setCopiedAll(true)
-      setCopyAllError(false)
-      setTimeout(() => setCopiedAll(false), 2000)
-    } catch {
-      setCopyAllError(true)
-      setTimeout(() => setCopyAllError(false), 3000)
-    }
-  }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   // Fly-in section removed — fly-ins are now in the unified "Your Trips" list
@@ -816,50 +797,39 @@ export default function TripPlanner() {
               <h3 className="mb-2 text-sm font-semibold text-accent-blue">Priority Player Results</h3>
               <div className="space-y-3">
                 {tripPlan.priorityResults.map((r) => {
-                  // Find best fly-in visit for fly-in-only priority players
-                  const bestFlyIn = r.status === 'fly-in-only'
-                    ? tripPlan.flyInVisits.find((v) => v.playerNames.includes(r.playerName))
-                    : null
+                  const player = playerMap.get(r.playerName)
+                  const assignments = useScheduleStore.getState().playerTeamAssignments
+                  const assignment = assignments[r.playerName]
+                  const teamName = assignment?.teamName ?? player?.org ?? ''
                   const tripNum = (r.status === 'included' || r.status === 'separate-trip') ? findTripNum(r.playerName) : 0
+
+                  // Find which unified trip # this player appears in (for fly-in results)
+                  const flyInTripIdx = r.status === 'fly-in-only'
+                    ? tripPlan.flyInVisits.findIndex((v) => v.playerNames.includes(r.playerName))
+                    : -1
+                  // Unified index: road trips come first in the "best" sort, so fly-in index starts after them
+                  const unifiedFlyInNum = flyInTripIdx >= 0 ? tripPlan.trips.length + flyInTripIdx + 1 : 0
+
                   return (
-                    <div key={r.playerName}>
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className={`h-2 w-2 rounded-full ${
-                          r.status === 'included' ? 'bg-accent-green' :
-                          r.status === 'separate-trip' ? 'bg-accent-orange' :
-                          r.status === 'fly-in-only' ? 'bg-accent-blue' :
-                          'bg-accent-red'
-                        }`} />
-                        <span className="font-medium text-text">{r.playerName}</span>
-                        <span className="text-xs text-text-dim">
-                          {r.status === 'included' && `Included in Trip #${tripNum}`}
-                          {r.status === 'separate-trip' && `Trip #${tripNum}`}
-                          {r.status === 'fly-in-only' && 'Fly-in required'}
-                          {r.status === 'unreachable' && 'Could not be reached'}
-                        </span>
-                        {r.status === 'unreachable' && r.reason && (
-                          <span className="text-[11px] text-accent-orange">— {r.reason}</span>
+                    <div key={r.playerName} className="rounded-lg bg-surface/50 px-3 py-2">
+                      <p className="text-sm text-text">
+                        <span className="font-medium">{r.playerName}</span>
+                        {teamName && <span className="text-text-dim"> ({teamName})</span>}
+                      </p>
+                      <p className="mt-0.5 text-xs text-text-dim">
+                        {r.status === 'included' && (
+                          <>Within driving range. <span className="text-accent-green font-medium">See him on Trip #{tripNum}.</span></>
                         )}
-                      </div>
-                      {bestFlyIn && (
-                        <div className="ml-4 mt-1.5 rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-2">
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className="font-medium text-accent-blue">Best fly-in:</span>
-                            <span className="text-text">{bestFlyIn.venue.name}</span>
-                            <span className="text-text-dim">~{bestFlyIn.estimatedTravelHours}h travel</span>
-                            <span className="text-text-dim">{bestFlyIn.distanceKm} mi</span>
-                          </div>
-                          <div className="mt-1 text-[11px] text-text-dim">
-                            {bestFlyIn.dates.slice(0, 5).map((d) => formatDate(d)).join(', ')}
-                            {bestFlyIn.dates.length > 5 && ` +${bestFlyIn.dates.length - 5} more`}
-                          </div>
-                          {bestFlyIn.sourceUrl && (
-                            <a href={bestFlyIn.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[11px] text-accent-blue hover:underline">
-                              Verify schedule ↗
-                            </a>
-                          )}
-                        </div>
-                      )}
+                        {r.status === 'separate-trip' && (
+                          <>Within driving range. <span className="text-accent-green font-medium">See him on Trip #{tripNum}.</span></>
+                        )}
+                        {r.status === 'fly-in-only' && (
+                          <>Too far to drive from Orlando — requires a flight. {unifiedFlyInNum > 0 && <span className="text-accent-blue font-medium">See Trip #{unifiedFlyInNum}.</span>}</>
+                        )}
+                        {r.status === 'unreachable' && (
+                          <span className="text-accent-red">No games found in the date range{r.reason ? ` — ${r.reason}` : ''}.</span>
+                        )}
+                      </p>
                     </div>
                   )
                 })}
@@ -896,8 +866,12 @@ export default function TripPlanner() {
               <div title={`${allTripPlayerNames.length} of your ${totalEligible} players appear in at least one trip option.`}>
                 <StatCard label="Players in Trips" value={allTripPlayerNames.length} accent="blue" scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
               </div>
-              <div title={`What percentage of players who still need visits appear in at least one trip`}>
-                <StatCard label="Players Reached" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
+              <div title={`${totalEligible - allTripPlayerNames.length} players still need trip options`}>
+                <StatCard
+                  label="Not Covered"
+                  value={Math.max(0, totalEligible - allTripPlayerNames.length)}
+                  accent={totalEligible - allTripPlayerNames.length <= 2 ? 'green' : 'orange'}
+                />
               </div>
               {beyondPlayers.length > 0 && (
                 <StatCard label="Beyond Flight" value={beyondPlayers.length} accent="orange" scrollTo="section-beyond-flight" hoverNames={beyondPlayers.map((e) => e.name)} />
@@ -992,39 +966,13 @@ export default function TripPlanner() {
 
             return (
             <div id="section-road-trips">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-text">
-                    Your Trips
-                    <span className="ml-2 text-xs font-normal text-text-dim">
-                      {tripPlan.trips.length} drives + {Math.min(tripPlan.flyInVisits.length, flyInLimit)} fly-ins
-                    </span>
-                  </h3>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleCopyAllTrips}
-                    className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
-                  >
-                    {copiedAll ? 'Copied!' : copyAllError ? 'Copy Failed' : 'Copy All Trips'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      try {
-                        const ics = generateAllTripsIcs(tripPlan.trips, playerMap)
-                        downloadIcs(ics, 'sv-travel-trips.ics')
-                        setCalAllError(false)
-                      } catch {
-                        setCalAllError(true)
-                        setTimeout(() => setCalAllError(false), 3000)
-                      }
-                    }}
-                    className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
-                    title="Download all trips as a calendar file you can import into Google Calendar, Outlook, etc."
-                  >
-                    {calAllError ? 'Export Failed' : 'Export to Calendar'}
-                  </button>
-                </div>
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-text">
+                  Your Trips
+                  <span className="ml-2 text-xs font-normal text-text-dim">
+                    {unified.length} trip options
+                  </span>
+                </h3>
               </div>
 
               {/* Compact toolbar */}
@@ -1044,10 +992,31 @@ export default function TripPlanner() {
                     {label}
                   </button>
                 ))}
+                <span className="mx-1 text-text-dim/20">|</span>
+                <span className="text-[11px] text-text-dim">Show:</span>
+                {([
+                  { key: 'all', label: 'All' },
+                  { key: 'drive', label: '🚗 Drives' },
+                  { key: 'fly', label: '✈️ Flights' },
+                ] as const).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setTripFilter(key)}
+                    className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                      tripFilter === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
 
               <div className="space-y-4">
-                {numbered.map((item, i) => {
+                {numbered.filter((item) => {
+                  if (tripFilter === 'drive') return item.type === 'road'
+                  if (tripFilter === 'fly') return item.type === 'flyin'
+                  return true
+                }).map((item, i) => {
                   if (item.type === 'road') {
                     return (
                       <TripCard

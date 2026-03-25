@@ -45,9 +45,13 @@ export function haversineKm(a: Coordinates, b: Coordinates): number {
 }
 
 // Estimate drive time in minutes from straight-line distance
-// ~95 km/h avg speed with 1.2 detour factor (calibrated for Florida interstate driving)
+// Short distances (<300km): 1.2x detour, 95 km/h avg (calibrated for Florida)
+// Long distances (>300km): 1.4x detour, 90 km/h avg (highways + rest stops)
 export function estimateDriveMinutes(a: Coordinates, b: Coordinates): number {
   const km = haversineKm(a, b)
+  if (km > 300) {
+    return Math.round((km * 1.4 / 90) * 60)
+  }
   return Math.round((km * 1.2 / 95) * 60)
 }
 
@@ -1020,6 +1024,7 @@ export async function generateTrips(
     confidence?: VisitConfidence
     teamLabel: string
     weekNum: number
+    gameTimeByDate: Map<string, string> // date → game time
   }>()
 
   for (const game of eligibleGames) {
@@ -1047,12 +1052,15 @@ export async function generateTrips(
     if (existing) {
       for (const name of relevantPlayers) existing.players.add(name)
       existing.dates.add(game.date)
+      if (game.time && !existing.gameTimeByDate.has(game.date)) existing.gameTimeByDate.set(game.date, game.time)
       if (game.confidence && (confidenceRank[game.confidence] ?? 0) > (confidenceRank[existing.confidence ?? ''] ?? 0)) {
         existing.confidence = game.confidence
       }
       if (game.sourceUrl && !existing.sourceUrl) existing.sourceUrl = game.sourceUrl
     } else {
       const distKm = haversineKm(HOME_BASE, game.venue.coords)
+      const gameTimeByDate = new Map<string, string>()
+      if (game.time) gameTimeByDate.set(game.date, game.time)
       flyInWeekMap.set(key, {
         venue: game.venue,
         players: new Set(relevantPlayers),
@@ -1064,6 +1072,7 @@ export async function generateTrips(
         confidence: game.confidence,
         teamLabel: teamName,
         weekNum,
+        gameTimeByDate,
       })
     }
   }
@@ -1129,15 +1138,20 @@ export async function generateTrips(
       const bestDate = sortedDates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY) ?? sortedDates[0]!
       const tripWindow = getTripWindow(bestDate)
 
-      // Assign one venue per day within the trip window
+      // Assign one venue per day within the trip window (dedup by venue coords)
       const stops: import('../types/schedule').FlyInStop[] = []
       const usedDays = new Set<string>()
+      const usedVenueCoords = new Set<string>()
       const allPlayerNames = new Set<string>()
 
       // Sort cluster venues by player value (most valuable first)
       clusterVenues.sort((a, b) => b.entry.players.size - a.entry.players.size)
 
       for (const v of clusterVenues) {
+        // Skip if we've already added this venue (same coords, different team label)
+        const venueCoordStr = coordKey(v.entry.venue.coords)
+        if (usedVenueCoords.has(venueCoordStr)) continue
+
         // Find best available day for this venue (prefer matching dates, then any trip day)
         const venueDates = [...v.entry.dates].sort()
         const matchingDay = tripWindow.find(d => venueDates.includes(d) && !usedDays.has(d))
@@ -1145,6 +1159,7 @@ export async function generateTrips(
         if (!matchingDay) continue
 
         usedDays.add(matchingDay)
+        usedVenueCoords.add(venueCoordStr)
         const prevStop = stops[stops.length - 1]
         const driveFromPrev = prevStop
           ? lookupDriveMinutes(prevStop.venue.coords, v.entry.venue.coords)
@@ -1163,6 +1178,7 @@ export async function generateTrips(
           sourceUrl: v.entry.sourceUrl,
           confidence: v.entry.confidence,
           teamLabel: v.entry.teamLabel,
+          gameTime: v.entry.gameTimeByDate.get(matchingDay),
         })
 
         comboVenuesUsed.add(v.coordKey)
