@@ -984,12 +984,10 @@ export default function TripPlanner() {
               })
             }
 
-            // Number trips sequentially
-            let tripNum = 0
-            let flyInNum = 0
-            const numbered = unified.map((item) => ({
+            // Number trips sequentially — one counter across both types
+            const numbered = unified.map((item, i) => ({
               ...item,
-              displayIndex: item.type === 'road' ? ++tripNum : ++flyInNum,
+              displayIndex: i + 1,
             }))
 
             return (
@@ -1360,7 +1358,7 @@ function TripAnchor({
   endDate: string
 }) {
   const [anchorCity, setAnchorCity] = useState('')
-  const [anchorCoords, setAnchorCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [, setAnchorCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [searching, setSearching] = useState(false)
   const [results, setResults] = useState<Array<{ playerName: string; venue: string; date: string; driveMin: number; org: string; tier: number }>>([])
   const [expanded, setExpanded] = useState(false)
@@ -1438,7 +1436,7 @@ function TripAnchor({
   return (
     <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
       <label className="mb-2 block text-xs font-medium text-text-dim">
-        Trip Anchor <span className="text-text-dim/50">(optional — "I'll be in [city], who's nearby?")</span>
+        Already traveling? <span className="text-text-dim/50">(see who you can visit nearby)</span>
       </label>
       <div className="flex items-center gap-2">
         <input
@@ -1446,7 +1444,7 @@ function TripAnchor({
           value={anchorCity}
           onChange={(e) => setAnchorCity(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleSearch() }}
-          placeholder="Enter a city (e.g., Boston, Atlanta, Nashville...)"
+          placeholder="I'll be in... (e.g., Boston, Atlanta, Nashville)"
           className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text placeholder:text-text-dim/50 focus:border-accent-blue focus:outline-none"
         />
         <button
@@ -1461,26 +1459,48 @@ function TripAnchor({
         )}
       </div>
 
-      {expanded && results.length > 0 && (
+      {expanded && results.length > 0 && (() => {
+        // Group results by date, show unique players per date
+        const byDate = new Map<string, typeof results>()
+        const seenPlayerDates = new Set<string>()
+        for (const r of results) {
+          const key = `${r.playerName}|${r.date}`
+          if (seenPlayerDates.has(key)) continue
+          seenPlayerDates.add(key)
+          const existing = byDate.get(r.date) ?? []
+          existing.push(r)
+          byDate.set(r.date, existing)
+        }
+        const uniquePlayers = new Set(results.map(r => r.playerName))
+        const dateEntries = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(0, 15)
+
+        return (
         <div className="mt-3 rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
-          <p className="mb-2 text-xs text-text-dim">
-            <span className="font-medium text-purple-400">{results.length} player-games</span> within 3h drive of {anchorCity}
-            {anchorCoords && <span className="text-text-dim/50"> ({anchorCoords.lat.toFixed(1)}, {anchorCoords.lng.toFixed(1)})</span>}
+          <p className="mb-3 text-xs text-text-dim">
+            <span className="font-medium text-purple-400">{uniquePlayers.size} players</span> within 3h drive of {anchorCity}
           </p>
-          <div className="max-h-48 overflow-y-auto space-y-1">
-            {results.slice(0, 30).map((r, i) => (
-              <div key={i} className="flex items-center gap-2 text-[11px]">
-                <span className="w-20 text-text-dim">{formatDate(r.date)}</span>
-                <span className={`h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[r.tier] ?? 'bg-gray-500'}`} />
-                <span className="font-medium text-text">{r.playerName}</span>
-                <span className="text-text-dim/60">{r.org}</span>
-                <span className="ml-auto text-text-dim/50">~{Math.floor(r.driveMin / 60)}h {r.driveMin % 60}m</span>
+          <div className="max-h-64 overflow-y-auto space-y-2">
+            {dateEntries.map(([date, dayResults]) => (
+              <div key={date}>
+                <p className="text-[11px] font-medium text-text-dim mb-0.5">{formatDate(date)}</p>
+                <div className="ml-3 space-y-0.5">
+                  {dayResults.slice(0, 5).map((r, i) => (
+                    <div key={i} className="flex items-center gap-2 text-[11px]">
+                      <span className={`h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[r.tier] ?? 'bg-gray-500'}`} />
+                      <span className="font-medium text-text">{r.playerName}</span>
+                      <span className="text-text-dim/60">{r.org}</span>
+                      <span className="ml-auto text-text-dim/50">~{formatDriveTime(r.driveMin)}</span>
+                    </div>
+                  ))}
+                  {dayResults.length > 5 && <p className="text-[10px] text-text-dim/40">+{dayResults.length - 5} more</p>}
+                </div>
               </div>
             ))}
           </div>
-          {results.length > 30 && <p className="mt-1 text-[10px] text-text-dim/50">{results.length - 30} more...</p>}
+          {byDate.size > 15 && <p className="mt-1 text-[10px] text-text-dim/50">Showing first 15 dates of {byDate.size}</p>}
         </div>
-      )}
+        )
+      })()}
 
       {expanded && results.length === 0 && !searching && anchorCity && (
         <p className="mt-2 text-xs text-text-dim">No players found within 3h drive of {anchorCity} during this date range.</p>

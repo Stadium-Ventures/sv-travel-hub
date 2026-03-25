@@ -1093,23 +1093,25 @@ export async function generateTrips(
       coordKey: coordKey(entry.venue.coords),
     }))
 
-    // Simple greedy clustering: for each unvisited venue, find all reachable neighbors
+    // Complete-linkage clustering: a new venue must be within drive range of
+    // ALL existing cluster members (not just any one). Prevents chaining
+    // across continents (e.g., Albuquerque → Ontario CA → Daytona FL).
     const visited = new Set<number>()
     for (let i = 0; i < venues.length; i++) {
       if (visited.has(i)) continue
       const cluster = [i]
       visited.add(i)
 
-      // Find all venues reachable from any venue in the cluster
-      for (let ci = 0; ci < cluster.length; ci++) {
-        const clusterVenue = venues[cluster[ci]!]!
-        for (let j = 0; j < venues.length; j++) {
-          if (visited.has(j)) continue
-          const drive = lookupDriveMinutes(clusterVenue.entry.venue.coords, venues[j]!.entry.venue.coords)
-          if (drive <= MAX_COMBO_INTER_VENUE) {
-            cluster.push(j)
-            visited.add(j)
-          }
+      for (let j = 0; j < venues.length; j++) {
+        if (visited.has(j)) continue
+        // Check distance to ALL current cluster members
+        const closeToAll = cluster.every((ci) => {
+          const drive = lookupDriveMinutes(venues[ci]!.entry.venue.coords, venues[j]!.entry.venue.coords)
+          return drive <= MAX_COMBO_INTER_VENUE
+        })
+        if (closeToAll) {
+          cluster.push(j)
+          visited.add(j)
         }
       }
 
@@ -1394,7 +1396,8 @@ export async function generateTrips(
   // Merge players filtered out by max flight range
   trulyUnreachable.push(...beyondFlightRange)
 
-  const totalCovered = visitedPlayers.size + flyInCovered.size
+  const allCoveredPlayers = new Set([...visitedPlayers, ...flyInCovered])
+  const totalCovered = allCoveredPlayers.size
   const totalVisitsPlanned = [...playerVisitCounts.values()].reduce((sum, v) => sum + v, 0)
   const totalTarget = players.reduce((sum, p) => sum + (TIER_VISIT_TARGETS[p.tier] ?? 0), 0)
 
