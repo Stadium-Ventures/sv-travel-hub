@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
@@ -1513,7 +1513,7 @@ function TripAnchor({
 
 function FlyInCard({
   visit, index, players, playerMap, priorityPlayers,
-  dateConflicts, copiedFlyIn, setCopiedFlyIn, onPlayerClick, defaultExpanded,
+  dateConflicts: _dateConflicts, copiedFlyIn: _copiedFlyIn, setCopiedFlyIn: _setCopiedFlyIn, onPlayerClick, defaultExpanded,
 }: {
   visit: import('../../types/schedule').FlyInVisit
   index: number
@@ -1537,11 +1537,6 @@ function FlyInCard({
     else if (visit.source === 'mlb-api' && firstPlayer) orgLabel = firstPlayer.org
   }
 
-  const coordKey = `${visit.venue.coords.lat.toFixed(4)},${visit.venue.coords.lng.toFixed(4)}`
-  const teamSlug = (visit.teamLabel ?? '').toLowerCase().replace(/\s+/g, '-')
-  const dateSlug = visit.dates[0] ?? ''
-  const flyInKey = `flyin-${coordKey}${teamSlug ? `-${teamSlug}` : ''}-${dateSlug}`
-
   const milesDisplay = Math.round(visit.distanceKm * 0.621).toLocaleString()
 
   // Tier counts
@@ -1559,7 +1554,6 @@ function FlyInCard({
   const dateLabel = firstDate && lastDate && firstDate !== lastDate
     ? `${formatDate(firstDate)} – ${formatDate(lastDate)}`
     : firstDate ? formatDate(firstDate) : ''
-  const dayCount = visit.dates.length
 
   // Natural language summary
   const t1Names = visit.playerNames.filter((n) => playerMap.get(n)?.tier === 1)
@@ -1583,33 +1577,8 @@ function FlyInCard({
     flyInWhy = `Worth the flight — sees ${visit.playerNames.length} players at one venue.`
   }
 
-  const breakdown = visit.scoreBreakdown
 
   // Copy handler
-  async function handleCopy(e: React.MouseEvent) {
-    e.stopPropagation()
-    const playerDescs = visit.playerNames.map((name) => {
-      const p = playerMap.get(name)
-      return p ? `${name} (T${p.tier})` : name
-    })
-    let text = `Fly-in #${index} — ${orgLabel || visit.venue.name}\n`
-    text += `Venue: ${visit.venue.name}\n`
-    text += `Players: ${playerDescs.join(', ')}\n`
-    text += `Travel: ~${visit.estimatedTravelHours}h (${milesDisplay} mi)\n`
-    text += `Available dates: ${visit.dates.map(formatDate).join(', ')}\n`
-    if (breakdown) {
-      const parts: string[] = []
-      if (breakdown.tier1Count > 0) parts.push(`${breakdown.tier1Count}x T1`)
-      if (breakdown.tier2Count > 0) parts.push(`${breakdown.tier2Count}x T2`)
-      if (breakdown.tier3Count > 0) parts.push(`${breakdown.tier3Count}x T3`)
-      text += `Score: ${breakdown.finalScore} pts (${parts.join(' + ')})\n`
-    }
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopiedFlyIn(flyInKey)
-      setTimeout(() => setCopiedFlyIn(null), 2000)
-    } catch { /* ignore */ }
-  }
 
   // Source badge
   const sourceBadge = visit.source === 'mlb-api'
@@ -1635,55 +1604,19 @@ function FlyInCard({
           <div className="flex items-center gap-2">
             <span className={`text-text-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
             <h3 className="text-base font-semibold text-text">
-              Trip #{index}
-              <span className="ml-1.5 text-xs font-normal text-purple-400">fly</span>
-            </h3>
-            {visit.isCombo && visit.stops && visit.stops.length > 1 && (
-              <span className="rounded-lg bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-400">
-                {visit.stops.length} stops{visit.totalDriveMinutes ? ` · ${formatDriveTime(visit.totalDriveMinutes)} driving` : ''}
+              Trip #{index} <span className="text-sm">✈️</span>
+              <span className="ml-1.5 text-sm font-medium text-purple-400">
+                Fly to {findNearestAirport(visit.venue.coords).name}
               </span>
-            )}
+            </h3>
           </div>
           <p className="mt-0.5 text-sm text-text-dim">
-            {dateLabel}
-            <span className="ml-2 text-xs text-text-dim/60">
-              {dayCount}-day trip
-            </span>
-            {dateConflicts && dateConflicts.length > 0 && (
-              <span className="ml-2 rounded bg-accent-orange/10 px-1.5 py-0.5 text-[10px] text-accent-orange">
-                Overlaps with Fly-in #{dateConflicts.join(', #')}
-              </span>
-            )}
+            {dateLabel} · {visit.isCombo && visit.stops ? visit.stops.map(s => s.teamLabel || s.venue.name).join(' → ') : (orgLabel || visit.venue.name)} · {visit.playerNames.length} player{visit.playerNames.length !== 1 ? 's' : ''}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
-          <button
-            onClick={handleCopy}
-            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors hidden sm:block"
-          >
-            {copiedFlyIn === flyInKey ? 'Copied!' : 'Copy'}
-          </button>
-          <div className="rounded-lg bg-purple-500/10 px-2.5 py-1">
-            <span className="text-sm font-bold text-purple-400">{visit.playerNames.length}</span>
-            <span className="ml-1 text-[11px] text-purple-400/70">
-              player{visit.playerNames.length !== 1 ? 's' : ''}
-            </span>
-          </div>
-          {(tierCounts.t1 > 0 || tierCounts.t2 > 0 || tierCounts.t3 > 0) && (
-            <div className="flex items-center gap-1 rounded-lg bg-gray-950/60 px-2 py-1 text-[11px] font-medium">
-              {tierCounts.t1 > 0 && <span className="text-accent-red">{tierCounts.t1}× {TIER_LABELS[1]}</span>}
-              {tierCounts.t1 > 0 && (tierCounts.t2 > 0 || tierCounts.t3 > 0) && <span className="text-text-dim/30">·</span>}
-              {tierCounts.t2 > 0 && <span className="text-accent-orange">{tierCounts.t2}× {TIER_LABELS[2]}</span>}
-              {tierCounts.t2 > 0 && tierCounts.t3 > 0 && <span className="text-text-dim/30">·</span>}
-              {tierCounts.t3 > 0 && <span className="text-yellow-400">{tierCounts.t3}× {TIER_LABELS[3]}</span>}
-            </div>
-          )}
-          <div className="rounded-lg bg-gray-950/60 px-2.5 py-1">
-            <span className="text-[11px] text-text-dim">~{visit.estimatedTravelHours}h</span>
-          </div>
-          <div className="hidden rounded-lg bg-gray-950/60 px-2.5 py-1 sm:block">
-            <span className="text-[11px] text-text-dim">{milesDisplay} mi</span>
-          </div>
+          {tierCounts.t1 > 0 && <span className="text-[11px] font-medium text-accent-red">{tierCounts.t1}× Must-see</span>}
+          {tierCounts.t2 > 0 && <span className="text-[11px] font-medium text-accent-orange">{tierCounts.t2}× High priority</span>}
         </div>
       </div>
 
@@ -1780,12 +1713,6 @@ function FlyInCard({
             </div>
 
             {flyInWhy && <p className="text-xs italic text-text-dim/60">{flyInWhy}</p>}
-
-            <div className="flex flex-wrap gap-2">
-              <button onClick={handleCopy} className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors">
-                {copiedFlyIn === flyInKey ? 'Copied!' : 'Copy Itinerary'}
-              </button>
-            </div>
           </div>
           )
         }
@@ -1878,15 +1805,6 @@ function FlyInCard({
             <p className="text-xs italic text-text-dim/60">{flyInWhy}</p>
           )}
 
-          {/* Actions */}
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={handleCopy}
-              className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
-            >
-              {copiedFlyIn === flyInKey ? 'Copied!' : 'Copy Itinerary'}
-            </button>
-          </div>
         </div>
         )
       })()}

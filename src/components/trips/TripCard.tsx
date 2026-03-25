@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
-import { useTripStore } from '../../store/tripStore'
+// import { useTripStore } from '../../store/tripStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
-import { generateTripIcs, downloadIcs } from '../../lib/icsExport'
+// import { generateTripIcs, downloadIcs } from '../../lib/icsExport'
 import { haversineKm, HOME_BASE } from '../../lib/tripEngine'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 import type { RosterPlayer } from '../../types/roster'
@@ -278,9 +278,7 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
 function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick, overlappingTrips: _overlappingTrips }: Props) {
   const stops = useMemo(() => buildVenueStops(trip, playerMap), [trip, playerMap])
   const [expanded, setExpanded] = useState(defaultExpanded)
-  const [copied, setCopied] = useState(false)
 
-  const setSelectedTripIndex = useTripStore((s) => s.setSelectedTripIndex)
 
   const allPlayers = new Set<string>()
   for (const stop of stops) {
@@ -333,10 +331,8 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
   const dayCount = displayDays.length
   const dateLabel = dayCount === 1 ? startDate : `${startDate} – ${endDate}`
 
-  const breakdown = trip.scoreBreakdown
 
   // Build concise summary
-  const t1Names = [...allPlayers].filter((n) => playerMap.get(n)?.tier === 1)
 
   // Natural language trip summary
   const tripSummary = useMemo(() => {
@@ -383,34 +379,6 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
     return parts.join(' ')
   }, [displayDays, dayAssignments, trip.driveFromHomeMinutes, stops, playerMap, lastStop])
 
-  const [scoreOpen, setScoreOpen] = useState(false)
-  const [copyError, setCopyError] = useState(false)
-  const [calError, setCalError] = useState(false)
-
-  async function handleCopyItinerary() {
-    try {
-      const text = generateItineraryText(trip, index, stops, playerMap)
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setCopyError(false)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      setCopyError(true)
-      setTimeout(() => setCopyError(false), 3000)
-    }
-  }
-
-  function handleExportCalendar(e: React.MouseEvent) {
-    e.stopPropagation()
-    try {
-      const ics = generateTripIcs(trip, index, playerMap)
-      downloadIcs(ics, `sv-trip-${index}.ics`)
-      setCalError(false)
-    } catch {
-      setCalError(true)
-      setTimeout(() => setCalError(false), 3000)
-    }
-  }
 
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
@@ -426,14 +394,16 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className={`text-text-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
-            <h3 className="text-base font-semibold text-text">Trip #{index} <span className="text-xs font-normal text-accent-green">drive</span></h3>
+            <h3 className="text-base font-semibold text-text">
+              Trip #{index} <span className="text-sm">🚗</span>
+              <span className="ml-1.5 text-sm font-medium text-accent-green">
+                Drive to {stops[0]?.orgLabel || stops[0]?.venueName || 'venue'} area
+              </span>
+            </h3>
           </div>
-          {/* Plain-English summary */}
+          {/* Compact summary */}
           <p className="mt-0.5 text-sm text-text-dim">
-            {dateLabel} · {allPlayers.size} player{allPlayers.size !== 1 ? 's' : ''} · ~{formatDriveTime(trip.driveFromHomeMinutes)} drive from Orlando
-            {t1Names.length > 0 && (
-              <span className="ml-1 text-accent-red font-medium"> · {t1Names.join(', ')}</span>
-            )}
+            {dateLabel} · {stops.map(s => s.orgLabel || s.venueName).join(' → ')} · {allPlayers.size} player{allPlayers.size !== 1 ? 's' : ''} · ~{formatDriveTime(trip.driveFromHomeMinutes)} from Orlando
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -590,64 +560,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             )
           })}
 
-          {/* Actions row */}
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={(e) => { e.stopPropagation(); handleCopyItinerary() }}
-              className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
-            >
-              {copied ? 'Copied!' : copyError ? 'Failed' : 'Copy Itinerary'}
-            </button>
-            <button
-              onClick={handleExportCalendar}
-              className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
-            >
-              {calError ? 'Failed' : 'Add to Calendar'}
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); setSelectedTripIndex(index - 1) }}
-              className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
-            >
-              Show on Map
-            </button>
-          </div>
-
-          {/* Score Details (collapsible, power-user info) */}
-          {breakdown && (
-            <div className="border-t border-border/30 pt-2">
-              <button
-                onClick={(e) => { e.stopPropagation(); setScoreOpen(!scoreOpen) }}
-                className="flex items-center gap-1 text-[11px] text-text-dim/60 hover:text-text-dim transition-colors"
-              >
-                <span className={`transition-transform text-[9px] ${scoreOpen ? 'rotate-90' : ''}`}>&#9654;</span>
-                Score Details
-              </button>
-              {scoreOpen && (
-                <div className="mt-1.5 grid grid-cols-2 gap-x-6 gap-y-0.5 text-[11px] text-text-dim/70 pl-3">
-                  <span className="col-span-2 text-xs font-semibold text-text-dim mb-0.5">
-                    Total: {breakdown.finalScore} pts
-                    {breakdown.tuesdayBonus && <span className="font-normal text-text-dim/50"> (incl. Tue +20%)</span>}
-                  </span>
-                  {breakdown.tier1Count > 0 && (
-                    <span><span className="text-accent-red">Tier 1</span>: {breakdown.tier1Count} player{breakdown.tier1Count !== 1 ? 's' : ''} = {breakdown.tier1Points} pts</span>
-                  )}
-                  {breakdown.tier2Count > 0 && (
-                    <span><span className="text-accent-orange">Tier 2</span>: {breakdown.tier2Count} player{breakdown.tier2Count !== 1 ? 's' : ''} = {breakdown.tier2Points} pts</span>
-                  )}
-                  {breakdown.tier3Count > 0 && (
-                    <span><span className="text-yellow-400">Tier 3</span>: {breakdown.tier3Count} player{breakdown.tier3Count !== 1 ? 's' : ''} = {breakdown.tier3Points} pts</span>
-                  )}
-                  {breakdown.pitcherMatchBonus > 0 && (
-                    <span className="text-accent-green">Pitcher match: +{breakdown.pitcherMatchBonus} pts</span>
-                  )}
-                  {breakdown.tuesdayBonus && (
-                    <span className="text-accent-blue">Tuesday bonus: +{breakdown.finalScore - breakdown.rawScore} pts</span>
-                  )}
-                  <span className="text-text-dim/50">Raw score: {breakdown.rawScore}</span>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Action buttons removed — keeping trip cards clean */}
 
 
         </div>
