@@ -494,20 +494,21 @@ export async function generateTrips(
     playerMap.set(p.playerName, p)
   }
 
-  // Track players skipped (T4 / no visits needed)
+  // Track players skipped (only Tier 4 with 0 visits — everyone else is eligible)
   const skippedPlayers: Array<{ name: string; reason: string }> = []
   for (const p of players) {
-    if (p.visitsRemaining <= 0) {
+    if (p.tier === 4 && p.visitsRemaining <= 0) {
       skippedPlayers.push({
         name: p.playerName,
-        reason: p.tier === 4 ? 'Tier 4 — no visits required' : 'All visits already completed',
+        reason: 'Tier 4 — no visits required',
       })
     }
   }
 
-  // Filter to players needing visits
+  // ALL players are eligible for trip planning (not just those with visits remaining).
+  // Players with completed visits still appear but score lower via visitsRemaining weight.
   const eligiblePlayers = new Set(
-    players.filter((p) => p.visitsRemaining > 0).map((p) => p.playerName),
+    players.filter((p) => !(p.tier === 4 && p.visitsRemaining <= 0)).map((p) => p.playerName),
   )
 
   // Filter games: no Sundays, within date range, with eligible players, exclude cancelled
@@ -760,7 +761,9 @@ export async function generateTrips(
   function isPlayerSaturated(name: string): boolean {
     const player = playerMap.get(name)
     if (!player) return true
-    return (playerVisitCounts.get(name) ?? 0) >= player.visitsRemaining
+    // At least 1 trip appearance for every player, even if visitsRemaining is 0
+    const maxAppearances = Math.max(1, player.visitsRemaining)
+    return (playerVisitCounts.get(name) ?? 0) >= maxAppearances
   }
 
   function addPlayerVisit(name: string) {
@@ -784,8 +787,8 @@ export async function generateTrips(
       if (!player) continue
       const weight = TIER_WEIGHTS[player.tier] ?? 0
       const remainingNeed = Math.max(0, player.visitsRemaining - (playerVisitCounts.get(name) ?? 0))
-      if (remainingNeed <= 0) continue
-      const base = weight * remainingNeed
+      // Always contribute at least 1 point (don't exclude completed players entirely)
+      const base = remainingNeed > 0 ? weight * remainingNeed : 1
       const urgencyBoost = urgencyMap?.get(name) ?? 1.0
       score += Math.round(base * urgencyBoost)
     }

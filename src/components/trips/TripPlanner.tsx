@@ -280,16 +280,16 @@ export default function TripPlanner() {
     return map
   }, [players])
 
-  // Players eligible for priority selection (have visits remaining)
+  // All players eligible for priority selection (don't filter by visits remaining)
   const eligibleForPriority = useMemo(
-    () => players.filter((p) => p.visitsRemaining > 0).sort((a, b) => a.playerName.localeCompare(b.playerName)),
+    () => players.sort((a, b) => a.playerName.localeCompare(b.playerName)),
     [players],
   )
 
   // Best week suggestions — computed on-demand only when user clicks "Suggest"
   // bestWeeks removed — trip planner generates for the dates selected
 
-  const hasHsPlayers = players.some((p) => p.level === 'HS' && p.visitsRemaining > 0)
+  const hasHsPlayers = players.some((p) => p.level === 'HS')
 
 
   const canGenerate = players.length > 0 && !computing
@@ -344,13 +344,13 @@ export default function TripPlanner() {
       // Always re-run HS + NCAA schedule conversion on startup — bundled data is
       // instant and ensures venue coords from the latest generation are used.
       const hsOrgs = players
-        .filter((p) => p.level === 'HS' && p.visitsRemaining > 0 && p.state)
+        .filter((p) => p.level === 'HS' && p.state)
         .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
       if (hsOrgs.length > 0) {
         useScheduleStore.getState().fetchHsSchedules(hsOrgs)
       }
       const ncaaAllOrgs = players
-        .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+        .filter((p) => p.level === 'NCAA' && true)
         .map((p) => ({ playerName: p.playerName, org: p.org }))
       if (ncaaAllOrgs.length > 0) {
         useScheduleStore.getState().fetchNcaaSchedules(ncaaAllOrgs)
@@ -378,7 +378,7 @@ export default function TripPlanner() {
     // For NCAA: fetch only the missing schools
     if (missingNcaaOrgs.length > 0) {
       const ncaaOrgs = players
-        .filter((p) => p.level === 'NCAA' && missingNcaaOrgs.includes(p.org) && p.visitsRemaining > 0)
+        .filter((p) => p.level === 'NCAA' && missingNcaaOrgs.includes(p.org) && true)
         .map((p) => ({ playerName: p.playerName, org: p.org }))
       if (ncaaOrgs.length > 0) {
         schedStore.fetchNcaaSchedules(ncaaOrgs, { merge: true })
@@ -401,7 +401,7 @@ export default function TripPlanner() {
 
     // 2. NCAA
     const ncaaAllOrgs = players
-      .filter((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+      .filter((p) => p.level === 'NCAA' && true)
       .map((p) => ({ playerName: p.playerName, org: p.org }))
     if (ncaaAllOrgs.length > 0) {
       schedStore.fetchNcaaSchedules(ncaaAllOrgs, { merge: true })
@@ -409,7 +409,7 @@ export default function TripPlanner() {
 
     // 3. HS (with geocoding)
     if (hasHsPlayers) {
-      const hsPlayers = players.filter((p) => p.level === 'HS' && p.visitsRemaining > 0)
+      const hsPlayers = players.filter((p) => p.level === 'HS' && true)
       const { useVenueStore } = await import('../../store/venueStore')
       const venueCount = Object.values(useVenueStore.getState().venues).filter((v: any) => v.source === 'hs-geocoded').length
       if (venueCount === 0) {
@@ -813,7 +813,7 @@ export default function TripPlanner() {
             const flyInPlayerNames = [...new Set(tripPlan.flyInVisits.flatMap((v) => v.playerNames))]
             // Unique players across ALL trip types
             const allTripPlayerNames = [...new Set([...roadTripPlayerNames, ...flyInPlayerNames])]
-            const totalEligible = players.filter((p) => p.visitsRemaining > 0).length
+            const totalEligible = players.length
 
             return (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
