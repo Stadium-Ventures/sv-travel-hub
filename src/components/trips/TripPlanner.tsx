@@ -270,7 +270,8 @@ export default function TripPlanner() {
   }, [players.length, rosterLoading, fetchRoster])
 
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
-  const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly' | 'multi'>('all')
+  const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly' | 'multi' | 'anchor'>('all')
+  const [anchorPlayerNames, setAnchorPlayerNames] = useState<string[]>([])
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
 
 
@@ -966,7 +967,8 @@ export default function TripPlanner() {
                   { key: 'drive', label: '🚗 Drives' },
                   { key: 'fly', label: '✈️ Flights' },
                   { key: 'multi', label: '👥 2+ Players' },
-                ] as const).map(({ key, label }) => (
+                  ...(anchorPlayerNames.length > 0 ? [{ key: 'anchor' as const, label: '📍 Near destination' }] : []),
+                ] as Array<{ key: typeof tripFilter; label: string }>).map(({ key, label }) => (
                   <button
                     key={key}
                     onClick={() => setTripFilter(key)}
@@ -984,12 +986,20 @@ export default function TripPlanner() {
                   if (tripFilter === 'drive') return item.type === 'road'
                   if (tripFilter === 'fly') return item.type === 'flyin'
                   if (tripFilter === 'multi') {
-                    // Show only trips with 2+ players
                     if (item.type === 'road') {
                       const playerSet = new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)])
                       return playerSet.size >= 2
                     } else {
                       return item.visit.playerNames.length >= 2
+                    }
+                  }
+                  if (tripFilter === 'anchor' && anchorPlayerNames.length > 0) {
+                    // Show trips that include any player near the anchor destination
+                    if (item.type === 'road') {
+                      const tripPlayers = [...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)]
+                      return tripPlayers.some(n => anchorPlayerNames.includes(n))
+                    } else {
+                      return item.visit.playerNames.some(n => anchorPlayerNames.includes(n))
                     }
                   }
                   return true
@@ -1251,6 +1261,7 @@ export default function TripPlanner() {
         playerMap={playerMap}
         startDate={startDate}
         endDate={endDate}
+        onPlayersFound={(names) => setAnchorPlayerNames(names)}
       />
 
       {/* Player schedule drill-down panel */}
@@ -1305,11 +1316,13 @@ function TripAnchor({
   playerMap,
   startDate,
   endDate,
+  onPlayersFound,
 }: {
   allGames: import('../../types/schedule').GameEvent[]
   playerMap: Map<string, RosterPlayer>
   startDate: string
   endDate: string
+  onPlayersFound?: (names: string[]) => void
 }) {
   const [anchorCity, setAnchorCity] = useState('')
   const [, setAnchorCoords] = useState<{ lat: number; lng: number } | null>(null)
@@ -1387,6 +1400,8 @@ function TripAnchor({
       // Sort by date, then tier
       nearby.sort((a, b) => a.date.localeCompare(b.date) || a.tier - b.tier)
       setResults(nearby)
+      const uniqueNames = [...new Set(nearby.map(r => r.playerName))]
+      onPlayersFound?.(uniqueNames)
       setExpanded(true)
     } catch (err) {
       console.warn('Anchor search failed:', err)
@@ -1440,7 +1455,7 @@ function TripAnchor({
           {searching ? 'Searching...' : 'Find Players'}
         </button>
         {results.length > 0 && (
-          <button onClick={() => { setResults([]); setAnchorCity(''); setExpanded(false) }} className="text-xs text-text-dim hover:text-text">Clear</button>
+          <button onClick={() => { setResults([]); setAnchorCity(''); setExpanded(false); onPlayersFound?.([]) }} className="text-xs text-text-dim hover:text-text">Clear</button>
         )}
       </div>
 
