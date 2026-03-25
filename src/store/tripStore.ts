@@ -40,6 +40,7 @@ interface TripState {
   endDate: string
   maxDriveMinutes: number
   maxFlightHours: number
+  useHeartbeatBoost: boolean
   priorityPlayers: string[]
   tripPlan: TripPlan | null
   computing: boolean
@@ -55,6 +56,7 @@ interface TripState {
   generateTrips: () => Promise<void>
   clearTrips: () => void
   setTripStatus: (tripKey: string, status: TripStatus | null) => void
+  setUseHeartbeatBoost: (v: boolean) => void
   setSelectedTripIndex: (index: number | null) => void
 }
 
@@ -68,6 +70,7 @@ export const useTripStore = create<TripState>()(
   endDate: defaultEnd(),
   maxDriveMinutes: MAX_DRIVE_MINUTES,
   maxFlightHours: 4,
+  useHeartbeatBoost: false, // default OFF — Heartbeat data is a snapshot of now, not the future
   priorityPlayers: [],
   tripPlan: null,
   computing: false,
@@ -79,6 +82,7 @@ export const useTripStore = create<TripState>()(
   setDateRange: (startDate, endDate) => set({ startDate, endDate }),
   setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes }),
   setMaxFlightHours: (maxFlightHours) => set({ maxFlightHours }),
+  setUseHeartbeatBoost: (useHeartbeatBoost: boolean) => set({ useHeartbeatBoost }),
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
   clearTrips: () => set({ tripPlan: null, selectedTripIndex: null }),
   setSelectedTripIndex: (selectedTripIndex) => set({ selectedTripIndex }),
@@ -94,7 +98,7 @@ export const useTripStore = create<TripState>()(
 
   generateTrips: async () => {
     if (get().computing) return
-    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers } = get()
+    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers, useHeartbeatBoost } = get()
     const players = useRosterStore.getState().players
     let scheduleState = useScheduleStore.getState()
 
@@ -200,17 +204,19 @@ export const useTripStore = create<TripState>()(
     }
     const allGames = [...gameMap.values()]
 
-    // Build urgency map from heartbeat data
+    // Build urgency map from heartbeat data (only when toggle is ON)
     const urgencyMap: UrgencyMap = new Map()
-    const heartbeatState = useHeartbeatStore.getState()
-    for (const p of players) {
-      const urgency = heartbeatState.getPlayerUrgency(p.playerName)
-      if (urgency && urgency.visitUrgencyScore > 0) {
-        // Scale: urgencyScore of 50+ gets 1.5x boost, 25-49 gets 1.25x, below 25 gets 1.0x
-        const boost = urgency.visitUrgencyScore >= 50 ? 1.5
-          : urgency.visitUrgencyScore >= 25 ? 1.25
-          : 1.0
-        if (boost > 1.0) urgencyMap.set(p.playerName, boost)
+    if (useHeartbeatBoost) {
+      const heartbeatState = useHeartbeatStore.getState()
+      for (const p of players) {
+        const urgency = heartbeatState.getPlayerUrgency(p.playerName)
+        if (urgency && urgency.visitUrgencyScore > 0) {
+          // Scale: urgencyScore of 50+ gets 2.0x, 25-49 gets 1.5x, below 25 gets 1.25x
+          const boost = urgency.visitUrgencyScore >= 50 ? 2.0
+            : urgency.visitUrgencyScore >= 25 ? 1.5
+            : 1.25
+          urgencyMap.set(p.playerName, boost)
+        }
       }
     }
 
@@ -299,6 +305,7 @@ export const useTripStore = create<TripState>()(
         // Migrate users who had the old default; keep custom values.
         maxDriveMinutes: persisted?.maxDriveMinutes === 180 ? MAX_DRIVE_MINUTES : (persisted?.maxDriveMinutes ?? MAX_DRIVE_MINUTES),
         maxFlightHours: persisted?.maxFlightHours ?? 4,
+        useHeartbeatBoost: persisted?.useHeartbeatBoost ?? false,
         priorityPlayers: persisted?.priorityPlayers ?? [],
         tripStatuses: persisted?.tripStatuses ?? {},
       }),
@@ -309,6 +316,7 @@ export const useTripStore = create<TripState>()(
         endDate: state.endDate,
         maxDriveMinutes: state.maxDriveMinutes,
         maxFlightHours: state.maxFlightHours,
+        useHeartbeatBoost: state.useHeartbeatBoost,
         priorityPlayers: state.priorityPlayers,
         tripStatuses: state.tripStatuses,
       }),

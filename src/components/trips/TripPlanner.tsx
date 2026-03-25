@@ -239,6 +239,8 @@ export default function TripPlanner() {
   const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
   const maxFlightHours = useTripStore((s) => s.maxFlightHours)
   const setMaxFlightHours = useTripStore((s) => s.setMaxFlightHours)
+  const useHeartbeatBoost = useTripStore((s) => s.useHeartbeatBoost)
+  const setUseHeartbeatBoost = useTripStore((s) => s.setUseHeartbeatBoost)
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const clearTrips = useTripStore((s) => s.clearTrips)
@@ -650,7 +652,17 @@ export default function TripPlanner() {
           )}
         </div>
 
-        {/* DayStrip removed — days are shown in trip cards */}
+        {/* Heartbeat boost toggle */}
+        <label className="mt-3 flex items-center gap-2 text-xs text-text-dim cursor-pointer">
+          <input
+            type="checkbox"
+            checked={useHeartbeatBoost}
+            onChange={(e) => setUseHeartbeatBoost(e.target.checked)}
+            className="rounded border-border accent-accent-blue"
+          />
+          Prioritize overdue players
+          <span className="text-text-dim/50">(boost players who haven't been visited recently)</span>
+        </label>
 
         {/* Priority players */}
         <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
