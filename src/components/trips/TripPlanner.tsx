@@ -9,6 +9,7 @@ import PlayerCoverageCard from './PlayerCoverageCard'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
+import { MAJOR_AIRPORTS, findNearestAirport } from '../../data/majorAirports'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
@@ -1331,6 +1332,7 @@ function TripAnchor({
   const [searching, setSearching] = useState(false)
   const [results, setResults] = useState<Array<{ playerName: string; venue: string; date: string; driveMin: number; org: string; tier: number }>>([])
   const [expanded, setExpanded] = useState(false)
+  const [showSuggestions, setShowSuggestions] = useState(false)
   const MAX_ANCHOR_DRIVE = 180 // 3h drive from anchor point
 
   async function handleSearch() {
@@ -1414,14 +1416,38 @@ function TripAnchor({
         Already have a trip planned? <span className="text-text-dim/50">(find players near your destination)</span>
       </label>
       <div className="flex items-center gap-2">
-        <input
-          type="text"
-          value={anchorCity}
-          onChange={(e) => setAnchorCity(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleSearch() }}
-          placeholder="City name (e.g., Boston, Atlanta, Nashville)"
-          className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text placeholder:text-text-dim/50 focus:border-accent-blue focus:outline-none"
-        />
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={anchorCity}
+            onChange={(e) => { setAnchorCity(e.target.value); setShowSuggestions(true) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { setShowSuggestions(false); handleSearch() } }}
+            onFocus={() => setShowSuggestions(true)}
+            placeholder="Type a city (e.g., Boston, Atlanta)"
+            className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text placeholder:text-text-dim/50 focus:border-accent-blue focus:outline-none"
+          />
+          {showSuggestions && anchorCity.length >= 2 && (() => {
+            const q = anchorCity.toLowerCase()
+            const matches = MAJOR_AIRPORTS.filter(a =>
+              a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q)
+            ).slice(0, 6)
+            if (matches.length === 0) return null
+            return (
+              <div className="absolute left-0 top-full z-20 mt-1 w-full rounded-lg border border-border bg-surface shadow-lg overflow-hidden">
+                {matches.map((a) => (
+                  <button
+                    key={a.code}
+                    onClick={() => { setAnchorCity(a.name); setShowSuggestions(false); }}
+                    className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-left hover:bg-accent-blue/10 transition-colors"
+                  >
+                    <span className="text-text">{a.name}</span>
+                    <span className="text-[10px] text-text-dim">{a.code}</span>
+                  </button>
+                ))}
+              </div>
+            )
+          })()}
+        </div>
         <button
           onClick={handleSearch}
           disabled={searching || !anchorCity.trim()}
@@ -1671,11 +1697,12 @@ function FlyInCard({
         // Combo trip: multi-stop fly-in with driving between venues
         if (visit.isCombo && visit.stops && visit.stops.length > 1) {
           const comboStops = visit.stops
+          const nearestApt = findNearestAirport(comboStops[0]!.venue.coords)
           return (
           <div className="mt-4 space-y-3">
             {/* Natural language summary */}
             <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
-              {formatDate(comboStops[0]!.date)} – {formatDate(comboStops[comboStops.length - 1]!.date)}: Fly from Orlando to the {comboStops[0]!.teamLabel || comboStops[0]!.venue.name} area (~{Math.round(visit.estimatedTravelHours - 3)}h flight).
+              {formatDate(comboStops[0]!.date)} – {formatDate(comboStops[comboStops.length - 1]!.date)}: Fly to {nearestApt.name} ({nearestApt.code}) (~{Math.round(visit.estimatedTravelHours - 3)}h flight).
               {comboStops.map((s, i) => {
                 const names = s.playerNames.map((n) => {
                   const p = playerMap.get(n)
@@ -1769,8 +1796,10 @@ function FlyInCard({
         <div className="mt-4 space-y-3">
           {/* Natural language summary */}
           <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
-            {formatDate(bestDay)}{hasMultipleDays ? ` – ${formatDate(visit.dates[visit.dates.length - 1]!)}` : ''}:
-            {' '}Fly from Orlando to {orgLabel || visit.venue.name} (~{Math.round(visit.estimatedTravelHours - 3)}h flight).
+            {(() => {
+              const apt = findNearestAirport(visit.venue.coords)
+              return `${formatDate(bestDay)}${hasMultipleDays ? ` – ${formatDate(visit.dates[visit.dates.length - 1]!)}` : ''}: Fly to ${apt.name} (${apt.code}) (~${Math.round(visit.estimatedTravelHours - 3)}h flight).`
+            })()}
             {' '}See {visit.playerNames.map((n) => {
               const p = playerMap.get(n)
               return p ? `${n} (${p.org})` : n

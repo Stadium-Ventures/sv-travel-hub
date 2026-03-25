@@ -52,3 +52,19 @@ export const MAJOR_AIRPORTS: Airport[] = [
   { code: 'CHS', name: 'Charleston', coords: { lat: 32.8986, lng: -80.0405 } },
   { code: 'SAV', name: 'Savannah', coords: { lat: 32.1276, lng: -81.2021 } },
 ]
+
+// Find the nearest major airport to given coordinates
+export function findNearestAirport(coords: Coordinates): Airport {
+  let best = MAJOR_AIRPORTS[0]!
+  let bestDist = Infinity
+  for (const a of MAJOR_AIRPORTS) {
+    const dlat = a.coords.lat - coords.lat
+    const dlng = a.coords.lng - coords.lng
+    const dist = dlat * dlat + dlng * dlng // squared distance is fine for comparison
+    if (dist < bestDist) {
+      bestDist = dist
+      best = a
+    }
+  }
+  return best
+}
