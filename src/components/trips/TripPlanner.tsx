@@ -1338,9 +1338,15 @@ function TripAnchor({
     setSearching(true)
     setResults([])
     try {
+      // Strip common prefixes like "I'll be in", "going to", etc.
+      const cleanCity = anchorCity
+        .replace(/^(i'll be in|i will be in|i'm going to|going to|visiting|traveling to|in)\s+/i, '')
+        .trim()
+      if (!cleanCity) { setSearching(false); return }
+
       // First check the bundled airports for quick match
       const { MAJOR_AIRPORTS } = await import('../../data/majorAirports')
-      const cityLower = anchorCity.toLowerCase().trim()
+      const cityLower = cleanCity.toLowerCase().trim()
       const airportMatch = MAJOR_AIRPORTS.find((a) =>
         a.name.toLowerCase().includes(cityLower) || a.code.toLowerCase() === cityLower
       )
@@ -1350,7 +1356,7 @@ function TripAnchor({
         coords = airportMatch.coords
       } else {
         // Geocode via Nominatim
-        const params = new URLSearchParams({ q: `${anchorCity}, USA`, format: 'json', limit: '1' })
+        const params = new URLSearchParams({ q: `${cleanCity}, USA`, format: 'json', limit: '1' })
         const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
           headers: { 'User-Agent': 'SVTravelHub/1.0' },
         })
@@ -1405,7 +1411,7 @@ function TripAnchor({
   return (
     <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
       <label className="mb-2 block text-xs font-medium text-text-dim">
-        Already traveling? <span className="text-text-dim/50">(see who you can visit nearby)</span>
+        Already have a trip planned? <span className="text-text-dim/50">(find players near your destination)</span>
       </label>
       <div className="flex items-center gap-2">
         <input
@@ -1413,7 +1419,7 @@ function TripAnchor({
           value={anchorCity}
           onChange={(e) => setAnchorCity(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleSearch() }}
-          placeholder="I'll be in... (e.g., Boston, Atlanta, Nashville)"
+          placeholder="City name (e.g., Boston, Atlanta, Nashville)"
           className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text placeholder:text-text-dim/50 focus:border-accent-blue focus:outline-none"
         />
         <button
@@ -1669,7 +1675,7 @@ function FlyInCard({
           <div className="mt-4 space-y-3">
             {/* Natural language summary */}
             <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
-              {formatDate(comboStops[0]!.date)} – {formatDate(comboStops[comboStops.length - 1]!.date)}: Fly from Orlando (~{Math.round(visit.estimatedTravelHours - 3)}h flight).
+              {formatDate(comboStops[0]!.date)} – {formatDate(comboStops[comboStops.length - 1]!.date)}: Fly from Orlando to the {comboStops[0]!.teamLabel || comboStops[0]!.venue.name} area (~{Math.round(visit.estimatedTravelHours - 3)}h flight).
               {comboStops.map((s, i) => {
                 const names = s.playerNames.map((n) => {
                   const p = playerMap.get(n)
@@ -1699,7 +1705,7 @@ function FlyInCard({
                       </span>
                     )}
                   </div>
-                  {i === 0 && <span className="text-[10px] text-text-dim">Fly from Orlando · ~{visit.estimatedTravelHours}h</span>}
+                  {i === 0 && <span className="text-[10px] text-text-dim">Fly from Orlando · ~{Math.round(visit.estimatedTravelHours - 3)}h flight</span>}
                 </div>
                 <div className="ml-4">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -1764,10 +1770,11 @@ function FlyInCard({
           {/* Natural language summary */}
           <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
             {formatDate(bestDay)}{hasMultipleDays ? ` – ${formatDate(visit.dates[visit.dates.length - 1]!)}` : ''}:
-            {' '}Fly from Orlando (~{Math.round(visit.estimatedTravelHours - 3)}h flight) to see {visit.playerNames.map((n) => {
+            {' '}Fly from Orlando to {orgLabel || visit.venue.name} (~{Math.round(visit.estimatedTravelHours - 3)}h flight).
+            {' '}See {visit.playerNames.map((n) => {
               const p = playerMap.get(n)
               return p ? `${n} (${p.org})` : n
-            }).join(' and ')} at {visit.venue.name}{isTue ? ' (Tuesday — best day for position players)' : ''}.
+            }).join(' and ')}{isTue ? ' (Tuesday — best day for position players)' : ''}.
             {' '}Fly home after.
           </p>
 
@@ -1778,7 +1785,7 @@ function FlyInCard({
                 <span className="text-xs font-bold text-purple-400">Day 1</span>
                 <span className="text-xs text-text-dim">{formatDate(bestDay)}{isTue ? ' (best day)' : ''}</span>
               </div>
-              <span className="text-[10px] text-text-dim">Fly from Orlando · ~{visit.estimatedTravelHours}h travel</span>
+              <span className="text-[10px] text-text-dim">Fly from Orlando · ~{Math.round(visit.estimatedTravelHours - 3)}h flight</span>
             </div>
 
             <div className="ml-4 space-y-2">
