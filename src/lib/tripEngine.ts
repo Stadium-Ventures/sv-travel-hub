@@ -511,11 +511,15 @@ export async function generateTrips(
     players.filter((p) => !(p.tier === 4 && p.visitsRemaining <= 0)).map((p) => p.playerName),
   )
 
+  // Clamp start date to today if in the past — no point planning trips to yesterday
+  const today = new Date().toISOString().slice(0, 10)
+  const effectiveStart = startDate < today ? today : startDate
+
   // Filter games: no Sundays, within date range, with eligible players, exclude cancelled
   const eligibleGames = games.filter(
     (g) =>
       isDateAllowed(g.date) &&
-      g.date >= startDate &&
+      g.date >= effectiveStart &&
       g.date <= endDate &&
       g.playerNames.some((n) => eligiblePlayers.has(n)) &&
       g.gameStatus !== 'Cancelled' &&
@@ -571,7 +575,8 @@ export async function generateTrips(
   const nearMissSeen = new Set<string>() // dedupe by player+venue
 
   // Cap candidates to prevent browser crash on wide date ranges
-  const MAX_CANDIDATES = 500
+  // 200 is plenty for greedy selection of 8 trips
+  const MAX_CANDIDATES = 200
   let candidateCount = 0
 
   for (const anchorDay of anchorDays) {
@@ -911,7 +916,12 @@ export async function generateTrips(
             priorityResults.push({
               playerName: pName,
               status: 'unreachable',
-              reason: `No games for ${pName} in the selected date range — MiLB schedules may not be published yet`,
+              reason: (() => {
+                const p = playerMap.get(pName)
+                if (p?.level === 'HS') return `No games for ${pName} in the selected date range — HS season may have ended`
+                if (p?.level === 'NCAA') return `No games for ${pName} in the selected date range — check college schedule`
+                return `No games for ${pName} in the selected date range — schedules may not be published yet`
+              })(),
             })
           }
         }
@@ -1121,7 +1131,10 @@ export async function generateTrips(
 
   // For each week, find venue clusters (venues within 3h drive of each other)
   const MAX_COMBO_INTER_VENUE = 180 // 3h drive between fly-in combo stops
+  let comboCount = 0
+  const MAX_COMBOS = 30 // cap combo generation
   for (const [, weekEntries] of entriesByWeek) {
+    if (comboCount >= MAX_COMBOS) break
     if (weekEntries.length < 2) continue // need 2+ venues to form a combo
 
     // Build adjacency: which venues are drivable from which

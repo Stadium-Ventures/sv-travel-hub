@@ -571,7 +571,12 @@ export default function TripPlanner() {
               <input
                 type="date"
                 value={startDate}
-                onChange={(e) => setDateRange(e.target.value, endDate)}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => {
+                  const today = new Date().toISOString().slice(0, 10)
+                  const val = e.target.value < today ? today : e.target.value
+                  setDateRange(val, endDate)
+                }}
                 className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
               />
               <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
