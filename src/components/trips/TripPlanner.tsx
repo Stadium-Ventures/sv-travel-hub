@@ -402,27 +402,22 @@ export default function TripPlanner() {
       schedStore.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
     }
 
-    // 2. NCAA
+    // 2. NCAA — bundled data loads instantly
     const ncaaAllOrgs = players
-      .filter((p) => p.level === 'NCAA' && true)
+      .filter((p) => p.level === 'NCAA')
       .map((p) => ({ playerName: p.playerName, org: p.org }))
     if (ncaaAllOrgs.length > 0) {
-      schedStore.fetchNcaaSchedules(ncaaAllOrgs, { merge: true })
+      schedStore.fetchNcaaSchedules(ncaaAllOrgs)
     }
 
-    // 3. HS (with geocoding)
+    // 3. HS — bundled data loads instantly (includes pre-geocoded venue coords)
+    // NO geocoding needed — bundled homeVenue coords are used directly
     if (hasHsPlayers) {
-      const hsPlayers = players.filter((p) => p.level === 'HS' && true)
-      const { useVenueStore } = await import('../../store/venueStore')
-      const venueCount = Object.values(useVenueStore.getState().venues).filter((v: any) => v.source === 'hs-geocoded').length
-      if (venueCount === 0) {
-        await useVenueStore.getState().geocodeHsVenues(
-          hsPlayers.map((p) => ({ schoolName: p.org, city: '', state: p.state }))
-        )
-      }
-      const hsOrgs = hsPlayers.map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
+      const hsOrgs = players
+        .filter((p) => p.level === 'HS')
+        .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
       if (hsOrgs.length > 0) {
-        schedStore.fetchHsSchedules(hsOrgs, { merge: true })
+        schedStore.fetchHsSchedules(hsOrgs)
       }
     }
   }

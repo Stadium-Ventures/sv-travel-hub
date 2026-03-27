@@ -570,10 +570,16 @@ export async function generateTrips(
   const nearMisses: NearMiss[] = []
   const nearMissSeen = new Set<string>() // dedupe by player+venue
 
+  // Cap candidates to prevent browser crash on wide date ranges
+  const MAX_CANDIDATES = 500
+  let candidateCount = 0
+
   for (const anchorDay of anchorDays) {
+    if (candidateCount >= MAX_CANDIDATES) break
     const anchorGames = eligibleGames.filter((g) => g.date === anchorDay)
 
     for (const anchor of anchorGames) {
+      if (candidateCount >= MAX_CANDIDATES) break
       if (anchor.venue.coords.lat === 0 && anchor.venue.coords.lng === 0) continue
 
       const anchorKey = coordKey(anchor.venue.coords)
@@ -633,6 +639,7 @@ export async function generateTrips(
           venueCount: 1,
           scoreBreakdown: soloBreakdown,
         })
+        candidateCount++
         continue
       }
 
@@ -746,6 +753,12 @@ export async function generateTrips(
         venueCount: 1 + new Set(nearbyGames.map((g) => coordKey(g.venue.coords))).size,
         scoreBreakdown: breakdown,
       })
+      candidateCount++
+    }
+
+    // Yield to browser periodically to prevent "Page Unresponsive"
+    if (candidateCount % 50 === 0) {
+      await new Promise(r => setTimeout(r, 0))
     }
   }
 
