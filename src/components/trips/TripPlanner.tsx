@@ -504,64 +504,31 @@ export default function TripPlanner() {
 
         {/* Quick date presets */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-text-dim">Quick:</span>
-          <button
-            onClick={() => {
-              const now = new Date()
-              // Start of this week (Monday)
-              const day = now.getDay()
-              const diffToMon = day === 0 ? -6 : 1 - day
-              const mon = new Date(now)
-              mon.setDate(now.getDate() + diffToMon)
-              const sat = new Date(mon)
-              sat.setDate(mon.getDate() + 5)
-              setDateRange(mon.toISOString().split('T')[0]!, sat.toISOString().split('T')[0]!)
-            }}
-            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
-          >
-            This week
-          </button>
-          <button
-            onClick={() => {
-              const now = new Date()
-              const day = now.getDay()
-              const diffToNextMon = day === 0 ? 1 : 8 - day
-              const mon = new Date(now)
-              mon.setDate(now.getDate() + diffToNextMon)
-              const sat = new Date(mon)
-              sat.setDate(mon.getDate() + 5)
-              setDateRange(mon.toISOString().split('T')[0]!, sat.toISOString().split('T')[0]!)
-            }}
-            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
-          >
-            Next week
-          </button>
-          <button
-            onClick={() => {
-              const now = new Date()
-              const day = now.getDay()
-              const diffToNextMon = day === 0 ? 1 : 8 - day
-              const start = new Date(now)
-              start.setDate(now.getDate() + diffToNextMon)
-              const end = new Date(start)
-              end.setDate(start.getDate() + 13) // 2 weeks
-              setDateRange(start.toISOString().split('T')[0]!, end.toISOString().split('T')[0]!)
-            }}
-            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
-          >
-            Next 2 weeks
-          </button>
-          <button
-            onClick={() => {
-              const now = new Date()
-              const end = new Date(now)
-              end.setDate(now.getDate() + 30)
-              setDateRange(now.toISOString().split('T')[0]!, end.toISOString().split('T')[0]!)
-            }}
-            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
-          >
-            Next 30 days
-          </button>
+          {/* Quick date range buttons — all start from today */}
+          {([
+            { label: 'Next 30 days', days: 30 },
+            { label: 'Next 3 months', days: 90 },
+            { label: 'Full season', days: 0 }, // special: Apr 1 – Sep 30
+          ]).map(({ label, days }) => (
+            <button
+              key={label}
+              onClick={() => {
+                const today = new Date().toISOString().split('T')[0]!
+                if (days === 0) {
+                  // Full season: today through Sep 30
+                  const y = new Date().getFullYear()
+                  setDateRange(today, `${y}-09-30`)
+                } else {
+                  const end = new Date()
+                  end.setDate(end.getDate() + days)
+                  setDateRange(today, end.toISOString().split('T')[0]!)
+                }
+              }}
+              className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
