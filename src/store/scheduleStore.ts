@@ -1103,11 +1103,14 @@ export const useScheduleStore = create<ScheduleState>()(
             { forceRefresh },
           )
 
-          // Convert MaxPreps games to GameEvents — home games only
+          // Convert MaxPreps games to GameEvents
           const newGames: GameEvent[] = []
           const schedulesObj: Record<string, MaxPrepsSchedule> = merge ? { ...prevState.hsSchedules } : {}
 
-          // Get venue store for home venue coords
+          // Load hardcoded venue coords as primary fallback
+          const { HS_VENUE_COORDS } = await import('../data/hsVenueCoords')
+
+          // Get venue store for additional fallback
           const venueState = useVenueStore.getState().venues
 
           for (const [schoolKey, schedule] of schedules) {
@@ -1124,6 +1127,12 @@ export const useScheduleStore = create<ScheduleState>()(
                 name: schedule.homeVenue.name,
                 coords: { lat: schedule.homeVenue.lat, lng: schedule.homeVenue.lng },
               }
+            }
+
+            // Fallback: hardcoded venue coords (always available, no geocoding needed)
+            if (!homeVenue && HS_VENUE_COORDS[schoolKey]) {
+              const hc = HS_VENUE_COORDS[schoolKey]!
+              homeVenue = { name: hc.name, coords: { lat: hc.lat, lng: hc.lng } }
             }
 
             const normalizedSchoolOrg = (schoolOrg ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
