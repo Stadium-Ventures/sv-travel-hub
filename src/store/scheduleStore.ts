@@ -1300,11 +1300,9 @@ export const useScheduleStore = create<ScheduleState>()(
         rosterMovesCheckedAt: state.rosterMovesCheckedAt,
         // Persist game data (stored in IndexedDB, no size limit)
         proGames: state.proGames,
-        ncaaGames: state.ncaaGames,
-        hsGames: state.hsGames,
+        // NCAA and HS games are NOT persisted — always recomputed from bundled data on startup
+        // This prevents stale cached games from overriding newer bundled schedules
         proFetchedAt: state.proFetchedAt,
-        ncaaFetchedAt: state.ncaaFetchedAt,
-        hsFetchedAt: state.hsFetchedAt,
         // Track cached coverage for incremental fetching
         cachedProTeamIds: state.cachedProTeamIds,
         cachedNcaaSchools: state.cachedNcaaSchools,
@@ -1322,11 +1320,12 @@ export const useScheduleStore = create<ScheduleState>()(
           assignmentLog: p?.assignmentLog ?? [],
           // Restore cached game data (was previously cleared every session)
           proGames: p?.proGames ?? [],
-          ncaaGames: p?.ncaaGames ?? [],
-          hsGames: p?.hsGames ?? [],
+          // NCAA and HS games always start empty — recomputed from bundle on startup
+          ncaaGames: [],
+          hsGames: [],
           proFetchedAt: p?.proFetchedAt ?? null,
-          ncaaFetchedAt: p?.ncaaFetchedAt ?? null,
-          hsFetchedAt: p?.hsFetchedAt ?? null,
+          ncaaFetchedAt: null,
+          hsFetchedAt: null,
           cachedProTeamIds: p?.cachedProTeamIds ?? [],
           cachedNcaaSchools: p?.cachedNcaaSchools ?? [],
           cachedHsSchools: p?.cachedHsSchools ?? [],
