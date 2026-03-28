@@ -1057,12 +1057,22 @@ export const useScheduleStore = create<ScheduleState>()(
         const schoolToPlayers = new Map<string, string[]>()
         for (const { playerName, org, state } of playerOrgs) {
           let key = `${org}|${state}`
-          // If state is missing, try to find a matching key in MaxPreps slugs
-          if (!state) {
+          // If state is missing or empty, try to find a matching key
+          if (!state || state.trim() === '') {
+            // Try MaxPreps slugs first
             const { MAXPREPS_SLUGS } = await import('../data/maxprepsSlugs')
-            const match = Object.keys(MAXPREPS_SLUGS).find(k => k.startsWith(`${org}|`))
-            if (match) key = match
+            const slugMatch = Object.keys(MAXPREPS_SLUGS).find(k => k.toLowerCase().startsWith(`${org.toLowerCase()}|`))
+            if (slugMatch) {
+              key = slugMatch
+            } else {
+              // Try bundled schedules directly
+              const { BUNDLED_HS_SCHEDULES } = await import('../data/hsSchedules.generated')
+              const bundleMatch = Object.keys(BUNDLED_HS_SCHEDULES).find(k => k.toLowerCase().startsWith(`${org.toLowerCase()}|`))
+              if (bundleMatch) key = bundleMatch
+            }
           }
+          console.log(`[HS] ${playerName}: org="${org}" state="${state}" → key="${key}"`)
+
           const existing = schoolToPlayers.get(key)
           if (existing) existing.push(playerName)
           else schoolToPlayers.set(key, [playerName])

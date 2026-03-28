@@ -564,6 +564,14 @@ export async function generateTrips(
   const uniqueVenueCount = homeToVenue.size
   onProgress?.('Analyzing', `${eligibleGames.length} visit opportunities across ${uniqueVenueCount} venues...`)
 
+  // Pre-index games by date for O(1) lookup instead of O(n) filter per anchor
+  const gamesByDate = new Map<string, typeof eligibleGames>()
+  for (const g of eligibleGames) {
+    const existing = gamesByDate.get(g.date)
+    if (existing) existing.push(g)
+    else gamesByDate.set(g.date, [g])
+  }
+
   // Get ALL non-Sunday dates as potential anchor days (Tuesdays preferred via scoring bonus)
   const anchorDays = getDatesInRange(startDate, endDate).filter(isDateAllowed)
 
@@ -575,13 +583,13 @@ export async function generateTrips(
   const nearMissSeen = new Set<string>() // dedupe by player+venue
 
   // Cap candidates to prevent browser crash on wide date ranges
-  // 200 is plenty for greedy selection of 8 trips
-  const MAX_CANDIDATES = 200
+  // 100 is plenty for greedy selection of 8 trips
+  const MAX_CANDIDATES = 100
   let candidateCount = 0
 
   for (const anchorDay of anchorDays) {
     if (candidateCount >= MAX_CANDIDATES) break
-    const anchorGames = eligibleGames.filter((g) => g.date === anchorDay)
+    const anchorGames = gamesByDate.get(anchorDay) ?? []
 
     for (const anchor of anchorGames) {
       if (candidateCount >= MAX_CANDIDATES) break
@@ -619,14 +627,18 @@ export async function generateTrips(
 
       const window = getTripWindow(anchorDay)
 
-      // Find nearby games within the trip window at any venue
-      const windowGames = eligibleGames.filter(
-        (g) =>
-          window.includes(g.date) &&
-          g.id !== anchor.id &&
-          g.venue.coords.lat !== 0 &&
-          g.venue.coords.lng !== 0,
-      )
+      // Find nearby games within the trip window using date index (O(1) per day vs O(n) filter)
+      const windowGames: typeof eligibleGames = []
+      for (const d of window) {
+        const dayGames = gamesByDate.get(d)
+        if (dayGames) {
+          for (const g of dayGames) {
+            if (g.id !== anchor.id && g.venue.coords.lat !== 0 && g.venue.coords.lng !== 0) {
+              windowGames.push(g)
+            }
+          }
+        }
+      }
 
       if (windowGames.length === 0) {
         // Solo anchor trip

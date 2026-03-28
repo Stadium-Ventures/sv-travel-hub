@@ -315,7 +315,7 @@ export default function TripPlanner() {
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const cachedProTeamIds = useScheduleStore((s) => s.cachedProTeamIds)
 
-  const anyScheduleLoading = schedulesLoading || ncaaLoading || hsLoading || autoAssignLoading
+  const anyScheduleLoading = schedulesLoading || ncaaLoading || hsLoading
   const allSchedulesLoaded = proGames.length > 0 && ncaaGames.length > 0 && (!hasHsPlayers || hsGames.length > 0)
 
   // Compute staleness — only pro schedules can go stale (live-fetched from MLB API).
