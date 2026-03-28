@@ -1130,9 +1130,17 @@ export const useScheduleStore = create<ScheduleState>()(
             }
 
             // Fallback: hardcoded venue coords (always available, no geocoding needed)
-            if (!homeVenue && HS_VENUE_COORDS[schoolKey]) {
-              const hc = HS_VENUE_COORDS[schoolKey]!
-              homeVenue = { name: hc.name, coords: { lat: hc.lat, lng: hc.lng } }
+            if (!homeVenue) {
+              // Try exact key first, then org-name-only match
+              let hc = HS_VENUE_COORDS[schoolKey]
+              if (!hc) {
+                const orgOnly = (schoolKey.split('|')[0] ?? '').toLowerCase()
+                const coordKey = Object.keys(HS_VENUE_COORDS).find(k => k.toLowerCase().startsWith(orgOnly + '|'))
+                if (coordKey) hc = HS_VENUE_COORDS[coordKey]
+              }
+              if (hc) {
+                homeVenue = { name: hc.name, coords: { lat: hc.lat, lng: hc.lng } }
+              }
             }
 
             const normalizedSchoolOrg = (schoolOrg ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -1350,9 +1358,10 @@ export const useScheduleStore = create<ScheduleState>()(
           assignmentLog: p?.assignmentLog ?? [],
           // Restore cached game data (was previously cleared every session)
           proGames: p?.proGames ?? [],
-          // NCAA and HS games always start empty — recomputed from bundle on startup
-          ncaaGames: [],
-          hsGames: [],
+          // NCAA and HS games: use current state if populated (from bundle conversion),
+          // otherwise start empty (will be loaded from bundle on startup)
+          ncaaGames: (current as any).ncaaGames?.length > 0 ? (current as any).ncaaGames : [],
+          hsGames: (current as any).hsGames?.length > 0 ? (current as any).hsGames : [],
           proFetchedAt: p?.proFetchedAt ?? null,
           ncaaFetchedAt: null,
           hsFetchedAt: null,
