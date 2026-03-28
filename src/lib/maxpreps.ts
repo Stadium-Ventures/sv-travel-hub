@@ -195,8 +195,16 @@ export async function fetchMaxPrepsSchedule(
   opts?: { forceRefresh?: boolean },
 ): Promise<MaxPrepsSchedule | null> {
   // Check bundled static data first (instant, no network)
-  if (!opts?.forceRefresh && BUNDLED_HS_SCHEDULES[orgStateKey]) {
-    return BUNDLED_HS_SCHEDULES[orgStateKey]!
+  if (!opts?.forceRefresh) {
+    if (BUNDLED_HS_SCHEDULES[orgStateKey]) {
+      return BUNDLED_HS_SCHEDULES[orgStateKey]!
+    }
+    // Fallback: if state is missing, find by org prefix (e.g., "Trinity|" matches "Trinity|KY")
+    if (orgStateKey.endsWith('|') || !orgStateKey.includes('|')) {
+      const orgOnly = orgStateKey.replace(/\|$/, '')
+      const match = Object.keys(BUNDLED_HS_SCHEDULES).find(k => k.startsWith(`${orgOnly}|`))
+      if (match) return BUNDLED_HS_SCHEDULES[match]!
+    }
   }
 
   const [org, state] = orgStateKey.split('|')

@@ -1056,7 +1056,13 @@ export const useScheduleStore = create<ScheduleState>()(
         // in fetchMaxPrepsSchedule will attempt to find unknown slugs automatically)
         const schoolToPlayers = new Map<string, string[]>()
         for (const { playerName, org, state } of playerOrgs) {
-          const key = `${org}|${state}`
+          let key = `${org}|${state}`
+          // If state is missing, try to find a matching key in MaxPreps slugs
+          if (!state) {
+            const { MAXPREPS_SLUGS } = await import('../data/maxprepsSlugs')
+            const match = Object.keys(MAXPREPS_SLUGS).find(k => k.startsWith(`${org}|`))
+            if (match) key = match
+          }
           const existing = schoolToPlayers.get(key)
           if (existing) existing.push(playerName)
           else schoolToPlayers.set(key, [playerName])
