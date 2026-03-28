@@ -1054,24 +1054,20 @@ export const useScheduleStore = create<ScheduleState>()(
 
         // Group players by org|state key — include all schools (slug discovery
         // in fetchMaxPrepsSchedule will attempt to find unknown slugs automatically)
+        // Pre-load bundle keys for fallback matching
+        const { BUNDLED_HS_SCHEDULES } = await import('../data/hsSchedules.generated')
+        const bundleKeys = Object.keys(BUNDLED_HS_SCHEDULES)
+
         const schoolToPlayers = new Map<string, string[]>()
         for (const { playerName, org, state } of playerOrgs) {
           let key = `${org}|${state}`
-          // If state is missing or empty, try to find a matching key
-          if (!state || state.trim() === '') {
-            // Try MaxPreps slugs first
-            const { MAXPREPS_SLUGS } = await import('../data/maxprepsSlugs')
-            const slugMatch = Object.keys(MAXPREPS_SLUGS).find(k => k.toLowerCase().startsWith(`${org.toLowerCase()}|`))
-            if (slugMatch) {
-              key = slugMatch
-            } else {
-              // Try bundled schedules directly
-              const { BUNDLED_HS_SCHEDULES } = await import('../data/hsSchedules.generated')
-              const bundleMatch = Object.keys(BUNDLED_HS_SCHEDULES).find(k => k.toLowerCase().startsWith(`${org.toLowerCase()}|`))
-              if (bundleMatch) key = bundleMatch
-            }
+
+          // If key doesn't match bundle, try matching by org name alone
+          if (!BUNDLED_HS_SCHEDULES[key]) {
+            const orgLower = org.toLowerCase()
+            const match = bundleKeys.find(k => k.toLowerCase().startsWith(`${orgLower}|`))
+            if (match) key = match
           }
-          console.log(`[HS] ${playerName}: org="${org}" state="${state}" → key="${key}"`)
 
           const existing = schoolToPlayers.get(key)
           if (existing) existing.push(playerName)
