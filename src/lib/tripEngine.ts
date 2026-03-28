@@ -1078,7 +1078,9 @@ export async function generateTrips(
     gameTimeByDate: Map<string, string> // date → game time
   }>()
 
+  const MAX_FLYIN_ENTRIES = 200 // cap fly-in map to prevent OOM
   for (const game of eligibleGames) {
+    if (flyInWeekMap.size >= MAX_FLYIN_ENTRIES) break
     if (game.venue.coords.lat === 0 && game.venue.coords.lng === 0) continue
     const relevantPlayers = game.playerNames.filter((n) => playersForFlyIns.includes(n))
     if (relevantPlayers.length === 0) continue
@@ -1144,7 +1146,7 @@ export async function generateTrips(
   // For each week, find venue clusters (venues within 3h drive of each other)
   const MAX_COMBO_INTER_VENUE = 180 // 3h drive between fly-in combo stops
   let comboCount = 0
-  const MAX_COMBOS = 30 // cap combo generation
+  const MAX_COMBOS = 15 // cap combo generation to prevent OOM
   for (const [, weekEntries] of entriesByWeek) {
     if (comboCount >= MAX_COMBOS) break
     if (weekEntries.length < 2) continue // need 2+ venues to form a combo

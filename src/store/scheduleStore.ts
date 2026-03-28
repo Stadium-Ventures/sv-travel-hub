@@ -1060,13 +1060,22 @@ export const useScheduleStore = create<ScheduleState>()(
 
         const schoolToPlayers = new Map<string, string[]>()
         for (const { playerName, org, state } of playerOrgs) {
+          // Try exact key first, then progressively looser matching
           let key = `${org}|${state}`
-
-          // If key doesn't match bundle, try matching by org name alone
           if (!BUNDLED_HS_SCHEDULES[key]) {
-            const orgLower = org.toLowerCase()
-            const match = bundleKeys.find(k => k.toLowerCase().startsWith(`${orgLower}|`))
-            if (match) key = match
+            // Try case-insensitive exact match
+            const exactMatch = bundleKeys.find(k => k.toLowerCase() === key.toLowerCase())
+            if (exactMatch) {
+              key = exactMatch
+            } else {
+              // Try org-only prefix match (handles missing/wrong state)
+              const orgLower = org.toLowerCase().trim()
+              const prefixMatch = bundleKeys.find(k => {
+                const [bOrg] = k.split('|')
+                return bOrg!.toLowerCase().trim() === orgLower
+              })
+              if (prefixMatch) key = prefixMatch
+            }
           }
 
           const existing = schoolToPlayers.get(key)
