@@ -178,6 +178,42 @@ function parseMaxPrepsHtml(html: string, schoolName: string): { teamName: string
     }
   }
 
+  // Fallback: if JSON-LD parsing found few/no games, extract SportsEvent data
+  // from inline React hydration data (MaxPreps embeds schedule outside JSON-LD tags)
+  if (games.length < 15) {
+    const dateMatches = [...html.matchAll(/"startDate":"(\d{4}-\d{2}-\d{2}T[^"]+)"/g)]
+    if (dateMatches.length > games.length) {
+      // Found more games in inline data — parse them
+      const homeTeamMatches = [...html.matchAll(/"homeTeam":\{"@type":"SportsTeam","name":"([^"]+)"\}/g)]
+      const awayTeamMatches = [...html.matchAll(/"awayTeam":\{"@type":"SportsTeam","name":"([^"]+)"\}/g)]
+
+      const inlineGames: MaxPrepsGame[] = []
+      for (let i = 0; i < dateMatches.length; i++) {
+        const startDate = dateMatches[i]![1]!
+        const dateOnly = startDate.slice(0, 10)
+        const homeTeam = homeTeamMatches[i]?.[1] ?? ''
+        const awayTeam = awayTeamMatches[i]?.[1] ?? ''
+
+        const schoolLower = schoolName.toLowerCase()
+        const homeLower = homeTeam.toLowerCase()
+        const isHome = homeLower.includes(schoolLower) || schoolLower.includes(homeLower.split(' ')[0] ?? '')
+        const opponent = isHome ? awayTeam : homeTeam
+
+        inlineGames.push({ date: dateOnly, time: startDate, isHome, opponent, gameUrl: null })
+      }
+
+      // Extract team name
+      const teamNameMatch = html.match(new RegExp(`"SportsTeam","name":"([^"]*${schoolName.replace(/[.*+?^${}()|[\]\\]/g, '\\\\$&')}[^"]*)""`))
+        ?? html.match(/"SportsTeam","name":"([^"]+)"/)
+      if (teamNameMatch) teamName = teamNameMatch[1]!
+
+      if (inlineGames.length > 0) {
+        console.log(` [inline: ${inlineGames.length} games]`)
+        return { teamName, games: inlineGames }
+      }
+    }
+  }
+
   return { teamName, games }
 }
 
