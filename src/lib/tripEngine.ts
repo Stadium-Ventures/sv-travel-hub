@@ -685,6 +685,13 @@ export async function generateTrips(
           return true
         })
 
+      // Cap nearby games to prevent memory explosion in route optimization
+      // Keep the closest venues — more distant ones add little trip value
+      if (nearbyGames.length > 6) {
+        nearbyGames.sort((a, b) => a.driveMinutes - b.driveMinutes)
+        nearbyGames.length = 6
+      }
+
       // Collect all unique players visited
       const allPlayerNames = new Set<string>()
       for (const name of anchor.playerNames) {
@@ -711,38 +718,24 @@ export async function generateTrips(
         }
       }
 
-      // Estimate total driving — try all permutations of nearby stops to find shortest route
-      // With at most 2-3 nearby stops, this is at most 6 permutations — negligible cost
-      function permutations<T>(arr: T[]): T[][] {
-        if (arr.length <= 1) return [arr]
-        const result: T[][] = []
-        for (let i = 0; i < arr.length; i++) {
-          const rest = [...arr.slice(0, i), ...arr.slice(i + 1)]
-          for (const perm of permutations(rest)) {
-            result.push([arr[i]!, ...perm])
-          }
+      // Estimate total driving using nearest-neighbor route heuristic
+      // O(n²) instead of O(n!) permutations — scales to any number of stops
+      let interVenueDrive = 0
+      let lastCoords = anchor.venue.coords
+      const unvisited = new Set(nearbyGames.map((_, i) => i))
+      while (unvisited.size > 0) {
+        let bestIdx = -1
+        let bestDist = Infinity
+        for (const idx of unvisited) {
+          const d = lookupDriveMinutes(lastCoords, nearbyGames[idx]!.venue.coords)
+          if (d < bestDist) { bestDist = d; bestIdx = idx }
         }
-        return result
+        interVenueDrive += bestDist
+        lastCoords = nearbyGames[bestIdx]!.venue.coords
+        unvisited.delete(bestIdx)
       }
-
-      let bestTotalDrive = Infinity
-      for (const perm of permutations(nearbyGames)) {
-        let interVenueDrive = 0
-        let prevCoords = anchor.venue.coords
-        for (const g of perm) {
-          interVenueDrive += lookupDriveMinutes(prevCoords, g.venue.coords)
-          prevCoords = g.venue.coords
-        }
-        const lastKey = perm.length > 0
-          ? coordKey(perm[perm.length - 1]!.venue.coords)
-          : anchorKey
-        const returnHome = homeToVenue.get(lastKey) ?? homeToAnchor
-        const drive = homeToAnchor + interVenueDrive + returnHome
-        if (drive < bestTotalDrive) {
-          bestTotalDrive = drive
-        }
-      }
-      const totalDrive = bestTotalDrive
+      const returnHome = homeToVenue.get(coordKey(lastCoords)) ?? homeToAnchor
+      const totalDrive = homeToAnchor + interVenueDrive + returnHome
 
       // Skip trips that exceed total driving cap (too much time on the road for 3 days)
       if (totalDrive > MAX_TOTAL_DRIVE_MINUTES) continue

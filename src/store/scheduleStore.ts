@@ -1219,26 +1219,26 @@ export const useScheduleStore = create<ScheduleState>()(
             }
 
             for (const game of schedule.games) {
-              // Only include home games — away game venues are unknown and including
-              // all games at approximate coords overwhelms the trip engine (memory crash)
-              if (!game.isHome) continue
-
               const d = new Date(game.date + 'T12:00:00Z')
               const [schoolOrg] = schoolKey.split('|')
 
               newGames.push({
-                id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
+                id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-${game.isHome ? '' : 'away-'}${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
                 date: game.date,
                 dayOfWeek: d.getUTCDay(),
                 time: game.time ?? game.date + 'T16:00:00Z',
-                homeTeam: schedule.teamName || schoolOrg || schoolKey,
-                awayTeam: game.opponent,
-                isHome: true,
-                venue: homeVenue,
+                homeTeam: game.isHome ? (schedule.teamName || schoolOrg || schoolKey) : game.opponent,
+                awayTeam: game.isHome ? game.opponent : (schedule.teamName || schoolOrg || schoolKey),
+                isHome: game.isHome,
+                venue: game.isHome
+                  ? homeVenue
+                  : { name: `${game.opponent} (near ${homeVenue.name})`, coords: homeVenue.coords },
                 source: 'hs-lookup',
                 playerNames,
-                confidence: 'high',
-                confidenceNote: 'Confirmed home game from schedule',
+                confidence: game.isHome ? 'high' : 'medium',
+                confidenceNote: game.isHome
+                  ? 'Confirmed home game from schedule'
+                  : `Away game at ${game.opponent} (approximate location)`,
                 sourceUrl: schedule.slug ? `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/` : undefined,
               })
             }
