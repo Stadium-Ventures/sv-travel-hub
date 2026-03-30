@@ -477,7 +477,7 @@ export default function TripPlanner() {
               />
               {hasHsPlayers && (
                 <ScheduleProgressRow
-                  label="HS Schedules"
+                  label={`HS Schedules${hsGames.length > 0 ? ` (${hsGames.length} games, ${new Set(hsGames.flatMap(g => g.playerNames)).size} players)` : ''}`}
                   loading={hsLoading}
                   done={hsGames.length > 0}
                   progress={hsProgress}
