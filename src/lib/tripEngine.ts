@@ -1199,13 +1199,24 @@ export async function generateTrips(
       const usedVenueCoords = new Set<string>()
       const allPlayerNames = new Set<string>()
 
-      // Sort cluster venues by player value (most valuable first)
-      clusterVenues.sort((a, b) => b.entry.players.size - a.entry.players.size)
+      // Sort cluster venues by tier-weighted value (T1/T2 venues first, not just player count)
+      clusterVenues.sort((a, b) => {
+        const valueA = [...a.entry.players].reduce((s, n) => s + (TIER_WEIGHTS[playerMap.get(n)?.tier ?? 3] ?? 0), 0)
+        const valueB = [...b.entry.players].reduce((s, n) => s + (TIER_WEIGHTS[playerMap.get(n)?.tier ?? 3] ?? 0), 0)
+        return valueB - valueA
+      })
 
       for (const v of clusterVenues) {
         // Skip if we've already added this venue (same coords, different team label)
         const venueCoordStr = coordKey(v.entry.venue.coords)
         if (usedVenueCoords.has(venueCoordStr)) continue
+
+        // Don't extend a trip for T3-only stops — not worth an extra day of travel
+        const hasHighTier = [...v.entry.players].some(n => {
+          const tier = playerMap.get(n)?.tier
+          return tier === 1 || tier === 2
+        })
+        if (!hasHighTier && stops.length >= 1) continue
 
         // Find best available day for this venue (prefer matching dates, then any trip day)
         const venueDates = [...v.entry.dates].sort()

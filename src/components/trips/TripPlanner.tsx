@@ -1030,12 +1030,12 @@ export default function TripPlanner() {
                 }
               }
 
-              // Trip length filter
+              // Trip length filter (fly-ins add +1 for return travel day, matching the card display)
               if (tripLengthFilter !== 'all') {
                 const targetDays = Number(tripLengthFilter)
                 const actualDays = item.type === 'road'
                   ? item.trip.suggestedDays.length
-                  : item.visit.dates.length
+                  : item.visit.dates.length + 1
                 if (actualDays !== targetDays) return false
               }
 
