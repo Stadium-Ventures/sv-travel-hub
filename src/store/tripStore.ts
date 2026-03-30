@@ -211,6 +211,20 @@ export const useTripStore = create<TripState>()(
     }
     const allGames = [...gameMap.values()]
 
+    // Diagnostic: log HS game counts per player so we can debug "no games in range" issues
+    const hsPlayers = players.filter((p) => p.level === 'HS')
+    if (hsPlayers.length > 0) {
+      const hsInAll = allGames.filter((g) => g.source === 'hs-lookup')
+      console.log(`[HS-DEBUG] HS games in allGames: ${hsInAll.length}, realHsGames: ${realHsGames.length}, hsSynthetic: ${hsSyntheticEvents.length}`)
+      for (const p of hsPlayers) {
+        const playerGames = allGames.filter((g) => g.playerNames.includes(p.playerName))
+        const inRange = playerGames.filter((g) => g.date >= startDate && g.date <= endDate)
+        if (playerGames.length > 0 || inRange.length === 0) {
+          console.log(`[HS-DEBUG] ${p.playerName}: ${playerGames.length} total games, ${inRange.length} in range (${startDate} to ${endDate})${playerGames.length > 0 ? `, dates: ${playerGames[0]!.date} to ${playerGames[playerGames.length - 1]!.date}` : ''}`)
+        }
+      }
+    }
+
     // Build urgency map from heartbeat data (only when toggle is ON)
     const urgencyMap: UrgencyMap = new Map()
     if (useHeartbeatBoost) {
