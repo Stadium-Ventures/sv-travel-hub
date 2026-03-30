@@ -1219,44 +1219,28 @@ export const useScheduleStore = create<ScheduleState>()(
             }
 
             for (const game of schedule.games) {
+              // Only include home games — away game venues are unknown and including
+              // all games at approximate coords overwhelms the trip engine (memory crash)
+              if (!game.isHome) continue
+
               const d = new Date(game.date + 'T12:00:00Z')
               const [schoolOrg] = schoolKey.split('|')
 
-              if (game.isHome) {
-                newGames.push({
-                  id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
-                  date: game.date,
-                  dayOfWeek: d.getUTCDay(),
-                  time: game.time ?? game.date + 'T16:00:00Z',
-                  homeTeam: schedule.teamName || schoolOrg || schoolKey,
-                  awayTeam: game.opponent,
-                  isHome: true,
-                  venue: homeVenue,
-                  source: 'hs-lookup',
-                  playerNames,
-                  confidence: 'high',
-                  confidenceNote: 'Confirmed home game from schedule',
-                  sourceUrl: schedule.slug ? `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/` : undefined,
-                })
-              } else {
-                // Away games: use home venue as approximate location (same region)
-                // This avoids slow runtime Nominatim geocoding (~1.2s per game × 270+ games)
-                newGames.push({
-                  id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-away-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
-                  date: game.date,
-                  dayOfWeek: d.getUTCDay(),
-                  time: game.time ?? game.date + 'T16:00:00Z',
-                  homeTeam: game.opponent,
-                  awayTeam: schedule.teamName || schoolOrg || schoolKey,
-                  isHome: false,
-                  venue: { name: `${game.opponent} (near ${homeVenue.name})`, coords: homeVenue.coords },
-                  source: 'hs-lookup',
-                  playerNames,
-                  confidence: 'medium',
-                  confidenceNote: `Away game at ${game.opponent} (approximate location)`,
-                  sourceUrl: schedule.slug ? `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/` : undefined,
-                })
-              }
+              newGames.push({
+                id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
+                date: game.date,
+                dayOfWeek: d.getUTCDay(),
+                time: game.time ?? game.date + 'T16:00:00Z',
+                homeTeam: schedule.teamName || schoolOrg || schoolKey,
+                awayTeam: game.opponent,
+                isHome: true,
+                venue: homeVenue,
+                source: 'hs-lookup',
+                playerNames,
+                confidence: 'high',
+                confidenceNote: 'Confirmed home game from schedule',
+                sourceUrl: schedule.slug ? `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/` : undefined,
+              })
             }
           }
 
