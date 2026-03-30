@@ -1261,11 +1261,21 @@ export const useScheduleStore = create<ScheduleState>()(
             ? [...new Set([...prevState.hsFailedSchools, ...failedSchools])]
             : failedSchools
 
+          // Per-player game count diagnostic
+          const playerGameCounts = new Map<string, number>()
+          for (const g of allGames) {
+            for (const n of g.playerNames) {
+              playerGameCounts.set(n, (playerGameCounts.get(n) ?? 0) + 1)
+            }
+          }
           console.log(`[HS] Conversion complete: ${allGames.length} games from ${schedules.size} schools, ${failedSchools.length} failed`)
-          if (allGames.length === 0 && schedules.size > 0) {
-            console.warn('[HS] WARNING: schedules loaded but zero games converted!')
-            for (const [sk, sched] of schedules) {
-              console.log(`[HS]   ${sk}: ${sched.games.length} games, homeVenue: ${sched.homeVenue ? 'yes' : 'no'}`)
+          console.log(`[HS] Per-player: ${[...playerGameCounts.entries()].map(([n, c]) => `${n}:${c}`).join(', ')}`)
+          // Flag players in roster but missing from games
+          for (const [, players] of schoolToPlayers) {
+            for (const name of players) {
+              if (!playerGameCounts.has(name)) {
+                console.warn(`[HS] MISSING: ${name} has 0 games after conversion`)
+              }
             }
           }
           set({

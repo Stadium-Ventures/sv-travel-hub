@@ -41,7 +41,7 @@ function getVisitContext(source: ScheduleSource, isHome: boolean, awayTeam: stri
       : { label: 'Est.', color: 'bg-accent-orange/15 text-accent-orange' }
   }
   return confidence === 'high'
-    ? { label: 'MaxPreps', color: 'bg-accent-green/15 text-accent-green' }
+    ? { label: 'HS', color: 'bg-accent-green/15 text-accent-green' }
     : { label: 'Est.', color: 'bg-accent-orange/15 text-accent-orange' }
 }
 
@@ -293,8 +293,6 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
     else if (tier === 3) tierCounts.t3++
   }
 
-  const hasUncertainEvents = stops.some((s) => s.confidence && s.confidence !== 'high')
-
   // Compute total drive
   let totalDrive = trip.driveFromHomeMinutes
   for (const s of stops) totalDrive += s.driveFromPrev
@@ -334,50 +332,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
 
   // Build concise summary
 
-  // Natural language trip summary
-  const tripSummary = useMemo(() => {
-    const gameDays = displayDays.filter((d) => (dayAssignments.get(d) ?? []).length > 0)
-    const parts: string[] = []
-
-    // Opening: date range + drive from Orlando
-    const firstDay = gameDays[0]
-    const lastDay = gameDays[gameDays.length - 1]
-    const dateRange = firstDay && lastDay && firstDay !== lastDay
-      ? `${formatDate(firstDay)} – ${formatDate(lastDay)}`
-      : firstDay ? formatDate(firstDay) : ''
-    parts.push(`${dateRange}: Drive ~${formatDriveTime(trip.driveFromHomeMinutes)} from Orlando.`)
-
-    // Each game day
-    for (const day of gameDays) {
-      const dayStops = dayAssignments.get(day) ?? []
-      if (dayStops.length === 0) continue
-      const dayName = formatDate(day)
-
-      if (dayStops.length === 1) {
-        const s = dayStops[0]!
-        const playerDescs = s.players.map((n) => {
-          const p = playerMap.get(n)
-          return p ? `${n} (${p.org})` : n
-        })
-        parts.push(`${dayName}: See ${playerDescs.join(' and ')} at ${s.orgLabel || s.venueName}.`)
-      } else {
-        const stopDescs = dayStops.map((s) => {
-          const names = s.players.map((n) => playerMap.get(n)?.playerName ?? n).join(', ')
-          const drive = s.driveFromPrev > 0 ? ` (${formatDriveTime(s.driveFromPrev)} drive between)` : ''
-          return `${names} at ${s.orgLabel || s.venueName}${drive}`
-        })
-        parts.push(`${dayName}: See ${stopDescs.join(', then ')}.`)
-      }
-    }
-
-    // Return drive
-    if (lastStop) {
-      const returnMin = Math.round((haversineKm(parseVenueKey(lastStop.venueKey), HOME_BASE) * 1.3 / 90) * 60)
-      parts.push(`Drive ~${formatDriveTime(returnMin)} home.`)
-    }
-
-    return parts.join(' ')
-  }, [displayDays, dayAssignments, trip.driveFromHomeMinutes, stops, playerMap, lastStop])
+  // Build concise summary line (not the old narrative paragraph)
 
 
   return (
@@ -401,9 +356,12 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
               </span>
             </h3>
           </div>
-          {/* Compact summary */}
+          {/* Compact summary — player names, not venue names */}
           <p className="mt-0.5 text-sm text-text-dim">
-            {dateLabel} · {stops.map(s => s.orgLabel || s.venueName).join(' → ')} · {allPlayers.size} player{allPlayers.size !== 1 ? 's' : ''} · ~{formatDriveTime(trip.driveFromHomeMinutes)} from Orlando
+            {dateLabel} · {[...allPlayers].map(n => {
+              const p = playerMap.get(n)
+              return p ? n : n
+            }).join(', ')} · ~{formatDriveTime(trip.driveFromHomeMinutes)} from Orlando
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -423,29 +381,33 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
       {expanded && (
         <div className="mt-4 space-y-3">
 
-          {/* Natural language summary */}
-          <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
-            {tripSummary}
-          </p>
-
-          {/* Confidence warning — shown at top for visibility */}
-          {hasUncertainEvents && (() => {
+          {/* Warnings — TBD times, estimated schedules */}
+          {(() => {
+            const warnings: string[] = []
+            // Check for TBD times on multi-stop days
+            for (const [day, dayStops] of dayAssignments) {
+              if (dayStops.length >= 2) {
+                const tbdCount = dayStops.filter(s => !formatGameTime(s.gameTime, s.source) || formatGameTime(s.gameTime, s.source) === 'TBD').length
+                if (tbdCount >= 2) {
+                  warnings.push(`${formatDate(day)}: ${tbdCount} games have unconfirmed start times — verify before committing to this route`)
+                }
+              }
+            }
+            // Estimated schedule stops
             const estimatedStops = stops.filter((s) => s.confidence && s.confidence !== 'high')
-            const hasLow = estimatedStops.some((s) => s.confidence === 'low')
+            if (estimatedStops.length > 0) {
+              for (const s of estimatedStops) {
+                if (s.confidenceNote) warnings.push(s.confidenceNote)
+              }
+            }
+            if (warnings.length === 0) return null
             return (
-              <div className={`rounded-lg border px-3 py-1.5 ${
-                hasLow
-                  ? 'border-accent-red/20 bg-accent-red/5'
-                  : 'border-accent-orange/20 bg-accent-orange/5'
-              }`}>
-                <p className={`text-[11px] ${hasLow ? 'text-accent-red' : 'text-accent-orange'}`}>
-                  {estimatedStops.length === 1 ? '1 stop' : `${estimatedStops.length} stops`} based on estimated schedules — verify before traveling.
-                  {estimatedStops.map((s) => s.confidenceNote).filter(Boolean).length > 0 && (
-                    <span className="block mt-0.5 text-text-dim/70">
-                      {estimatedStops.map((s) => s.confidenceNote).filter(Boolean).join(' · ')}
-                    </span>
-                  )}
-                </p>
+              <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
+                {warnings.map((w, i) => (
+                  <p key={i} className="text-[11px] text-accent-orange">
+                    ⚠ {w}
+                  </p>
+                ))}
               </div>
             )
           })()}
