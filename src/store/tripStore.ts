@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Coordinates } from '../types/roster'
 import type { TripPlan } from '../types/schedule'
-import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, HOME_BASE } from '../lib/tripEngine'
+import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, DEFAULT_HOME_BASE } from '../lib/tripEngine'
 import { findDoubleUps } from '../lib/doubleUps'
 import type { UrgencyMap } from '../lib/tripEngine'
 import type { WorkerParams, WorkerMessage } from '../lib/tripEngine.worker'
@@ -42,6 +42,8 @@ interface TripState {
   maxFlightHours: number
   useHeartbeatBoost: boolean
   priorityPlayers: string[]
+  homeBase: Coordinates
+  homeBaseName: string
   tripPlan: TripPlan | null
   computing: boolean
   progressStep: string
@@ -53,6 +55,7 @@ interface TripState {
   setMaxDriveMinutes: (minutes: number) => void
   setMaxFlightHours: (hours: number) => void
   setPriorityPlayers: (players: string[]) => void
+  setHomeBase: (coords: Coordinates, name: string) => void
   generateTrips: () => Promise<void>
   clearTrips: () => void
   setTripStatus: (tripKey: string, status: TripStatus | null) => void
@@ -72,6 +75,8 @@ export const useTripStore = create<TripState>()(
   maxFlightHours: 4,
   useHeartbeatBoost: false, // default OFF — Heartbeat data is a snapshot of now, not the future
   priorityPlayers: [],
+  homeBase: DEFAULT_HOME_BASE,
+  homeBaseName: 'Orlando, FL',
   tripPlan: null,
   computing: false,
   progressStep: '',
@@ -84,6 +89,7 @@ export const useTripStore = create<TripState>()(
   setMaxFlightHours: (maxFlightHours) => set({ maxFlightHours }),
   setUseHeartbeatBoost: (useHeartbeatBoost: boolean) => set({ useHeartbeatBoost }),
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
+  setHomeBase: (homeBase, homeBaseName) => set({ homeBase, homeBaseName }),
   clearTrips: () => set({ tripPlan: null, selectedTripIndex: null }),
   setSelectedTripIndex: (selectedTripIndex) => set({ selectedTripIndex }),
   setTripStatus: (tripKey, status) => set((state) => {
@@ -98,7 +104,7 @@ export const useTripStore = create<TripState>()(
 
   generateTrips: async () => {
     if (get().computing) return
-    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers, useHeartbeatBoost } = get()
+    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers, useHeartbeatBoost, homeBase, homeBaseName } = get()
     const players = useRosterStore.getState().players
     let scheduleState = useScheduleStore.getState()
 
@@ -136,11 +142,11 @@ export const useTripStore = create<TripState>()(
         if (playerGames.length === 0) continue // missing schedule already handled above
         const hasDrivable = playerGames.some((g) => {
           if (g.venue.coords.lat === 0 && g.venue.coords.lng === 0) return false
-          return estimateDriveMinutes(HOME_BASE, g.venue.coords) <= maxDriveMinutes
+          return estimateDriveMinutes(homeBase, g.venue.coords) <= maxDriveMinutes
         })
         if (!hasDrivable) {
           const driveHours = Math.round(maxDriveMinutes / 60)
-          set({ progressDetail: `Heads up: ${pName} has no games within ${driveHours}h drive of Orlando — will check fly-in options...` })
+          set({ progressDetail: `Heads up: ${pName} has no games within ${driveHours}h drive of ${homeBaseName} — will check fly-in options...` })
           // Brief pause so user sees the warning before heavy computation
           await new Promise((r) => setTimeout(r, 1200))
         }
@@ -263,6 +269,7 @@ export const useTripStore = create<TripState>()(
       urgencyRecord: Object.keys(urgencyRecord).length > 0 ? urgencyRecord : undefined,
       maxFlightHours,
       playerTeamAssignments: scheduleState.playerTeamAssignments,
+      homeBase,
     }
 
     const worker = new Worker(
@@ -317,7 +324,7 @@ export const useTripStore = create<TripState>()(
 }),
     {
       name: 'sv-travel-trips',
-      version: 5,
+      version: 6,
       migrate: (persisted: any) => ({
         // Keep settings, drop computed trip data
         startDate: persisted?.startDate ?? defaultStart(),
@@ -329,6 +336,8 @@ export const useTripStore = create<TripState>()(
         useHeartbeatBoost: persisted?.useHeartbeatBoost ?? false,
         priorityPlayers: persisted?.priorityPlayers ?? [],
         tripStatuses: persisted?.tripStatuses ?? {},
+        homeBase: persisted?.homeBase ?? DEFAULT_HOME_BASE,
+        homeBaseName: persisted?.homeBaseName ?? 'Orlando, FL',
       }),
       partialize: (state) => ({
         // tripPlan is NOT persisted — it's computed data that should be
@@ -340,6 +349,8 @@ export const useTripStore = create<TripState>()(
         useHeartbeatBoost: state.useHeartbeatBoost,
         priorityPlayers: state.priorityPlayers,
         tripStatuses: state.tripStatuses,
+        homeBase: state.homeBase,
+        homeBaseName: state.homeBaseName,
       }),
       merge: (persisted, current) => {
         const p = persisted as any
@@ -349,6 +360,8 @@ export const useTripStore = create<TripState>()(
           maxFlightHours: p?.maxFlightHours ?? 8,
           priorityPlayers: p?.priorityPlayers ?? [],
           tripStatuses: p?.tripStatuses ?? {},
+          homeBase: p?.homeBase ?? DEFAULT_HOME_BASE,
+          homeBaseName: p?.homeBaseName ?? 'Orlando, FL',
           tripPlan: null, // Always start fresh
         }
       },

@@ -20,6 +20,7 @@ export function generateTripIcs(
   trip: TripCandidate,
   index: number,
   playerMap: Map<string, RosterPlayer>,
+  homeBaseName: string = 'Orlando',
 ): string {
   const startDate = trip.suggestedDays[0]!
   const endDate = trip.suggestedDays[trip.suggestedDays.length - 1]!
@@ -44,7 +45,7 @@ export function generateTripIcs(
 
   const description = [
     `Trip #${index} — ${dayCount} day${dayCount !== 1 ? 's' : ''}`,
-    `Drive from Orlando: ~${driveStr}`,
+    `Drive from ${homeBaseName}: ~${driveStr}`,
     `Players: ${playerList}`,
     trip.scoreBreakdown ? `Score: ${trip.scoreBreakdown.finalScore} pts` : '',
   ].filter(Boolean).join('\\n')
@@ -79,6 +80,7 @@ export function generateTripIcs(
 export function generateAllTripsIcs(
   trips: TripCandidate[],
   playerMap: Map<string, RosterPlayer>,
+  homeBaseName: string = 'Orlando',
 ): string {
   const events: string[] = []
 
@@ -106,7 +108,7 @@ export function generateAllTripsIcs(
 
     const description = [
       `Trip #${i + 1} — ${dayCount} day${dayCount !== 1 ? 's' : ''}`,
-      `Drive from Orlando: ~${driveStr}`,
+      `Drive from ${homeBaseName}: ~${driveStr}`,
       `Players: ${playerList}`,
       trip.scoreBreakdown ? `Score: ${trip.scoreBreakdown.finalScore} pts` : '',
     ].filter(Boolean).join('\\n')
@@ -143,6 +145,7 @@ export function generateFlyInIcs(
   visit: FlyInVisit,
   index: number,
   playerMap: Map<string, RosterPlayer>,
+  homeBaseName: string = 'Orlando',
 ): string {
   const startDate = visit.dates[0]!
   const endDate = visit.dates[visit.dates.length - 1]!
@@ -158,7 +161,7 @@ export function generateFlyInIcs(
 
   const description = [
     `Fly-in #${index} — ${dayCount} day${dayCount !== 1 ? 's' : ''}`,
-    `Travel from Orlando: ~${visit.estimatedTravelHours}h (${milesDisplay} mi)`,
+    `Travel from ${homeBaseName}: ~${visit.estimatedTravelHours}h (${milesDisplay} mi)`,
     `Players: ${playerList}`,
     visit.scoreBreakdown ? `Score: ${visit.scoreBreakdown.finalScore} pts` : '',
   ].filter(Boolean).join('\\n')

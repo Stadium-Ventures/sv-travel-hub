@@ -13,6 +13,21 @@ import { MAJOR_AIRPORTS, findNearestAirport } from '../../data/majorAirports'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
+const STARTING_LOCATIONS = [
+  { name: 'Orlando, FL', coords: { lat: 28.5383, lng: -81.3792 } },
+  { name: 'Denver, CO', coords: { lat: 39.7392, lng: -104.9903 } },
+  { name: 'Phoenix, AZ', coords: { lat: 33.4484, lng: -112.0740 } },
+  { name: 'Dallas, TX', coords: { lat: 32.7767, lng: -96.7970 } },
+  { name: 'Atlanta, GA', coords: { lat: 33.7490, lng: -84.3880 } },
+  { name: 'Nashville, TN', coords: { lat: 36.1627, lng: -86.7816 } },
+  { name: 'Charlotte, NC', coords: { lat: 35.2271, lng: -80.8431 } },
+  { name: 'Miami, FL', coords: { lat: 25.7617, lng: -80.1918 } },
+  { name: 'Los Angeles, CA', coords: { lat: 34.0522, lng: -118.2437 } },
+  { name: 'Chicago, IL', coords: { lat: 41.8781, lng: -87.6298 } },
+  { name: 'New York, NY', coords: { lat: 40.7128, lng: -74.0060 } },
+  { name: 'Houston, TX', coords: { lat: 29.7604, lng: -95.3698 } },
+] as const
+
 const LEVEL_ORDER: Record<string, number> = { Pro: 0, NCAA: 1, HS: 2 }
 const LEVEL_LABELS: Record<string, string> = { Pro: 'Pro', NCAA: 'College', HS: 'High School' }
 const LEVEL_COLORS: Record<string, string> = {
@@ -242,6 +257,8 @@ export default function TripPlanner() {
   const useHeartbeatBoost = useTripStore((s) => s.useHeartbeatBoost)
   const setUseHeartbeatBoost = useTripStore((s) => s.setUseHeartbeatBoost)
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
+  const homeBaseName = useTripStore((s) => s.homeBaseName)
+  const setHomeBase = useTripStore((s) => s.setHomeBase)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const clearTrips = useTripStore((s) => s.clearTrips)
   const proGames = useScheduleStore((s) => s.proGames)
@@ -581,7 +598,9 @@ export default function TripPlanner() {
               className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
             />
             <p className="mt-0.5 text-[9px] text-text-dim/50" title="Drive times are rough estimates — actual times depend on traffic and route">
-              {maxDriveMinutes <= 150 ? 'Covers central FL' : maxDriveMinutes <= 210 ? 'Reaches Tampa, Jacksonville, Port St. Lucie' : maxDriveMinutes <= 270 ? 'Reaches Tallahassee, South FL' : 'Reaches most of FL + southern GA'}
+              {homeBaseName === 'Orlando, FL'
+                ? (maxDriveMinutes <= 150 ? 'Covers central FL' : maxDriveMinutes <= 210 ? 'Reaches Tampa, Jacksonville, Port St. Lucie' : maxDriveMinutes <= 270 ? 'Reaches Tallahassee, South FL' : 'Reaches most of FL + southern GA')
+                : `~${Math.round(maxDriveMinutes / 60)}h radius from ${homeBaseName}`}
               {' · estimates only'}
             </p>
           </div>
@@ -601,6 +620,22 @@ export default function TripPlanner() {
             <p className="mt-0.5 text-[9px] text-text-dim/50" title="Total travel time including airport time and flight. Options beyond this limit won't be shown.">
               {maxFlightHours <= 4 ? 'Southeast US only' : maxFlightHours <= 6 ? 'Reaches Midwest, Northeast' : maxFlightHours <= 8 ? 'Most domestic destinations' : maxFlightHours <= 10 ? 'Coast-to-coast + Hawaii' : 'All domestic + nearby international'}
             </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-text-dim">Starting From</label>
+            <select
+              value={homeBaseName}
+              onChange={(e) => {
+                const loc = STARTING_LOCATIONS.find((l) => l.name === e.target.value)
+                if (loc) setHomeBase({ lat: loc.coords.lat, lng: loc.coords.lng }, loc.name)
+              }}
+              title="Where are you traveling from? This changes which trips are drivable and which require a flight."
+              className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
+            >
+              {STARTING_LOCATIONS.map((loc) => (
+                <option key={loc.name} value={loc.name}>{loc.name}</option>
+              ))}
+            </select>
           </div>
           {startDate > endDate && (
             <p className="self-center text-xs text-accent-red">End date is before start date</p>
@@ -780,7 +815,7 @@ export default function TripPlanner() {
                           <>Within driving range. <span className="text-accent-green font-medium">See him on Trip #{tripNum}.</span></>
                         )}
                         {r.status === 'fly-in-only' && tripNum > 0 && (
-                          <>Too far to drive from Orlando — requires a flight. <span className="text-accent-blue font-medium">See Trip #{tripNum}.</span></>
+                          <>Too far to drive from {homeBaseName} — requires a flight. <span className="text-accent-blue font-medium">See Trip #{tripNum}.</span></>
                         )}
                         {(r.status === 'included' || r.status === 'separate-trip' || r.status === 'fly-in-only') && tripNum === 0 && (
                           <span className="text-accent-orange">Has games but not in a numbered trip yet.</span>
@@ -920,7 +955,7 @@ export default function TripPlanner() {
           {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length > 0 && (
             <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-4 py-3">
               <p className="text-sm text-accent-orange">
-                No road trips possible — all players with games are beyond the {Math.floor(maxDriveMinutes / 60)}h drive radius from Orlando.
+                No road trips possible — all players with games are beyond the {Math.floor(maxDriveMinutes / 60)}h drive radius from {homeBaseName}.
                 See fly-in options below, or increase the max drive time.
               </p>
             </div>
@@ -1054,7 +1089,7 @@ export default function TripPlanner() {
                 <span className="text-[11px] text-text-dim">Show:</span>
                 {([
                   { key: 'all', label: 'All', tip: 'Show all trip options — drives and flights.' },
-                  { key: 'drive', label: '🚗 Drives', tip: 'Only show trips you can drive to from Orlando.' },
+                  { key: 'drive', label: '🚗 Drives', tip: `Only show trips you can drive to from ${homeBaseName}.` },
                   { key: 'fly', label: '✈️ Flights', tip: 'Only show trips that require a flight.' },
                   { key: 'multi', label: '👥 2+ Players', tip: 'Only show trips where you can see 2 or more players.' },
                   ...(anchorPlayerNames.length > 0 ? [{ key: 'anchor' as const, label: '📍 Near destination', tip: 'Only show trips near your selected destination.' }] : []),
@@ -1675,6 +1710,7 @@ function FlyInCard({
   defaultExpanded?: boolean
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded ?? false)
+  const flyInHomeBaseName = useTripStore((s) => s.homeBaseName)
 
   // Derive org label — prefer teamLabel from trip engine (accurate per-team grouping)
   const firstPlayer = players.find((p) => visit.playerNames.includes(p.playerName))
@@ -1804,7 +1840,7 @@ function FlyInCard({
                       </span>
                     )}
                   </div>
-                  {i === 0 && <span className="text-[10px] text-text-dim">Fly from Orlando · ~{Math.round(visit.estimatedTravelHours - 3)}h flight</span>}
+                  {i === 0 && <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{Math.round(visit.estimatedTravelHours - 3)}h flight</span>}
                 </div>
                 <div className="ml-4">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -1880,7 +1916,7 @@ function FlyInCard({
                 <span className="text-xs font-bold text-purple-400">Day 1</span>
                 <span className="text-xs text-text-dim">{formatDate(bestDay)}{isTue ? ' (best day)' : ''}</span>
               </div>
-              <span className="text-[10px] text-text-dim">Fly from Orlando · ~{Math.round(visit.estimatedTravelHours - 3)}h flight</span>
+              <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{Math.round(visit.estimatedTravelHours - 3)}h flight</span>
             </div>
 
             <div className="ml-4 space-y-2">

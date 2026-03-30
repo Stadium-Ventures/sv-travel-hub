@@ -13,6 +13,7 @@ export interface WorkerParams {
   urgencyRecord?: Record<string, number>
   maxFlightHours: number
   playerTeamAssignments?: Record<string, { teamId: number; sportId: number; teamName: string }>
+  homeBase?: { lat: number; lng: number }
 }
 
 export type WorkerMessage =
@@ -43,6 +44,7 @@ self.onmessage = async (e: MessageEvent<WorkerParams>) => {
       urgencyMap,
       params.maxFlightHours,
       params.playerTeamAssignments,
+      params.homeBase,
     )
     self.postMessage({ type: 'result', plan } satisfies WorkerMessage)
   } catch (err) {

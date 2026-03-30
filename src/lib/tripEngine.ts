@@ -10,7 +10,8 @@ import { resolveMaxPrepsSlug } from './maxpreps'
 import { VENUE_PROXIMITY } from '../data/venueProximity'
 
 // Constants
-const HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
+const DEFAULT_HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
+const HOME_BASE = DEFAULT_HOME_BASE // Legacy alias — prefer passing homeBase explicitly
 const MAX_DRIVE_MINUTES = 240 // 4 hours one-way — a 4h drive beats a flight + hotel
 const MAX_INTER_VENUE_MINUTES = 120 // max detour between stops on multi-venue trip
 const MAX_TOTAL_DRIVE_MINUTES = 600 // 10h total round-trip driving cap for a 3-day trip
@@ -445,11 +446,15 @@ function coordKey(c: Coordinates): string {
 }
 
 // Look up home-to-venue drive minutes from pre-computed data, fallback to Haversine
-function lookupHomeMinutes(coords: Coordinates): number {
-  const key = coordKey(coords)
-  const entry = VENUE_PROXIMITY[key]
-  if (entry) return entry.homeMinutes
-  return estimateDriveMinutes(HOME_BASE, coords)
+// Pre-computed homeMinutes in VENUE_PROXIMITY are relative to Orlando — only use when homeBase matches
+function lookupHomeMinutes(coords: Coordinates, homeBase: Coordinates = DEFAULT_HOME_BASE): number {
+  const isDefaultBase = Math.abs(homeBase.lat - DEFAULT_HOME_BASE.lat) < 0.01 && Math.abs(homeBase.lng - DEFAULT_HOME_BASE.lng) < 0.01
+  if (isDefaultBase) {
+    const key = coordKey(coords)
+    const entry = VENUE_PROXIMITY[key]
+    if (entry) return entry.homeMinutes
+  }
+  return estimateDriveMinutes(homeBase, coords)
 }
 
 // Check if two venues are within maxMinutes drive using pre-computed data
@@ -485,6 +490,7 @@ export async function generateTrips(
   urgencyMap?: UrgencyMap,
   maxFlightHours: number = 4,
   playerTeamAssignments?: Record<string, { teamId: number; sportId: number; teamName: string }>,
+  homeBase: Coordinates = DEFAULT_HOME_BASE,
 ): Promise<TripPlan> {
   onProgress?.('Preparing', 'Filtering eligible players...')
 
@@ -557,7 +563,7 @@ export async function generateTrips(
     if (g.venue.coords.lat === 0 && g.venue.coords.lng === 0) continue
     const key = coordKey(g.venue.coords)
     if (!homeToVenue.has(key)) {
-      homeToVenue.set(key, lookupHomeMinutes(g.venue.coords))
+      homeToVenue.set(key, lookupHomeMinutes(g.venue.coords, homeBase))
     }
   }
 
@@ -899,7 +905,7 @@ export async function generateTrips(
           if (hasGames) {
             const playerFlyInGames = eligibleGames.filter(g => g.playerNames.includes(pName) && g.venue.coords.lat !== 0)
             const minTravelHours = playerFlyInGames.length > 0
-              ? Math.min(...playerFlyInGames.map(g => estimateFlightHours(haversineKm(HOME_BASE, g.venue.coords))))
+              ? Math.min(...playerFlyInGames.map(g => estimateFlightHours(haversineKm(homeBase, g.venue.coords))))
               : Infinity
             const beyondFlight = minTravelHours > maxFlightHours
             if (beyondFlight) {
@@ -1104,7 +1110,7 @@ export async function generateTrips(
       }
       if (game.sourceUrl && !existing.sourceUrl) existing.sourceUrl = game.sourceUrl
     } else {
-      const distKm = haversineKm(HOME_BASE, game.venue.coords)
+      const distKm = haversineKm(homeBase, game.venue.coords)
       const gameTimeByDate = new Map<string, string>()
       if (game.time) gameTimeByDate.set(game.date, game.time)
       flyInWeekMap.set(key, {
@@ -1257,14 +1263,14 @@ export async function generateTrips(
       const centroidLng = stops.reduce((s, st) => s + st.venue.coords.lng, 0) / stops.length
 
       const hubCoords = { lat: centroidLat, lng: centroidLng }
-      const distFromOrlando = haversineKm(HOME_BASE, hubCoords)
+      const distFromHome = haversineKm(homeBase, hubCoords)
 
       flyInVisits.push({
         playerNames: comboPlayerNames,
         venue: stops[0]!.venue, // primary venue
         dates: stops.map(s => s.date),
-        distanceKm: Math.round(distFromOrlando),
-        estimatedTravelHours: estimateFlightHours(distFromOrlando),
+        distanceKm: Math.round(distFromHome),
+        estimatedTravelHours: estimateFlightHours(distFromHome),
         visitValue: comboBreakdown.finalScore,
         scoreBreakdown: comboBreakdown,
         source: stops[0]!.source,
@@ -1573,4 +1579,4 @@ export function analyzeBestWeeks(
   return weeks.slice(0, 5)
 }
 
-export { HOME_BASE, MAX_DRIVE_MINUTES, TIER_WEIGHTS }
+export { HOME_BASE, DEFAULT_HOME_BASE, MAX_DRIVE_MINUTES, TIER_WEIGHTS }
