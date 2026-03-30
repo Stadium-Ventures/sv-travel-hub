@@ -155,7 +155,14 @@ export const useTripStore = create<TripState>()(
     const customNcaaAliases = scheduleState.customNcaaAliases
 
     // Merge scheduled games with spring training + NCAA + HS visit opportunities
-    const stEvents = generateSpringTrainingEvents(players, startDate, endDate, customMlbAliases)
+    // Only generate ST events for Pro players who don't have real API games yet
+    const proPlayersWithRealGames = new Set(
+      scheduledGames.flatMap((g) => g.playerNames),
+    )
+    const stEvents = generateSpringTrainingEvents(
+      players.filter((p) => !proPlayersWithRealGames.has(p.playerName)),
+      startDate, endDate, customMlbAliases,
+    )
 
     // Use real D1Baseball NCAA schedules if available, otherwise fall back to synthetic
     const ncaaPlayersWithRealSchedules = new Set(

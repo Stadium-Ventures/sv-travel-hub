@@ -1232,13 +1232,13 @@ export const useScheduleStore = create<ScheduleState>()(
                 isHome: game.isHome,
                 venue: game.isHome
                   ? homeVenue
-                  : { name: `${game.opponent} (near ${homeVenue.name})`, coords: homeVenue.coords },
+                  : { name: `at ${game.opponent}`, coords: homeVenue.coords },
                 source: 'hs-lookup',
                 playerNames,
                 confidence: game.isHome ? 'high' : 'medium',
                 confidenceNote: game.isHome
                   ? 'Confirmed home game from schedule'
-                  : `Away game at ${game.opponent} (approximate location)`,
+                  : `Away game vs. ${game.opponent} — location estimated from home field area`,
                 sourceUrl: schedule.slug ? `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/` : undefined,
               })
             }

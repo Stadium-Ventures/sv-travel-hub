@@ -1566,15 +1566,6 @@ function FlyInCard({
 
   const milesDisplay = Math.round(visit.distanceKm * 0.621).toLocaleString()
 
-  // Tier counts
-  const tierCounts = { t1: 0, t2: 0, t3: 0 }
-  for (const name of visit.playerNames) {
-    const tier = playerMap.get(name)?.tier
-    if (tier === 1) tierCounts.t1++
-    else if (tier === 2) tierCounts.t2++
-    else if (tier === 3) tierCounts.t3++
-  }
-
   // Date formatting
   const firstDate = visit.dates[0]
   const lastDate = visit.dates[visit.dates.length - 1]
@@ -1638,12 +1629,11 @@ function FlyInCard({
             </h3>
           </div>
           <p className="mt-0.5 text-sm text-text-dim">
-            {dateLabel} · {visit.isCombo && visit.stops ? visit.stops.map(s => s.teamLabel || s.venue.name).join(' → ') : (orgLabel || visit.venue.name)} · {visit.playerNames.length} player{visit.playerNames.length !== 1 ? 's' : ''}
+            {dateLabel} · {visit.playerNames.join(', ')}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
-          {tierCounts.t1 > 0 && <span className="text-[11px] font-medium text-accent-red">{tierCounts.t1}× Must-see</span>}
-          {tierCounts.t2 > 0 && <span className="text-[11px] font-medium text-accent-orange">{tierCounts.t2}× High priority</span>}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="text-[11px] text-text-dim/50">{visit.playerNames.length} player{visit.playerNames.length !== 1 ? 's' : ''}</span>
         </div>
       </div>
 

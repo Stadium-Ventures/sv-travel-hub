@@ -285,14 +285,6 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
     for (const name of stop.players) allPlayers.add(name)
   }
 
-  const tierCounts = { t1: 0, t2: 0, t3: 0 }
-  for (const name of allPlayers) {
-    const tier = playerMap.get(name)?.tier
-    if (tier === 1) tierCounts.t1++
-    else if (tier === 2) tierCounts.t2++
-    else if (tier === 3) tierCounts.t3++
-  }
-
   // Compute total drive
   let totalDrive = trip.driveFromHomeMinutes
   for (const s of stops) totalDrive += s.driveFromPrev
@@ -365,15 +357,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {(tierCounts.t1 > 0 || tierCounts.t2 > 0 || tierCounts.t3 > 0) && (
-            <div className="flex items-center gap-1 rounded-lg bg-gray-950/60 px-2 py-1 text-[11px] font-medium">
-              {tierCounts.t1 > 0 && <span className="text-accent-red">{tierCounts.t1}x {TIER_LABELS[1]}</span>}
-              {tierCounts.t1 > 0 && (tierCounts.t2 > 0 || tierCounts.t3 > 0) && <span className="text-text-dim/30">·</span>}
-              {tierCounts.t2 > 0 && <span className="text-accent-orange">{tierCounts.t2}x {TIER_LABELS[2]}</span>}
-              {tierCounts.t2 > 0 && tierCounts.t3 > 0 && <span className="text-text-dim/30">·</span>}
-              {tierCounts.t3 > 0 && <span className="text-yellow-400">{tierCounts.t3}x {TIER_LABELS[3]}</span>}
-            </div>
-          )}
+          <span className="text-[11px] text-text-dim/50">{allPlayers.size} player{allPlayers.size !== 1 ? 's' : ''}</span>
         </div>
       </div>
 
@@ -491,13 +475,13 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                               )}
                               {stop.awayTeam === 'Spring Training' && (() => {
                                 const gameDate = new Date(stop.dates[0] + 'T12:00:00Z')
-                                const marchEnd = new Date(gameDate.getUTCFullYear(), 2, 28) // Mar 28
-                                return gameDate >= marchEnd ? (
+                                const marchCutoff = new Date(gameDate.getUTCFullYear(), 2, 22) // Mar 22
+                                return gameDate >= marchCutoff ? (
                                   <span
                                     className="rounded bg-accent-red/10 px-1.5 py-0.5 text-[10px] text-accent-red cursor-help"
-                                    title="Spring training is almost over. This player may be reassigned to a minor league affiliate soon — verify their location before booking travel."
+                                    title="Spring training is ending. This player will be reassigned to a minor league affiliate soon — verify their current location before booking travel."
                                   >
-                                    ST ends soon — verify
+                                    ST ending — verify location
                                   </span>
                                 ) : null
                               })()}
