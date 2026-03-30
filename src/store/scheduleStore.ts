@@ -1134,8 +1134,6 @@ export const useScheduleStore = create<ScheduleState>()(
             console.warn('[HS] Schools not in CSV, using bundled fallback:', missingFromCsv)
           }
 
-          set({ hsProgress: { completed: schoolToPlayers.size, total: schoolToPlayers.size } })
-
           // Convert MaxPreps games to GameEvents
           const newGames: GameEvent[] = []
           const schedulesObj: Record<string, MaxPrepsSchedule> = merge ? { ...prevState.hsSchedules } : {}
@@ -1220,9 +1218,6 @@ export const useScheduleStore = create<ScheduleState>()(
               }
             }
 
-            // Collect away games for async geocoding
-            const hsAwayGames: Array<{ game: typeof schedule.games[number]; schoolOrg: string }> = []
-
             for (const game of schedule.games) {
               const d = new Date(game.date + 'T12:00:00Z')
               const [schoolOrg] = schoolKey.split('|')
@@ -1244,52 +1239,24 @@ export const useScheduleStore = create<ScheduleState>()(
                   sourceUrl: schedule.slug ? `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/` : undefined,
                 })
               } else {
-                // Queue away game for geocoding
-                hsAwayGames.push({ game, schoolOrg: schoolOrg || schoolKey })
-              }
-            }
-
-            // Geocode away game venues
-            for (const { game, schoolOrg } of hsAwayGames) {
-              try {
-                const params = new URLSearchParams({
-                  q: `${game.opponent} high school baseball field`,
-                  format: 'json',
-                  limit: '1',
-                  countrycodes: 'us',
+                // Away games: use home venue as approximate location (same region)
+                // This avoids slow runtime Nominatim geocoding (~1.2s per game × 270+ games)
+                newGames.push({
+                  id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-away-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
+                  date: game.date,
+                  dayOfWeek: d.getUTCDay(),
+                  time: game.time ?? game.date + 'T16:00:00Z',
+                  homeTeam: game.opponent,
+                  awayTeam: schedule.teamName || schoolOrg || schoolKey,
+                  isHome: false,
+                  venue: { name: `${game.opponent} (near ${homeVenue.name})`, coords: homeVenue.coords },
+                  source: 'hs-lookup',
+                  playerNames,
+                  confidence: 'medium',
+                  confidenceNote: `Away game at ${game.opponent} (approximate location)`,
+                  sourceUrl: schedule.slug ? `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/` : undefined,
                 })
-                const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
-                  headers: { 'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures internal tool)' },
-                })
-                if (res.ok) {
-                  const results = await res.json()
-                  if (results.length > 0) {
-                    const coords = { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) }
-                    if (coords.lat >= 24.5 && coords.lat <= 49.5 && coords.lng >= -125.0 && coords.lng <= -66.5) {
-                      const d = new Date(game.date + 'T12:00:00Z')
-                      newGames.push({
-                        id: `hs-mp-${schoolKey.toLowerCase().replace(/[|]/g, '-')}-${game.date}-away-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
-                        date: game.date,
-                        dayOfWeek: d.getUTCDay(),
-                        time: game.time ?? game.date + 'T16:00:00Z',
-                        homeTeam: game.opponent,
-                        awayTeam: schedule.teamName || schoolOrg,
-                        isHome: false,
-                        venue: { name: `${game.opponent} Field`, coords },
-                        source: 'hs-lookup',
-                        playerNames,
-                        confidence: 'medium',
-                        confidenceNote: `Away game at ${game.opponent} (venue geocoded)`,
-                        sourceUrl: schedule.slug ? `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/` : undefined,
-                      })
-                    }
-                  }
-                }
-              } catch {
-                // Skip if geocoding fails
               }
-              // Rate limit for Nominatim
-              await new Promise(r => setTimeout(r, 1200))
             }
           }
 
