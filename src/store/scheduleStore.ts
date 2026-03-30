@@ -10,7 +10,6 @@ import type { D1Schedule } from '../lib/d1baseball'
 import { fetchAllD1Schedules, resolveOpponentVenue, resolveOpponentVenueAsync } from '../lib/d1baseball'
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import type { MaxPrepsSchedule } from '../lib/maxpreps'
-import { fetchAllMaxPrepsSchedules } from '../lib/maxpreps'
 import { fetchScheduleCsv } from '../lib/scheduleCsv'
 import { useRosterStore } from './rosterStore'
 import { useVenueStore } from './venueStore'
@@ -1052,7 +1051,7 @@ export const useScheduleStore = create<ScheduleState>()(
           })
         }
       },
-      fetchHsSchedules: async (playerOrgs, { merge = false, forceRefresh = false } = {}) => {
+      fetchHsSchedules: async (playerOrgs, { merge = false, forceRefresh: _forceRefresh = false } = {}) => {
         console.log(`[HS-ENTRY] fetchHsSchedules called with ${playerOrgs.length} players, hsLoading=${get().hsLoading}`)
         if (get().hsLoading) { console.log('[HS-ENTRY] SKIPPED — already loading'); return }
 
