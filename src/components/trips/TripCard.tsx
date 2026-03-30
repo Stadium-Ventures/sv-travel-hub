@@ -356,8 +356,10 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             }).join(', ')} · ~{formatDriveTime(trip.driveFromHomeMinutes)} from Orlando
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <span className="text-[11px] text-text-dim/50">{allPlayers.size} player{allPlayers.size !== 1 ? 's' : ''}</span>
+        <div className="flex shrink-0 items-center gap-2 text-[11px] text-text-dim/60">
+          <span>{dayCount} day{dayCount !== 1 ? 's' : ''}</span>
+          <span className="text-text-dim/20">·</span>
+          <span>~{formatDriveTime(trip.driveFromHomeMinutes)} drive</span>
         </div>
       </div>
 
@@ -398,11 +400,9 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
 
             if (items.length === 0) return null
             return (
-              <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2 space-y-1">
+              <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2 space-y-2">
                 {items.map((item, i) => (
-                  <p key={i} className="text-[11px] text-accent-orange cursor-help" title={item.detail}>
-                    ⚠ {item.summary} <span className="text-accent-orange/40 text-[9px]">(hover for details)</span>
-                  </p>
+                  <ExpandableWarning key={i} summary={item.summary} detail={item.detail} />
                 ))}
               </div>
             )
@@ -538,6 +538,25 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
 
 
         </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Expandable warning row ── click to show/hide details ── */
+function ExpandableWarning({ summary, detail }: { summary: string; detail: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+        className="flex w-full items-start gap-1 text-left text-[11px] text-accent-orange"
+      >
+        <span className="shrink-0">{open ? '▾' : '▸'}</span>
+        <span>⚠ {summary}</span>
+      </button>
+      {open && (
+        <p className="mt-1 ml-4 text-[11px] text-text-dim leading-relaxed">{detail}</p>
       )}
     </div>
   )

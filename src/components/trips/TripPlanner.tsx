@@ -796,7 +796,6 @@ export default function TripPlanner() {
 
           {/* Coverage stats */}
           {(() => {
-            const beyondPlayers = tripPlan.unvisitablePlayers.filter((e) => e.reason.startsWith('Beyond max flight'))
             // Collect all player names that appear in road trips
             const roadTripPlayerNames = [...new Set(tripPlan.trips.flatMap((t) => [
               ...t.anchorGame.playerNames,
@@ -808,23 +807,54 @@ export default function TripPlanner() {
             const allTripPlayerNames = [...new Set([...roadTripPlayerNames, ...flyInPlayerNames])]
             const totalEligible = players.length
 
+            const notCoveredCount = Math.max(0, totalEligible - allTripPlayerNames.length)
+
+            // Build detailed breakdown of why players aren't covered
+            const coveredSet = new Set(allTripPlayerNames)
+            const uncoveredPlayers = players.filter((p) => !coveredSet.has(p.playerName))
+            const unvisitableMap = new Map(tripPlan.unvisitablePlayers.map((u) => [u.name, u.reason]))
+
+            // Group by reason
+            const beyondFlight = uncoveredPlayers.filter((p) => unvisitableMap.get(p.playerName)?.startsWith('Beyond max flight'))
+            const noGamesInRange = uncoveredPlayers.filter((p) => {
+              const r = unvisitableMap.get(p.playerName)
+              return r && (r.includes('No games in date range') || r.includes('season may be over'))
+            })
+            const noSchedule = uncoveredPlayers.filter((p) => {
+              const r = unvisitableMap.get(p.playerName)
+              return r && (r.includes('No schedule') || r.includes('No venue') || r.includes('geocoding'))
+            })
+            const otherUncovered = uncoveredPlayers.filter((p) =>
+              !beyondFlight.includes(p) && !noGamesInRange.includes(p) && !noSchedule.includes(p)
+            )
+
             return (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <StatCard label="Total Trips" value={tripPlan.trips.length + Math.min(tripPlan.flyInVisits.length, flyInLimit)} scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
               <div title={`${allTripPlayerNames.length} of your ${totalEligible} players appear in at least one trip option.`}>
                 <StatCard label="Players in Trips" value={allTripPlayerNames.length} accent="blue" scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
               </div>
-              <div title={`${Math.max(0, totalEligible - allTripPlayerNames.length)} players don't appear in any trip option yet. Try extending your date range or increasing the drive/flight sliders to find more options.`}>
-                <StatCard
-                  label="Not Covered"
-                  value={Math.max(0, totalEligible - allTripPlayerNames.length)}
-                  accent={totalEligible - allTripPlayerNames.length <= 2 ? 'green' : 'orange'}
-                />
-              </div>
-              {beyondPlayers.length > 0 && (
-                <StatCard label="Beyond Flight" value={beyondPlayers.length} accent="orange" scrollTo="section-beyond-flight" hoverNames={beyondPlayers.map((e) => e.name)} />
-              )}
+              <StatCard
+                label="Not Covered"
+                value={notCoveredCount}
+                accent={notCoveredCount <= 2 ? 'green' : 'orange'}
+                hoverNames={uncoveredPlayers.map((p) => p.playerName)}
+              />
             </div>
+
+            {/* Not Covered explainer — expandable */}
+            {notCoveredCount > 0 && (
+              <NotCoveredExplainer
+                beyondFlight={beyondFlight}
+                noGamesInRange={noGamesInRange}
+                noSchedule={noSchedule}
+                otherUncovered={otherUncovered}
+                unvisitableMap={unvisitableMap}
+                onPlayerClick={setSelectedPlayer}
+              />
+            )}
+            </>
             )
           })()}
 
@@ -1634,8 +1664,10 @@ function FlyInCard({
             {dateLabel} · {visit.playerNames.join(', ')}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <span className="text-[11px] text-text-dim/50">{visit.playerNames.length} player{visit.playerNames.length !== 1 ? 's' : ''}</span>
+        <div className="flex shrink-0 items-center gap-2 text-[11px] text-text-dim/60">
+          <span>{visit.dates.length + 1} days</span>
+          <span className="text-text-dim/20">·</span>
+          <span>~{Math.round(visit.estimatedTravelHours - 3)}h flight</span>
         </div>
       </div>
 
@@ -1845,7 +1877,97 @@ const APP_TIPS = [
   'Estimated pro assignments auto-correct once official rosters are published — just hit Check Assignments again.',
   'The "Prioritize overdue players" checkbox boosts players who haven\'t been visited recently.',
   'Filter trips by Drives or Flights to focus on one travel type at a time.',
+  'Click the "Not Covered" section to see exactly which players are missing and why.',
 ]
+
+/* ── Not Covered Explainer ── shows who isn't in any trip and why ── */
+function NotCoveredExplainer({
+  beyondFlight, noGamesInRange, noSchedule, otherUncovered, unvisitableMap, onPlayerClick,
+}: {
+  beyondFlight: RosterPlayer[]
+  noGamesInRange: RosterPlayer[]
+  noSchedule: RosterPlayer[]
+  otherUncovered: RosterPlayer[]
+  unvisitableMap: Map<string, string>
+  onPlayerClick: (name: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const total = beyondFlight.length + noGamesInRange.length + noSchedule.length + otherUncovered.length
+  if (total === 0) return null
+
+  return (
+    <div className="rounded-xl border border-accent-orange/20 bg-accent-orange/5">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between px-4 py-2.5 text-left"
+      >
+        <span className="text-xs font-medium text-accent-orange">
+          {expanded ? '▾' : '▸'} {total} player{total !== 1 ? 's' : ''} not in any trip — why?
+        </span>
+        <span className="text-[10px] text-accent-orange/50">{expanded ? 'hide' : 'show'}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-accent-orange/10 px-4 py-3 space-y-3">
+          {beyondFlight.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium text-accent-orange mb-1">Too far to reach ({beyondFlight.length})</p>
+              <p className="text-[10px] text-text-dim/60 mb-1.5">These players are beyond your max flight time setting. Increase the flight slider to include them.</p>
+              <div className="flex flex-wrap gap-1">
+                {beyondFlight.map((p) => (
+                  <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
+                    {p.playerName} <span className="text-text-dim/40">({p.org})</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {noGamesInRange.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium text-accent-orange mb-1">No games in your date range ({noGamesInRange.length})</p>
+              <p className="text-[10px] text-text-dim/60 mb-1.5">These players have schedules, but no games fall within your selected dates. Try extending your end date.</p>
+              <div className="flex flex-wrap gap-1">
+                {noGamesInRange.map((p) => {
+                  const reason = unvisitableMap.get(p.playerName)
+                  return (
+                    <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
+                      {p.playerName} <span className="text-text-dim/40">({reason?.includes('season may be over') ? 'season may be over' : p.org})</span>
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          {noSchedule.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium text-accent-orange mb-1">No schedule data ({noSchedule.length})</p>
+              <p className="text-[10px] text-text-dim/60 mb-1.5">We couldn't find or load a schedule for these players. Their team may not be recognized, or data hasn't been published yet.</p>
+              <div className="flex flex-wrap gap-1">
+                {noSchedule.map((p) => (
+                  <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
+                    {p.playerName} <span className="text-text-dim/40">({p.org})</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {otherUncovered.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium text-text-dim mb-1">Not included in a trip ({otherUncovered.length})</p>
+              <p className="text-[10px] text-text-dim/60 mb-1.5">These players have games available, but the engine didn't include them in a trip — usually because they overlap with higher-priority players or their games are on Sundays.</p>
+              <div className="flex flex-wrap gap-1">
+                {otherUncovered.map((p) => (
+                  <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
+                    {p.playerName} <span className="text-text-dim/40">({p.org})</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function DidYouKnow() {
   const [index, setIndex] = useState(() => Math.floor(Math.random() * APP_TIPS.length))
