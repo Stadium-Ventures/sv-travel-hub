@@ -1052,7 +1052,8 @@ export const useScheduleStore = create<ScheduleState>()(
         }
       },
       fetchHsSchedules: async (playerOrgs, { merge = false, forceRefresh = false } = {}) => {
-        if (get().hsLoading) return
+        console.log(`[HS-ENTRY] fetchHsSchedules called with ${playerOrgs.length} players, hsLoading=${get().hsLoading}`)
+        if (get().hsLoading) { console.log('[HS-ENTRY] SKIPPED — already loading'); return }
 
         // Group players by org|state key — include all schools (slug discovery
         // in fetchMaxPrepsSchedule will attempt to find unknown slugs automatically)
@@ -1141,9 +1142,11 @@ export const useScheduleStore = create<ScheduleState>()(
               }
               if (hc) {
                 homeVenue = { name: hc.name, coords: { lat: hc.lat, lng: hc.lng } }
+                console.log(`[HS-VENUE] ${schoolKey}: using hardcoded coords [${hc.lat}, ${hc.lng}]`)
               }
             }
 
+            console.log(`[HS-VENUE] ${schoolKey}: venue=${homeVenue ? homeVenue.name : 'NONE'}, games=${schedule.games.length}`)
             const normalizedSchoolOrg = (schoolOrg ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
             if (!homeVenue) for (const [vKey, v] of Object.entries(venueState)) {
               if (v.source === 'hs-geocoded') {
@@ -1182,6 +1185,7 @@ export const useScheduleStore = create<ScheduleState>()(
                 }
               }
               if (!homeVenue) {
+                console.warn(`[HS-VENUE] SKIPPING ${schoolKey} — no venue found (bundled: ${!!schedule.homeVenue}, hardcoded: ${!!HS_VENUE_COORDS[schoolKey]})`)
                 continue // No venue found — truly unresolvable
               }
             }
