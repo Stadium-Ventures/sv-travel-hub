@@ -271,6 +271,8 @@ export default function TripPlanner() {
 
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
   const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly' | 'multi' | 'anchor'>('all')
+  const [tripLengthFilter, setTripLengthFilter] = useState<'all' | '1' | '2' | '3'>('all')
+  const [tierFilter, setTierFilter] = useState<'all' | 'priority'>('all')
   const [anchorPlayerNames, setAnchorPlayerNames] = useState<string[]>([])
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
 
@@ -971,19 +973,67 @@ export default function TripPlanner() {
               displayIndex: i + 1,
             }))
 
+            // Apply all filters (transport type, trip length, tier)
+            const filtered = numbered.filter((item) => {
+              // Transport type filter
+              if (tripFilter === 'drive' && item.type !== 'road') return false
+              if (tripFilter === 'fly' && item.type !== 'flyin') return false
+              if (tripFilter === 'multi') {
+                if (item.type === 'road') {
+                  const playerSet = new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)])
+                  if (playerSet.size < 2) return false
+                } else {
+                  if (item.visit.playerNames.length < 2) return false
+                }
+              }
+              if (tripFilter === 'anchor' && anchorPlayerNames.length > 0) {
+                if (item.type === 'road') {
+                  const tripPlayers = [...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)]
+                  if (!tripPlayers.some(n => anchorPlayerNames.includes(n))) return false
+                } else {
+                  if (!item.visit.playerNames.some(n => anchorPlayerNames.includes(n))) return false
+                }
+              }
+
+              // Trip length filter
+              if (tripLengthFilter !== 'all') {
+                const targetDays = Number(tripLengthFilter)
+                const actualDays = item.type === 'road'
+                  ? item.trip.suggestedDays.length
+                  : item.visit.dates.length
+                if (actualDays !== targetDays) return false
+              }
+
+              // Tier filter — must have at least one T1 or T2 player
+              if (tierFilter === 'priority') {
+                const names = item.type === 'road'
+                  ? [...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)]
+                  : item.visit.playerNames
+                const hasPriority = names.some(n => {
+                  const tier = playerMap.get(n)?.tier
+                  return tier === 1 || tier === 2
+                })
+                if (!hasPriority) return false
+              }
+
+              return true
+            })
+
             return (
             <div id="section-road-trips">
               <div className="mb-3">
                 <h3 className="text-sm font-semibold text-text">
                   Your Trips
                   <span className="ml-2 text-xs font-normal text-text-dim">
-                    {unified.length} trip options
+                    {filtered.length === unified.length
+                      ? `${unified.length} trip options`
+                      : `${filtered.length} of ${unified.length} trips`}
                   </span>
                 </h3>
               </div>
 
               {/* Compact toolbar */}
-              <div className="sticky top-0 z-10 -mx-5 mb-3 flex items-center gap-3 rounded-b-lg bg-surface px-5 pb-2 pt-2 border-b border-border/30">
+              <div className="sticky top-0 z-10 -mx-5 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-b-lg bg-surface px-5 pb-2 pt-2 border-b border-border/30">
                 <span className="text-[11px] text-text-dim">Sort:</span>
                 {([
                   { key: 'score', label: 'Best', tip: 'Sort by our recommendation — factors in player tier, travel efficiency, and how many players you can see per trip.' },
@@ -1020,31 +1070,46 @@ export default function TripPlanner() {
                     {label}
                   </button>
                 ))}
+                <span className="mx-1 text-text-dim/20">|</span>
+                <span className="text-[11px] text-text-dim">Days:</span>
+                {([
+                  { key: 'all', label: 'Any', tip: 'Show trips of any length.' },
+                  { key: '1', label: '1-day', tip: 'Only show day trips — no overnight stay needed.' },
+                  { key: '2', label: '2-day', tip: 'Only show 2-day trips — one overnight stay.' },
+                  { key: '3', label: '3-day', tip: 'Only show 3-day trips — the maximum trip length.' },
+                ] as const).map(({ key, label, tip }) => (
+                  <button
+                    key={key}
+                    onClick={() => setTripLengthFilter(key)}
+                    title={tip}
+                    className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                      tripLengthFilter === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <span className="mx-1 text-text-dim/20">|</span>
+                <span className="text-[11px] text-text-dim">Tier:</span>
+                {([
+                  { key: 'all', label: 'Any', tip: 'Show trips with players of any tier.' },
+                  { key: 'priority', label: '⭐ Must-see', tip: 'Only show trips with at least one must-see or high-priority player (Tier 1 or 2).' },
+                ] as const).map(({ key, label, tip }) => (
+                  <button
+                    key={key}
+                    onClick={() => setTierFilter(key)}
+                    title={tip}
+                    className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                      tierFilter === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
 
               <div className="space-y-4">
-                {numbered.filter((item) => {
-                  if (tripFilter === 'drive') return item.type === 'road'
-                  if (tripFilter === 'fly') return item.type === 'flyin'
-                  if (tripFilter === 'multi') {
-                    if (item.type === 'road') {
-                      const playerSet = new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)])
-                      return playerSet.size >= 2
-                    } else {
-                      return item.visit.playerNames.length >= 2
-                    }
-                  }
-                  if (tripFilter === 'anchor' && anchorPlayerNames.length > 0) {
-                    // Show trips that include any player near the anchor destination
-                    if (item.type === 'road') {
-                      const tripPlayers = [...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)]
-                      return tripPlayers.some(n => anchorPlayerNames.includes(n))
-                    } else {
-                      return item.visit.playerNames.some(n => anchorPlayerNames.includes(n))
-                    }
-                  }
-                  return true
-                }).map((item, i) => {
+                {filtered.map((item, i) => {
                   if (item.type === 'road') {
                     return (
                       <TripCard
@@ -1075,6 +1140,11 @@ export default function TripPlanner() {
                 })}
                 {unified.length === 0 && (
                   <p className="py-4 text-center text-sm text-text-dim">No trips generated for the selected date range.</p>
+                )}
+                {unified.length > 0 && filtered.length === 0 && (
+                  <p className="py-4 text-center text-sm text-text-dim">
+                    No trips match these filters. Try loosening the Days or Tier filter.
+                  </p>
                 )}
               </div>
             </div>
