@@ -473,9 +473,19 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                               <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${ctx.color}`}>
                                 {ctx.label}
                               </span>
-                              {gameTime && <span className="text-[10px] text-text-dim/60">{gameTime}</span>}
+                              {gameTime && (
+                                <span
+                                  className={`text-[10px] text-text-dim/60 ${gameTime === 'TBD' ? 'cursor-help' : ''}`}
+                                  title={gameTime === 'TBD' ? 'Game time hasn\'t been posted yet. Check the team schedule closer to game day for the start time.' : undefined}
+                                >{gameTime}</span>
+                              )}
                               {stop.confidence && stop.confidence !== 'high' && (
-                                <span className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-[10px] text-accent-orange">
+                                <span
+                                  className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-[10px] text-accent-orange cursor-help"
+                                  title={stop.confidence === 'medium'
+                                    ? 'Location is based on the team schedule but not 100% confirmed. Click "Verify" to double-check.'
+                                    : 'We\'re not sure about this game\'s location — the schedule may have changed. Click "Verify" to confirm before planning around it.'}
+                                >
                                   {stop.confidence === 'medium' ? 'Likely' : 'Unconfirmed'}
                                 </span>
                               )}
@@ -483,14 +493,18 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                                 const gameDate = new Date(stop.dates[0] + 'T12:00:00Z')
                                 const marchEnd = new Date(gameDate.getUTCFullYear(), 2, 28) // Mar 28
                                 return gameDate >= marchEnd ? (
-                                  <span className="rounded bg-accent-red/10 px-1.5 py-0.5 text-[10px] text-accent-red">
+                                  <span
+                                    className="rounded bg-accent-red/10 px-1.5 py-0.5 text-[10px] text-accent-red cursor-help"
+                                    title="Spring training is almost over. This player may be reassigned to a minor league affiliate soon — verify their location before booking travel."
+                                  >
                                     ST ends soon — verify
                                   </span>
                                 ) : null
                               })()}
                               {stop.sourceUrl && (
                                 <a href={stop.sourceUrl} target="_blank" rel="noopener noreferrer"
-                                  className="text-[10px] text-text-dim/50 hover:text-accent-blue">Verify ↗</a>
+                                  className="text-[10px] text-text-dim/50 hover:text-accent-blue"
+                                  title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
                               )}
                             </div>
                             {/* Players inline */}

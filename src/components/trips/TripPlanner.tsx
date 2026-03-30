@@ -709,6 +709,19 @@ export default function TripPlanner() {
         )}
       </div>
 
+      {/* Did you know? — rotating app tips */}
+      <DidYouKnow />
+
+      {/* First-time welcome — dismissible */}
+      {!tripPlan && !computing && <WelcomeHint />}
+
+      {/* Empty state coaching — when no trips generated yet */}
+      {!tripPlan && !computing && allSchedulesLoaded && (
+        <div className="rounded-xl border border-border/50 bg-surface/50 px-5 py-6 text-center">
+          <p className="text-sm text-text-dim">Set your date range above and hit <span className="font-medium text-accent-blue">Generate Trips</span> to see trip options.</p>
+        </div>
+      )}
+
       {/* Results */}
       {tripPlan && (
         <>
@@ -858,6 +871,16 @@ export default function TripPlanner() {
               <p className="text-sm text-accent-orange">
                 No road trips possible — all players with games are beyond the {Math.floor(maxDriveMinutes / 60)}h drive radius from Orlando.
                 See fly-in options below, or increase the max drive time.
+              </p>
+            </div>
+          )}
+
+          {/* Zero everything — no results at all */}
+          {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length === 0 && (
+            <div className="rounded-xl border border-border/50 bg-surface/50 px-5 py-6 text-center space-y-2">
+              <p className="text-sm font-medium text-text">No trip options found for this date range.</p>
+              <p className="text-xs text-text-dim">
+                Try extending your end date, increasing the drive or flight time sliders, or checking that schedules are loaded for your players.
               </p>
             </div>
           )}
@@ -1586,12 +1609,12 @@ function FlyInCard({
 
   // Source badge
   const sourceBadge = visit.source === 'mlb-api'
-    ? { label: visit.isHome ? 'Home Game' : 'Away Game', color: visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400' }
+    ? { label: visit.isHome ? 'Home Game' : 'Away Game', color: visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400', tip: visit.isHome ? 'Confirmed home game from the MLB/MiLB schedule.' : 'Away game — location is based on the opposing team\'s home venue.' }
     : (visit.source === 'hs-lookup' && visit.confidence === 'high')
-      ? { label: 'Home Game (MaxPreps)', color: 'bg-accent-green/15 text-accent-green' }
+      ? { label: 'Home Game (MaxPreps)', color: 'bg-accent-green/15 text-accent-green', tip: 'Confirmed home game from MaxPreps schedule.' }
       : (visit.source === 'ncaa-lookup' && visit.confidence === 'high')
-        ? { label: 'School Visit (D1Baseball)', color: 'bg-accent-green/15 text-accent-green' }
-        : { label: 'School Visit (est.)', color: 'bg-accent-orange/15 text-accent-orange' }
+        ? { label: 'School Visit (D1Baseball)', color: 'bg-accent-green/15 text-accent-green', tip: 'Confirmed from D1Baseball schedule.' }
+        : { label: 'School Visit (est.)', color: 'bg-accent-orange/15 text-accent-orange', tip: 'Location is estimated — we know the game exists but aren\'t sure of the exact venue. Click "Verify" to confirm.' }
 
   return (
     <div className={`rounded-xl border bg-surface p-5 ${isPriority ? 'border-purple-500/40' : 'border-border'}`}>
@@ -1685,7 +1708,7 @@ function FlyInCard({
                       ) : null
                     })()}
                     {stop.sourceUrl && (
-                      <a href={stop.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400">Verify ↗</a>
+                      <a href={stop.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400" title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
                     )}
                   </div>
                   {isTueDay && <p className="mt-0.5 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>}
@@ -1756,11 +1779,11 @@ function FlyInCard({
                   {orgLabel && orgLabel !== visit.venue.name && (
                     <span className="text-[11px] text-text-dim/60">{visit.venue.name}</span>
                   )}
-                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${sourceBadge.color}`}>
+                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium cursor-help ${sourceBadge.color}`} title={sourceBadge.tip}>
                     {sourceBadge.label}
                   </span>
                   {visit.sourceUrl && (
-                    <a href={visit.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400">Verify ↗</a>
+                    <a href={visit.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400" title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
                   )}
                 </div>
                 {isTue && (
@@ -1812,6 +1835,63 @@ function FlyInCard({
         </div>
         )
       })()}
+    </div>
+  )
+}
+
+/* ── Did You Know? ── rotating app tips ── */
+const APP_TIPS = [
+  'Click any player name to see their full schedule and upcoming games.',
+  'Use Priority Players to build trips around specific guys first.',
+  'Hover over yellow badges for details on what\'s estimated or unconfirmed.',
+  '"Not Covered" means no trip exists yet — try widening your date range or increasing the drive slider.',
+  'Combo fly-ins cluster nearby players so you can see more per trip.',
+  'The drive time slider controls which trips appear — slide right to see more options.',
+  'Sort trips by "Best" for our recommendation, or "Date" to plan chronologically.',
+  'Hover over the stat cards (Total Trips, Players in Trips) to see which players are included.',
+  '"Verify" links open the source schedule so you can double-check game details.',
+  'Estimated pro assignments auto-correct once official rosters are published — just hit Check Assignments again.',
+  'The "Prioritize overdue players" checkbox boosts players who haven\'t been visited recently.',
+  'Filter trips by Drives or Flights to focus on one travel type at a time.',
+]
+
+function DidYouKnow() {
+  const [index, setIndex] = useState(() => Math.floor(Math.random() * APP_TIPS.length))
+  useEffect(() => {
+    const id = setInterval(() => setIndex((i) => (i + 1) % APP_TIPS.length), 20_000)
+    return () => clearInterval(id)
+  }, [])
+  return (
+    <div className="flex items-center gap-2 rounded-lg bg-gray-950/40 px-4 py-2">
+      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-accent-blue/60">Tip</span>
+      <p className="text-[11px] text-text-dim/70">{APP_TIPS[index]}</p>
+    </div>
+  )
+}
+
+/* ── Welcome Hint ── first-time dismissible card ── */
+function WelcomeHint() {
+  const [dismissed, setDismissed] = useState(() => localStorage.getItem('sv-trip-welcome-dismissed') === '1')
+  if (dismissed) return null
+  return (
+    <div className="rounded-xl border border-accent-blue/20 bg-accent-blue/5 px-5 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-text">Welcome to the Trip Planner</p>
+          <ol className="mt-2 space-y-1 text-xs text-text-dim list-decimal list-inside">
+            <li>Pick your <span className="text-text">date range</span> and adjust drive/flight sliders if needed.</li>
+            <li>Hit <span className="font-medium text-accent-blue">Generate Trips</span> to build trip options.</li>
+            <li>Review your trips — expand any card for the full day-by-day itinerary.</li>
+          </ol>
+          <p className="mt-2 text-[10px] text-text-dim/50">Use Priority Players to build trips around specific guys first.</p>
+        </div>
+        <button
+          onClick={() => { localStorage.setItem('sv-trip-welcome-dismissed', '1'); setDismissed(true) }}
+          className="shrink-0 text-xs text-text-dim/50 hover:text-text"
+        >
+          Got it
+        </button>
+      </div>
     </div>
   )
 }

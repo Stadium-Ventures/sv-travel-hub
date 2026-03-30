@@ -151,7 +151,7 @@ export default function RosterDashboard() {
               onClick={fetchRoster}
               disabled={loading}
               className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-text-dim hover:text-text hover:border-accent-blue transition-colors disabled:opacity-50"
-              title="Refresh roster from Google Sheet"
+              title="Pull the latest player list from the Google Sheet (names, orgs, tiers)"
             >
               {loading ? (
                 <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
@@ -160,7 +160,7 @@ export default function RosterDashboard() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M20.016 4.657v4.992" />
                 </svg>
               )}
-              Refresh
+              Reload Roster
             </button>
           </div>
         </div>
@@ -253,7 +253,7 @@ export default function RosterDashboard() {
               onClick={autoAssignPlayers}
               disabled={autoAssignLoading}
               className="ml-auto flex items-center gap-1.5 rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
-              title="Check MLB/MiLB rosters and verify current affiliate assignments"
+              title="Look up where each player is currently assigned using live MLB/MiLB rosters"
             >
               {autoAssignLoading ? (
                 <span className="h-3 w-3 animate-spin rounded-full border border-white border-t-transparent" />
@@ -262,7 +262,7 @@ export default function RosterDashboard() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                 </svg>
               )}
-              Verify Assignments
+              Check Assignments
             </button>
           </div>
 
@@ -534,32 +534,71 @@ function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; 
 
   return (
     <div className="mb-3 rounded-lg border border-border/50 bg-surface px-4 py-3">
-      <div className="mb-2 flex items-center gap-3 text-xs">
+      {/* Status summary badges */}
+      <div className="mb-2 flex flex-wrap items-center gap-3 text-xs">
         {confirmedCount > 0 && (
-          <span className="text-accent-green">{confirmedCount} confirmed</span>
+          <span className="flex items-center gap-1 text-accent-green">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+            {confirmedCount} confirmed
+          </span>
         )}
         {estimatedCount > 0 && (
-          <span className="text-accent-orange">{estimatedCount} estimated</span>
+          <span className="flex items-center gap-1 text-accent-orange">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+            {estimatedCount} best guess
+          </span>
         )}
         {reassigned.length > 0 && (
-          <span className="text-accent-blue">{reassigned.length} changed</span>
+          <span className="flex items-center gap-1 text-accent-blue">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>
+            {reassigned.length} moved
+          </span>
         )}
         {notFound.length > 0 && (
-          <span className="text-accent-red">{notFound.length} not found</span>
+          <span className="flex items-center gap-1 text-accent-red">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            {notFound.length} not found
+          </span>
         )}
       </div>
 
-      {springTraining && estimatedCount > 0 && (() => {
+      {/* Plain-English explanations */}
+      <div className="mb-2 space-y-1.5 text-[11px]">
+        {confirmedCount > 0 && (
+          <p className="text-text-dim">
+            <span className="font-medium text-accent-green">Confirmed</span> — verified on a current MLB or MiLB roster. Good to go.
+          </p>
+        )}
+        {estimatedCount > 0 && (
+          <p className="text-text-dim">
+            <span className="font-medium text-accent-orange">Best guess</span> — rosters aren't published yet{springTraining ? ' (spring training)' : ''}, so we're using last year's team + one level promotion. These will update automatically once official rosters are released.
+          </p>
+        )}
+        {reassigned.length > 0 && (
+          <p className="text-text-dim">
+            <span className="font-medium text-accent-blue">Moved</span> — these players are on a different affiliate than last time. Schedules updated.
+          </p>
+        )}
+        {notFound.length > 0 && (
+          <p className="text-text-dim">
+            <span className="font-medium text-accent-red">Not found</span> — not on any MLB or MiLB roster right now. Could be unsigned, released, or just not added yet.
+          </p>
+        )}
+      </div>
+
+      {/* Estimated player details */}
+      {estimatedCount > 0 && (() => {
         const estimatedNames = Object.entries(assignments)
           .filter(([, a]) => a.source === 'estimated')
           .map(([name, a]) => `${name} → ${a.teamName}`)
         return (
-          <p className="mb-2 text-[10px] text-accent-orange">
-            Estimated from last year + one level promotion: {estimatedNames.join(', ')}. Will auto-correct when regular season rosters publish.
-          </p>
+          <div className="mb-2 rounded bg-accent-orange/10 px-2 py-1.5 text-[10px] text-accent-orange">
+            {estimatedNames.join(', ')}
+          </div>
         )
       })()}
 
+      {/* Reassigned player details */}
       {reassigned.length > 0 && (
         <div className="mb-2 space-y-1">
           {reassigned.map((e) => (
@@ -573,22 +612,24 @@ function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; 
         </div>
       )}
 
+      {/* Not found player details */}
       {notFound.length > 0 && (
         <div className="space-y-1">
           {notFound.map((e) => (
             <div key={e.playerName} className="flex items-center gap-2 rounded bg-accent-red/10 px-2 py-1 text-[11px]">
               <span className="font-medium text-accent-red">{e.playerName}</span>
-              <span className="text-text-dim">not found on any MLB/MiLB roster</span>
+              <span className="text-text-dim">not on any current roster</span>
             </div>
           ))}
         </div>
       )}
 
+      {/* All clear message */}
       {reassigned.length === 0 && notFound.length === 0 && confirmedCount > 0 && estimatedCount === 0 && (
-        <p className="text-[11px] text-accent-green">All assignments verified from current rosters — no changes detected.</p>
+        <p className="text-[11px] text-accent-green">All players verified on current rosters. No changes.</p>
       )}
       {reassigned.length === 0 && notFound.length === 0 && confirmedCount > 0 && estimatedCount > 0 && (
-        <p className="text-[11px] text-text-dim">{confirmedCount} from current rosters, {estimatedCount} estimated. Re-verify after opening day for full accuracy.</p>
+        <p className="text-[11px] text-text-dim">{confirmedCount} confirmed, {estimatedCount} best guess. Check again after opening day for full accuracy.</p>
       )}
     </div>
   )

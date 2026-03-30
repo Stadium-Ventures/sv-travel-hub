@@ -29,7 +29,7 @@ export function normalizeName(name: string): string {
 function parseLevel(raw: string): PlayerLevel {
   const lower = raw.toLowerCase().trim()
   if (lower === 'pro' || lower === 'professional' || lower === 'mlb' || lower === 'milb') return 'Pro'
-  if (lower === 'ncaa' || lower === 'college') return 'NCAA'
+  if (lower === 'ncaa' || lower === 'college' || lower === 'juco' || lower === 'junior college') return 'NCAA'
   if (lower === 'hs' || lower === 'high school') return 'HS'
   return 'Pro' // default
 }
