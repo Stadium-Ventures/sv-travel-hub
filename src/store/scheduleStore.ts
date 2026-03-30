@@ -14,6 +14,8 @@ import { fetchAllMaxPrepsSchedules } from '../lib/maxpreps'
 import { useRosterStore } from './rosterStore'
 import { useVenueStore } from './venueStore'
 import { useDiagnosticsStore } from './diagnosticsStore'
+import { BUNDLED_HS_SCHEDULES } from '../data/hsSchedules.generated'
+import { HS_VENUE_COORDS } from '../data/hsVenueCoords'
 
 export interface PlayerTeamAssignment {
   teamId: number
@@ -1054,8 +1056,7 @@ export const useScheduleStore = create<ScheduleState>()(
 
         // Group players by org|state key — include all schools (slug discovery
         // in fetchMaxPrepsSchedule will attempt to find unknown slugs automatically)
-        // Pre-load bundle keys for fallback matching
-        const { BUNDLED_HS_SCHEDULES } = await import('../data/hsSchedules.generated')
+        // Use statically imported bundle keys for matching
         const bundleKeys = Object.keys(BUNDLED_HS_SCHEDULES)
 
         const schoolToPlayers = new Map<string, string[]>()
@@ -1078,6 +1079,7 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
+          console.log(`[HS-KEY] ${playerName}: "${org}|${state}" → "${key}" (bundle: ${!!BUNDLED_HS_SCHEDULES[key]}, coords: ${!!HS_VENUE_COORDS[key]})`)
           const existing = schoolToPlayers.get(key)
           if (existing) existing.push(playerName)
           else schoolToPlayers.set(key, [playerName])
@@ -1107,8 +1109,7 @@ export const useScheduleStore = create<ScheduleState>()(
           const newGames: GameEvent[] = []
           const schedulesObj: Record<string, MaxPrepsSchedule> = merge ? { ...prevState.hsSchedules } : {}
 
-          // Load hardcoded venue coords as primary fallback
-          const { HS_VENUE_COORDS } = await import('../data/hsVenueCoords')
+          // Hardcoded venue coords loaded via static import
 
           // Get venue store for additional fallback
           const venueState = useVenueStore.getState().venues
@@ -1275,6 +1276,13 @@ export const useScheduleStore = create<ScheduleState>()(
             ? [...new Set([...prevState.hsFailedSchools, ...failedSchools])]
             : failedSchools
 
+          console.log(`[HS] Conversion complete: ${allGames.length} games from ${schedules.size} schools, ${failedSchools.length} failed`)
+          if (allGames.length === 0 && schedules.size > 0) {
+            console.warn('[HS] WARNING: schedules loaded but zero games converted!')
+            for (const [sk, sched] of schedules) {
+              console.log(`[HS]   ${sk}: ${sched.games.length} games, homeVenue: ${sched.homeVenue ? 'yes' : 'no'}`)
+            }
+          }
           set({
             hsSchedules: schedulesObj,
             hsGames: allGames,
