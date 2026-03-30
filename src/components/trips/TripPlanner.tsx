@@ -1969,23 +1969,61 @@ function NotCoveredExplainer({
               </div>
             </div>
           )}
-          {otherUncovered.length > 0 && (
+          {otherUncovered.length > 0 && (() => {
+            const TIER_EXPLAIN: Record<number, string> = {
+              1: 'Must-see',
+              2: 'High priority',
+              3: 'Standard',
+              4: 'Development',
+            }
+            const TIER_COLOR: Record<number, string> = {
+              1: 'text-accent-red',
+              2: 'text-accent-orange',
+              3: 'text-yellow-400',
+              4: 'text-text-dim',
+            }
+            // Group by tier
+            const byTier = new Map<number, typeof otherUncovered>()
+            for (const p of otherUncovered) {
+              const tier = p.tier ?? 4
+              const arr = byTier.get(tier) ?? []
+              arr.push(p)
+              byTier.set(tier, arr)
+            }
+            const sortedTiers = [...byTier.entries()].sort((a, b) => a[0] - b[0])
+            const highTierCount = (byTier.get(1)?.length ?? 0) + (byTier.get(2)?.length ?? 0)
+
+            return (
             <div>
               <p className="text-[11px] font-medium text-text-dim mb-1">Have games but not in a trip ({otherUncovered.length})</p>
-              <p className="text-[10px] text-text-dim/60 mb-1.5">These players have games in your date range, but the engine built trips around other players instead. Try adding them as Priority Players to force the engine to include them.</p>
-              <div className="flex flex-wrap gap-1">
-                {otherUncovered.map((p) => {
-                  const r = unvisitableMap.get(p.playerName)
-                  const gameCount = r?.match(/Has (\d+) game/)?.[1]
-                  return (
-                    <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
-                      {p.playerName} <span className="text-text-dim/40">({p.org}{gameCount ? ` · ${gameCount} games` : ''})</span>
-                    </span>
-                  )
-                })}
+              <p className="text-[10px] text-text-dim/60 mb-1.5">
+                {highTierCount > 0
+                  ? `${highTierCount} high-priority player${highTierCount !== 1 ? 's' : ''} missed — try adding them as Priority Players. Lower-tier players are included when they're near higher-priority stops.`
+                  : 'These are mostly lower-tier players. The engine prioritizes trips with must-see and high-priority players first. Add any of these as a Priority Player to force the engine to build a trip around them.'}
+              </p>
+              <div className="space-y-2">
+                {sortedTiers.map(([tier, players]) => (
+                  <div key={tier}>
+                    <p className={`text-[10px] font-medium mb-1 ${TIER_COLOR[tier] ?? 'text-text-dim'}`}>
+                      Tier {tier} — {TIER_EXPLAIN[tier] ?? 'Other'} ({players.length})
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {players.map((p) => {
+                        const r = unvisitableMap.get(p.playerName)
+                        const gameCount = r?.match(/Has (\d+) game/)?.[1]
+                        return (
+                          <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
+                            {p.playerName} <span className="text-text-dim/40">({p.org}{gameCount ? ` · ${gameCount} games` : ''})</span>
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          )}
+            )
+          })()}
         </div>
       )}
     </div>
