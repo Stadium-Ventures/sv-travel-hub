@@ -818,7 +818,7 @@ export default function TripPlanner() {
             const beyondFlight = uncoveredPlayers.filter((p) => unvisitableMap.get(p.playerName)?.startsWith('Beyond max flight'))
             const noGamesInRange = uncoveredPlayers.filter((p) => {
               const r = unvisitableMap.get(p.playerName)
-              return r && (r.includes('No games in date range') || r.includes('season may be over'))
+              return r && !r.includes('not selected') && (r.includes('No games in date range') || r.includes('season may be over'))
             })
             const noSchedule = uncoveredPlayers.filter((p) => {
               const r = unvisitableMap.get(p.playerName)
@@ -1952,14 +1952,18 @@ function NotCoveredExplainer({
           )}
           {otherUncovered.length > 0 && (
             <div>
-              <p className="text-[11px] font-medium text-text-dim mb-1">Not included in a trip ({otherUncovered.length})</p>
-              <p className="text-[10px] text-text-dim/60 mb-1.5">These players have games available, but the engine didn't include them in a trip — usually because they overlap with higher-priority players or their games are on Sundays.</p>
+              <p className="text-[11px] font-medium text-text-dim mb-1">Have games but not in a trip ({otherUncovered.length})</p>
+              <p className="text-[10px] text-text-dim/60 mb-1.5">These players have games in your date range, but the engine built trips around other players instead. Try adding them as Priority Players to force the engine to include them.</p>
               <div className="flex flex-wrap gap-1">
-                {otherUncovered.map((p) => (
-                  <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
-                    {p.playerName} <span className="text-text-dim/40">({p.org})</span>
-                  </span>
-                ))}
+                {otherUncovered.map((p) => {
+                  const r = unvisitableMap.get(p.playerName)
+                  const gameCount = r?.match(/Has (\d+) game/)?.[1]
+                  return (
+                    <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
+                      {p.playerName} <span className="text-text-dim/40">({p.org}{gameCount ? ` · ${gameCount} games` : ''})</span>
+                    </span>
+                  )
+                })}
               </div>
             </div>
           )}

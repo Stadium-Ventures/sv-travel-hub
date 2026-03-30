@@ -1457,7 +1457,7 @@ export async function generateTrips(
       return { name, reason: 'All games on Sundays (blackout days)' }
     }
 
-    return { name, reason: 'No games in date range' }
+    return { name, reason: `Has ${gamesInRange.length} game${gamesInRange.length !== 1 ? 's' : ''} in range but not selected for a trip — may overlap with higher-priority trips` }
   })
 
   // Merge players filtered out by max flight range
