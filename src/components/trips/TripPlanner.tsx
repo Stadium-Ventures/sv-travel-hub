@@ -727,18 +727,34 @@ export default function TripPlanner() {
         <>
           {/* Priority player results */}
           {tripPlan.priorityResults && tripPlan.priorityResults.length > 0 && (() => {
-            // Sort trips same way as card list so trip numbers match
-            const prSorted = [...tripPlan.trips].sort((a, b) => {
-              if (sortBy === 'score') return (b.scoreBreakdown?.finalScore ?? b.visitValue) - (a.scoreBreakdown?.finalScore ?? a.visitValue)
-              if (sortBy === 'date') return a.anchorGame.date.localeCompare(b.anchorGame.date)
-              return 0
-            })
-            function findTripNum(playerName: string): number {
-              const idx = prSorted.findIndex((t) =>
-                t.anchorGame.playerNames.includes(playerName) ||
-                t.nearbyGames.some((g) => g.playerNames.includes(playerName))
+            // Build unified list matching the displayed trip order exactly
+            type PrUnifiedItem =
+              | { type: 'road'; trip: typeof tripPlan.trips[0] }
+              | { type: 'flyin'; visit: typeof tripPlan.flyInVisits[0] }
+            const prUnified: PrUnifiedItem[] = [
+              ...tripPlan.trips.map((trip) => ({ type: 'road' as const, trip })),
+              ...tripPlan.flyInVisits.slice(0, flyInLimit).map((visit) => ({ type: 'flyin' as const, visit })),
+            ]
+            if (sortBy === 'date') {
+              prUnified.sort((a, b) => {
+                const dateA = a.type === 'road' ? a.trip.anchorGame.date : (a.visit.dates[0] ?? '')
+                const dateB = b.type === 'road' ? b.trip.anchorGame.date : (b.visit.dates[0] ?? '')
+                return dateA.localeCompare(dateB)
+              })
+            } else {
+              prUnified.sort((a, b) => {
+                const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : a.visit.visitValue
+                const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : b.visit.visitValue
+                return scoreB - scoreA
+              })
+            }
+            function findUnifiedTripNum(playerName: string): number {
+              const idx = prUnified.findIndex((item) =>
+                item.type === 'road'
+                  ? (item.trip.anchorGame.playerNames.includes(playerName) || item.trip.nearbyGames.some((g) => g.playerNames.includes(playerName)))
+                  : item.visit.playerNames.includes(playerName)
               )
-              return idx + 1
+              return idx >= 0 ? idx + 1 : 0
             }
             return (
             <div className="rounded-xl border border-accent-blue/30 bg-accent-blue/5 p-4">
@@ -749,14 +765,7 @@ export default function TripPlanner() {
                   const assignments = useScheduleStore.getState().playerTeamAssignments
                   const assignment = assignments[r.playerName]
                   const teamName = assignment?.teamName ?? player?.org ?? ''
-                  const tripNum = (r.status === 'included' || r.status === 'separate-trip') ? findTripNum(r.playerName) : 0
-
-                  // Find which unified trip # this player appears in (for fly-in results)
-                  const flyInTripIdx = r.status === 'fly-in-only'
-                    ? tripPlan.flyInVisits.findIndex((v) => v.playerNames.includes(r.playerName))
-                    : -1
-                  // Unified index: road trips come first in the "best" sort, so fly-in index starts after them
-                  const unifiedFlyInNum = flyInTripIdx >= 0 ? tripPlan.trips.length + flyInTripIdx + 1 : 0
+                  const tripNum = findUnifiedTripNum(r.playerName)
 
                   return (
                     <div key={r.playerName} className="rounded-lg bg-surface/50 px-3 py-2">
@@ -765,14 +774,14 @@ export default function TripPlanner() {
                         {teamName && <span className="text-text-dim"> ({teamName})</span>}
                       </p>
                       <p className="mt-0.5 text-xs text-text-dim">
-                        {r.status === 'included' && (
+                        {(r.status === 'included' || r.status === 'separate-trip') && tripNum > 0 && (
                           <>Within driving range. <span className="text-accent-green font-medium">See him on Trip #{tripNum}.</span></>
                         )}
-                        {r.status === 'separate-trip' && (
-                          <>Within driving range. <span className="text-accent-green font-medium">See him on Trip #{tripNum}.</span></>
+                        {r.status === 'fly-in-only' && tripNum > 0 && (
+                          <>Too far to drive from Orlando — requires a flight. <span className="text-accent-blue font-medium">See Trip #{tripNum}.</span></>
                         )}
-                        {r.status === 'fly-in-only' && (
-                          <>Too far to drive from Orlando — requires a flight. {unifiedFlyInNum > 0 && <span className="text-accent-blue font-medium">See Trip #{unifiedFlyInNum}.</span>}</>
+                        {(r.status === 'included' || r.status === 'separate-trip' || r.status === 'fly-in-only') && tripNum === 0 && (
+                          <span className="text-accent-orange">Has games but not in a numbered trip yet.</span>
                         )}
                         {r.status === 'unreachable' && (
                           <span className="text-accent-red">No games found in the date range{r.reason ? ` — ${r.reason}` : ''}.</span>
@@ -860,34 +869,44 @@ export default function TripPlanner() {
 
           {/* Priority player status — the most important thing */}
           {priorityPlayers.length > 0 && (() => {
-            // Sort trips same way as card list so trip numbers match
-            const sorted = [...tripPlan.trips].sort((a, b) => {
-              if (sortBy === 'score') return (b.scoreBreakdown?.finalScore ?? b.visitValue) - (a.scoreBreakdown?.finalScore ?? a.visitValue)
-              if (sortBy === 'date') return a.anchorGame.date.localeCompare(b.anchorGame.date)
-              return 0
-            })
-            const prioInRoad = priorityPlayers.filter((n) =>
-              sorted.some((t) => t.anchorGame.playerNames.includes(n) || t.nearbyGames.some((g) => g.playerNames.includes(n)))
-            )
-            const prioInFlyIn = priorityPlayers.filter((n) =>
-              !prioInRoad.includes(n) && tripPlan.flyInVisits.some((v) => v.playerNames.includes(n))
-            )
-            const prioMissing = priorityPlayers.filter((n) => !prioInRoad.includes(n) && !prioInFlyIn.includes(n))
+            // Build unified list matching displayed trip order exactly
+            type StatusUnified =
+              | { type: 'road'; trip: typeof tripPlan.trips[0] }
+              | { type: 'flyin'; visit: typeof tripPlan.flyInVisits[0] }
+            const statusUnified: StatusUnified[] = [
+              ...tripPlan.trips.map((trip) => ({ type: 'road' as const, trip })),
+              ...tripPlan.flyInVisits.slice(0, flyInLimit).map((visit) => ({ type: 'flyin' as const, visit })),
+            ]
+            if (sortBy === 'date') {
+              statusUnified.sort((a, b) => {
+                const dateA = a.type === 'road' ? a.trip.anchorGame.date : (a.visit.dates[0] ?? '')
+                const dateB = b.type === 'road' ? b.trip.anchorGame.date : (b.visit.dates[0] ?? '')
+                return dateA.localeCompare(dateB)
+              })
+            } else {
+              statusUnified.sort((a, b) => {
+                const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : a.visit.visitValue
+                const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : b.visit.visitValue
+                return scoreB - scoreA
+              })
+            }
+            function findPrioTripNum(playerName: string): number {
+              const idx = statusUnified.findIndex((item) =>
+                item.type === 'road'
+                  ? (item.trip.anchorGame.playerNames.includes(playerName) || item.trip.nearbyGames.some((g) => g.playerNames.includes(playerName)))
+                  : item.visit.playerNames.includes(playerName)
+              )
+              return idx >= 0 ? idx + 1 : 0
+            }
+            const prioInTrip = priorityPlayers.filter((n) => findPrioTripNum(n) > 0)
+            const prioMissing = priorityPlayers.filter((n) => findPrioTripNum(n) === 0)
             return (
               <div className={`rounded-lg px-3 py-2 ${prioMissing.length > 0 ? 'bg-accent-red/10 border border-accent-red/30' : 'bg-accent-green/10 border border-accent-green/30'}`}>
                 <p className="text-sm font-medium">
                   {prioMissing.length > 0
                     ? <span className="text-accent-red">Priority player {prioMissing.join(', ')} not found in any trip option</span>
                     : <span className="text-accent-green">
-                        {prioInRoad.map((n) => {
-                          const idx = sorted.findIndex((t) => t.anchorGame.playerNames.includes(n) || t.nearbyGames.some((g) => g.playerNames.includes(n)))
-                          return `${n} → Trip #${idx + 1}`
-                        }).join(' · ')}
-                        {prioInFlyIn.length > 0 && prioInFlyIn.map((n) => {
-                          const bestVisit = tripPlan.flyInVisits.find((v) => v.playerNames.includes(n))
-                          const bestDate = bestVisit?.dates[0]
-                          return ` · ${n} → Fly-in${bestDate ? ` (${formatDate(bestDate)})` : ''}`
-                        }).join('')}
+                        {prioInTrip.map((n) => `${n} → Trip #${findPrioTripNum(n)}`).join(' · ')}
                       </span>
                   }
                 </p>

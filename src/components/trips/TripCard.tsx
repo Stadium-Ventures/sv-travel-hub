@@ -385,6 +385,31 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
               }
             }
 
+            // Time conflicts — same day, same time, different venues
+            for (const [day, dayStops] of dayAssignments) {
+              if (dayStops.length >= 2) {
+                const withTimes = dayStops
+                  .map((s) => ({ stop: s, time: formatGameTime(s.gameTime, s.source) }))
+                  .filter((s) => s.time && s.time !== 'TBD')
+                // Group by time
+                const byTime = new Map<string, typeof withTimes>()
+                for (const s of withTimes) {
+                  const arr = byTime.get(s.time) ?? []
+                  arr.push(s)
+                  byTime.set(s.time, arr)
+                }
+                for (const [time, group] of byTime) {
+                  if (group.length >= 2) {
+                    const names = group.map((g) => `${g.stop.players.join(', ')} at ${g.stop.orgLabel}`).join(' and ')
+                    items.push({
+                      summary: `${formatDate(day)}: ${group.length} games at ${time} — pick one`,
+                      detail: `${names} are both at ${time} on ${formatDate(day)} but at different venues. You can only attend one of these games. Consider which player is higher priority.`,
+                    })
+                  }
+                }
+              }
+            }
+
             // Estimated location stops
             const estimatedStops = stops.filter((s) => s.confidence && s.confidence !== 'high')
             for (const s of estimatedStops) {
