@@ -24,4 +24,5 @@ export const HS_VENUE_COORDS: Record<string, { name: string; lat: number; lng: n
   'Spotswood|VA': { name: 'Spotswood HS Field', lat: 38.3857, lng: -78.8025 },
   'N. Broward Prep|FL': { name: 'N. Broward Prep Field', lat: 26.2517, lng: -80.1789 },
   'Mill Creek|GA': { name: 'Mill Creek HS Field', lat: 34.0788, lng: -83.8786 },
+  'Coral Springs Charter|FL': { name: 'Coral Springs Charter Field', lat: 26.2710, lng: -80.2594 },
 }

@@ -11,6 +11,7 @@ import { fetchAllD1Schedules, resolveOpponentVenue, resolveOpponentVenueAsync } 
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import type { MaxPrepsSchedule } from '../lib/maxpreps'
 import { fetchAllMaxPrepsSchedules } from '../lib/maxpreps'
+import { fetchScheduleCsv } from '../lib/scheduleCsv'
 import { useRosterStore } from './rosterStore'
 import { useVenueStore } from './venueStore'
 import { useDiagnosticsStore } from './diagnosticsStore'
@@ -1055,24 +1056,37 @@ export const useScheduleStore = create<ScheduleState>()(
         console.log(`[HS-ENTRY] fetchHsSchedules called with ${playerOrgs.length} players, hsLoading=${get().hsLoading}`)
         if (get().hsLoading) { console.log('[HS-ENTRY] SKIPPED — already loading'); return }
 
-        // Group players by org|state key — include all schools (slug discovery
-        // in fetchMaxPrepsSchedule will attempt to find unknown slugs automatically)
-        // Use statically imported bundle keys for matching
-        const bundleKeys = Object.keys(BUNDLED_HS_SCHEDULES)
+        // Try fetching live schedule CSV first; fall back to bundled data
+        let csvSchedules: Map<string, MaxPrepsSchedule> | null = null
+        try {
+          const result = await fetchScheduleCsv()
+          csvSchedules = result.schedules
+          console.log(`[HS] CSV fetch OK: ${csvSchedules.size} schools`)
+        } catch (err) {
+          console.warn('[HS] CSV fetch failed, falling back to bundled data:', err)
+        }
 
+        // Build set of all available schedule keys (CSV + bundled)
+        const availableKeys = [
+          ...(csvSchedules ? csvSchedules.keys() : []),
+          ...Object.keys(BUNDLED_HS_SCHEDULES),
+        ]
+
+        // Group players by org|state key with fuzzy matching
         const schoolToPlayers = new Map<string, string[]>()
         for (const { playerName, org, state } of playerOrgs) {
-          // Try exact key first, then progressively looser matching
           let key = `${org}|${state}`
-          if (!BUNDLED_HS_SCHEDULES[key]) {
-            // Try case-insensitive exact match
-            const exactMatch = bundleKeys.find(k => k.toLowerCase() === key.toLowerCase())
+          // Try exact match against available keys
+          if (!csvSchedules?.has(key) && !BUNDLED_HS_SCHEDULES[key]) {
+            // Case-insensitive exact match
+            const keyLower = key.toLowerCase()
+            const exactMatch = availableKeys.find(k => k.toLowerCase() === keyLower)
             if (exactMatch) {
               key = exactMatch
             } else {
-              // Try org-only prefix match (handles missing/wrong state)
+              // Org-only prefix match (handles missing/wrong state)
               const orgLower = org.toLowerCase().trim()
-              const prefixMatch = bundleKeys.find(k => {
+              const prefixMatch = availableKeys.find(k => {
                 const [bOrg] = k.split('|')
                 return bOrg!.toLowerCase().trim() === orgLower
               })
@@ -1080,7 +1094,7 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
-          console.log(`[HS-KEY] ${playerName}: "${org}|${state}" → "${key}" (bundle: ${!!BUNDLED_HS_SCHEDULES[key]}, coords: ${!!HS_VENUE_COORDS[key]})`)
+          console.log(`[HS-KEY] ${playerName}: "${org}|${state}" → "${key}" (csv: ${!!csvSchedules?.has(key)}, bundle: ${!!BUNDLED_HS_SCHEDULES[key]}, coords: ${!!HS_VENUE_COORDS[key]})`)
           const existing = schoolToPlayers.get(key)
           if (existing) existing.push(playerName)
           else schoolToPlayers.set(key, [playerName])
@@ -1100,11 +1114,28 @@ export const useScheduleStore = create<ScheduleState>()(
         })
 
         try {
-          const { schedules, failedSchools } = await fetchAllMaxPrepsSchedules(
-            [...schoolToPlayers.keys()],
-            (completed, total) => set({ hsProgress: { completed, total } }),
-            { forceRefresh },
-          )
+          // Resolve schedules: CSV (live) → bundled (static) → MaxPreps (legacy fallback)
+          const schedules = new Map<string, MaxPrepsSchedule>()
+          const failedSchools: string[] = []
+          const missingFromCsv: string[] = []
+
+          for (const schoolKey of schoolToPlayers.keys()) {
+            const csvSched = csvSchedules?.get(schoolKey)
+            if (csvSched) {
+              schedules.set(schoolKey, csvSched)
+            } else if (BUNDLED_HS_SCHEDULES[schoolKey]) {
+              schedules.set(schoolKey, BUNDLED_HS_SCHEDULES[schoolKey]!)
+              missingFromCsv.push(schoolKey)
+            } else {
+              failedSchools.push(schoolKey)
+            }
+          }
+
+          if (missingFromCsv.length > 0) {
+            console.warn('[HS] Schools not in CSV, using bundled fallback:', missingFromCsv)
+          }
+
+          set({ hsProgress: { completed: schoolToPlayers.size, total: schoolToPlayers.size } })
 
           // Convert MaxPreps games to GameEvents
           const newGames: GameEvent[] = []
@@ -1210,8 +1241,8 @@ export const useScheduleStore = create<ScheduleState>()(
                   source: 'hs-lookup',
                   playerNames,
                   confidence: 'high',
-                  confidenceNote: 'Confirmed home game from MaxPreps',
-                  sourceUrl: `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/`,
+                  confidenceNote: 'Confirmed home game from schedule',
+                  sourceUrl: schedule.slug ? `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/` : undefined,
                 })
               } else {
                 // Queue away game for geocoding
@@ -1250,7 +1281,7 @@ export const useScheduleStore = create<ScheduleState>()(
                         playerNames,
                         confidence: 'medium',
                         confidenceNote: `Away game at ${game.opponent} (venue geocoded)`,
-                        sourceUrl: `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/`,
+                        sourceUrl: schedule.slug ? `https://www.maxpreps.com/${schedule.slug}/baseball/schedule/` : undefined,
                       })
                     }
                   }
