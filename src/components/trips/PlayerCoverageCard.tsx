@@ -83,17 +83,17 @@ export default function PlayerCoverageCard({ players, allGames, onPlayerClick, o
         </h3>
         <div className="flex items-center gap-2 text-[10px]">
           {realDataCount > 0 && (
-            <span className="rounded bg-accent-green/10 px-1.5 py-0.5 text-accent-green">
+            <span className="rounded bg-accent-green/10 px-1.5 py-0.5 text-accent-green cursor-help" title={`${realDataCount} players have confirmed schedules from MLB, D1Baseball, or MaxPreps.`}>
               {realDataCount} with schedules
             </span>
           )}
           {estimatedCount > 0 && (
-            <span className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-accent-orange">
+            <span className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-accent-orange cursor-help" title={`${estimatedCount} players have estimated schedules — game dates are based on typical patterns, not confirmed data. Hit "Load all schedules" to try pulling real data.`}>
               {estimatedCount} estimated
             </span>
           )}
           {noDataCount > 0 && (
-            <span className="rounded bg-accent-red/10 px-1.5 py-0.5 text-accent-red">
+            <span className="rounded bg-accent-red/10 px-1.5 py-0.5 text-accent-red cursor-help" title={`${noDataCount} players have no schedule data at all. Their team may not be recognized, or schedules haven't been published yet.`}>
               {noDataCount} no data
             </span>
           )}

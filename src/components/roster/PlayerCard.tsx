@@ -110,30 +110,39 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
         )}
         <td className="px-4 py-2.5 text-text-dim">{player.position}</td>
         <td className="px-4 py-2.5">
-          <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${TIER_COLORS[player.tier] ?? TIER_COLORS[4]}`}>
+          <span
+            className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold cursor-help ${TIER_COLORS[player.tier] ?? TIER_COLORS[4]}`}
+            title={player.tier === 1 ? 'Tier 1 — Must-see. Top priority for visits.' : player.tier === 2 ? 'Tier 2 — High priority. Important to visit regularly.' : player.tier === 3 ? 'Tier 3 — Standard. Visit when convenient or nearby.' : 'Tier 4 — Development. Visit opportunistically.'}
+          >
             {player.tier}
           </span>
         </td>
         <td className="px-4 py-2.5">
           {daysSinceVisit !== null ? (
-            <span className={`text-xs ${daysSinceVisit > 90 ? 'text-accent-red' : daysSinceVisit > 45 ? 'text-accent-orange' : 'text-accent-green'}`}>
+            <span
+              className={`text-xs cursor-help ${daysSinceVisit > 90 ? 'text-accent-red' : daysSinceVisit > 45 ? 'text-accent-orange' : 'text-accent-green'}`}
+              title={`Last visited ${daysSinceVisit} days ago. ${daysSinceVisit > 90 ? 'Overdue — hasn\'t been seen in over 3 months.' : daysSinceVisit > 45 ? 'Getting stale — consider scheduling a visit soon.' : 'Recently visited — in good shape.'}`}
+            >
               {daysSinceVisit}d
             </span>
           ) : (
-            <span className="text-xs text-text-dim/40">—</span>
+            <span className="text-xs text-text-dim/40 cursor-help" title="No visit on record yet.">—</span>
           )}
         </td>
         <td className="px-4 py-2.5">
           {loveScore !== null ? (
-            <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ${
-              loveScore >= 60 ? 'bg-accent-green/20 text-accent-green' :
-              loveScore >= 30 ? 'bg-accent-orange/20 text-accent-orange' :
-              'bg-accent-red/20 text-accent-red'
-            }`}>
+            <span
+              className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold cursor-help ${
+                loveScore >= 60 ? 'bg-accent-green/20 text-accent-green' :
+                loveScore >= 30 ? 'bg-accent-orange/20 text-accent-orange' :
+                'bg-accent-red/20 text-accent-red'
+              }`}
+              title={`Love Score: ${loveScore}/100 from Heartbeat. ${loveScore >= 60 ? 'Strong relationship — keep it up.' : loveScore >= 30 ? 'Decent but could use more engagement.' : 'Needs attention — this relationship is cooling off.'}`}
+            >
               {loveScore}
             </span>
           ) : (
-            <span className="text-xs text-text-dim/40">—</span>
+            <span className="text-xs text-text-dim/40 cursor-help" title="No Love Score from Heartbeat yet.">—</span>
           )}
         </td>
       </tr>

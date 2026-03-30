@@ -425,7 +425,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                     {isTue && ' (best day)'}
                   </span>
                   {dayStops.length >= 2 && (
-                    <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-bold text-accent-green">
+                    <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-bold text-accent-green cursor-help" title={`${dayStops.length} games on the same day — see multiple players in one trip day.`}>
                       DOUBLE UP · {dayStops.length} games
                     </span>
                   )}

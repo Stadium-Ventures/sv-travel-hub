@@ -814,7 +814,7 @@ export default function TripPlanner() {
               <div title={`${allTripPlayerNames.length} of your ${totalEligible} players appear in at least one trip option.`}>
                 <StatCard label="Players in Trips" value={allTripPlayerNames.length} accent="blue" scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
               </div>
-              <div title={`${totalEligible - allTripPlayerNames.length} players still need trip options`}>
+              <div title={`${Math.max(0, totalEligible - allTripPlayerNames.length)} players don't appear in any trip option yet. Try extending your date range or increasing the drive/flight sliders to find more options.`}>
                 <StatCard
                   label="Not Covered"
                   value={Math.max(0, totalEligible - allTripPlayerNames.length)}
@@ -937,12 +937,13 @@ export default function TripPlanner() {
               <div className="sticky top-0 z-10 -mx-5 mb-3 flex items-center gap-3 rounded-b-lg bg-surface px-5 pb-2 pt-2 border-b border-border/30">
                 <span className="text-[11px] text-text-dim">Sort:</span>
                 {([
-                  { key: 'score', label: 'Best' },
-                  { key: 'date', label: 'Date' },
-                ] as const).map(({ key, label }) => (
+                  { key: 'score', label: 'Best', tip: 'Sort by our recommendation — factors in player tier, travel efficiency, and how many players you can see per trip.' },
+                  { key: 'date', label: 'Date', tip: 'Sort chronologically — earliest trips first, so you can plan week by week.' },
+                ] as const).map(({ key, label, tip }) => (
                   <button
                     key={key}
                     onClick={() => setSortBy(key)}
+                    title={tip}
                     className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
                       sortBy === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
                     }`}
@@ -953,15 +954,16 @@ export default function TripPlanner() {
                 <span className="mx-1 text-text-dim/20">|</span>
                 <span className="text-[11px] text-text-dim">Show:</span>
                 {([
-                  { key: 'all', label: 'All' },
-                  { key: 'drive', label: '🚗 Drives' },
-                  { key: 'fly', label: '✈️ Flights' },
-                  { key: 'multi', label: '👥 2+ Players' },
-                  ...(anchorPlayerNames.length > 0 ? [{ key: 'anchor' as const, label: '📍 Near destination' }] : []),
-                ] as Array<{ key: typeof tripFilter; label: string }>).map(({ key, label }) => (
+                  { key: 'all', label: 'All', tip: 'Show all trip options — drives and flights.' },
+                  { key: 'drive', label: '🚗 Drives', tip: 'Only show trips you can drive to from Orlando.' },
+                  { key: 'fly', label: '✈️ Flights', tip: 'Only show trips that require a flight.' },
+                  { key: 'multi', label: '👥 2+ Players', tip: 'Only show trips where you can see 2 or more players.' },
+                  ...(anchorPlayerNames.length > 0 ? [{ key: 'anchor' as const, label: '📍 Near destination', tip: 'Only show trips near your selected destination.' }] : []),
+                ] as Array<{ key: typeof tripFilter; label: string; tip: string }>).map(({ key, label, tip }) => (
                   <button
                     key={key}
                     onClick={() => setTripFilter(key)}
+                    title={tip}
                     className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
                       tripFilter === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
                     }`}
