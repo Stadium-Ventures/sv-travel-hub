@@ -54,6 +54,7 @@ const CSV_TEAM_INFO: Record<string, TeamInfo> = {
   'Muskego': { key: 'Muskego|WI', homeCity: 'Muskego' },
   'North Broward Prep': { key: 'N. Broward Prep|FL', homeCity: 'Coconut Creek' },
   'Sarasota': { key: 'Sarasota HS|FL', homeCity: 'Sarasota' },
+  'SCF': { key: 'SCF|FL', homeCity: 'Bradenton', homeBallparks: ['Robert C. Wynn'] },
   'South Walton': { key: 'South Walton|FL', homeCity: 'Santa Rosa Beach' },
   'Spotswood': { key: 'Spotswood|VA', homeCity: 'Penn Laird' },
   "St. Joseph's Prep": { key: "St. Joseph's Prep|PA", homeCity: 'Philadelphia', homeBallparks: ["St. Joseph's", "SJP"] },
@@ -239,9 +240,10 @@ async function main() {
     console.warn('CSV parse warnings:', parsed.errors.slice(0, 5))
   }
 
-  // Filter to HS rows only
-  const hsRows = parsed.data.filter(r => r.Level?.trim().toUpperCase() === 'HS')
-  console.log(`\nFound ${hsRows.length} HS game rows across ${new Set(hsRows.map(r => r.Team)).size} teams\n`)
+  // Filter to HS + JUCO rows (both use CSV schedule path, not MLB API or D1Baseball)
+  const csvLevels = new Set(['HS', 'JUCO', 'JUNIOR COLLEGE'])
+  const hsRows = parsed.data.filter(r => csvLevels.has(r.Level?.trim().toUpperCase() ?? ''))
+  console.log(`\nFound ${hsRows.length} HS/JUCO game rows across ${new Set(hsRows.map(r => r.Team)).size} teams\n`)
 
   // Group games by school key
   const schoolGames = new Map<string, { csvTeam: string; rosterOrg: string; games: HsGame[] }>()

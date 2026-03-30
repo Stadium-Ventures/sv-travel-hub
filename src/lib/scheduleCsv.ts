@@ -37,6 +37,7 @@ const CSV_TEAM_INFO: Record<string, TeamInfo> = {
   'Muskego': { key: 'Muskego|WI', homeCity: 'Muskego' },
   'North Broward Prep': { key: 'N. Broward Prep|FL', homeCity: 'Coconut Creek' },
   'Sarasota': { key: 'Sarasota HS|FL', homeCity: 'Sarasota' },
+  'SCF': { key: 'SCF|FL', homeCity: 'Bradenton', homeBallparks: ['Robert C. Wynn'] },
   'South Walton': { key: 'South Walton|FL', homeCity: 'Santa Rosa Beach' },
   'Spotswood': { key: 'Spotswood|VA', homeCity: 'Penn Laird' },
   "St. Joseph's Prep": { key: "St. Joseph's Prep|PA", homeCity: 'Philadelphia', homeBallparks: ["St. Joseph's", 'SJP'] },
@@ -190,7 +191,8 @@ export async function fetchScheduleCsv(): Promise<ScheduleCsvResult> {
 export function parseScheduleCsv(csvText: string): ScheduleCsvResult {
   const parsed = Papa.parse<CsvRow>(csvText, { header: true, skipEmptyLines: true })
 
-  const hsRows = parsed.data.filter(r => (r['Level'] ?? '').trim().toUpperCase() === 'HS')
+  const csvLevels = new Set(['HS', 'JUCO', 'JUNIOR COLLEGE'])
+  const hsRows = parsed.data.filter(r => csvLevels.has((r['Level'] ?? '').trim().toUpperCase()))
 
   const schoolGames = new Map<string, { csvTeam: string; rosterOrg: string; games: MaxPrepsGame[] }>()
   const unmappedTeams: string[] = []
