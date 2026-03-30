@@ -365,31 +365,43 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
       {expanded && (
         <div className="mt-4 space-y-3">
 
-          {/* Warnings — TBD times, estimated schedules */}
+          {/* Warnings — TBD times, estimated locations */}
           {(() => {
-            const warnings: string[] = []
+            const items: Array<{ summary: string; detail: string }> = []
+
             // Check for TBD times on multi-stop days
             for (const [day, dayStops] of dayAssignments) {
               if (dayStops.length >= 2) {
-                const tbdCount = dayStops.filter(s => !formatGameTime(s.gameTime, s.source) || formatGameTime(s.gameTime, s.source) === 'TBD').length
-                if (tbdCount >= 2) {
-                  warnings.push(`${formatDate(day)}: ${tbdCount} games have unconfirmed start times — verify before committing to this route`)
+                const tbdStops = dayStops.filter(s => !formatGameTime(s.gameTime, s.source) || formatGameTime(s.gameTime, s.source) === 'TBD')
+                if (tbdStops.length >= 2) {
+                  const names = tbdStops.flatMap(s => s.players).join(', ')
+                  items.push({
+                    summary: `${formatDate(day)}: ${tbdStops.length} games have unconfirmed start times (${names})`,
+                    detail: `Games for ${names} don't have posted start times yet. If you're planning to see multiple games on the same day, check the team schedules closer to game day to make sure the times don't conflict.`,
+                  })
                 }
               }
             }
-            // Estimated schedule stops
+
+            // Estimated location stops
             const estimatedStops = stops.filter((s) => s.confidence && s.confidence !== 'high')
-            if (estimatedStops.length > 0) {
-              for (const s of estimatedStops) {
-                if (s.confidenceNote) warnings.push(s.confidenceNote)
-              }
+            for (const s of estimatedStops) {
+              const playerList = s.players.join(', ')
+              const isHsAway = s.source === 'hs-lookup' && !s.isHome
+              items.push({
+                summary: `${playerList}'s game at ${s.orgLabel}: location is estimated`,
+                detail: isHsAway
+                  ? `${playerList} has an away game vs. ${s.homeTeam}. We don't have the exact address of the opponent's field, so the map pin is placed near ${s.orgLabel}'s home field as a rough estimate. The actual game could be in a different location — check the schedule to confirm the venue before planning your route.`
+                  : `The game for ${playerList} at ${s.orgLabel} is on the schedule, but we haven't confirmed the exact venue. Click "Verify" on the stop below to double-check the location.`,
+              })
             }
-            if (warnings.length === 0) return null
+
+            if (items.length === 0) return null
             return (
-              <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
-                {warnings.map((w, i) => (
-                  <p key={i} className="text-[11px] text-accent-orange">
-                    ⚠ {w}
+              <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2 space-y-1">
+                {items.map((item, i) => (
+                  <p key={i} className="text-[11px] text-accent-orange cursor-help" title={item.detail}>
+                    ⚠ {item.summary} <span className="text-accent-orange/40 text-[9px]">(hover for details)</span>
                   </p>
                 ))}
               </div>
@@ -466,11 +478,13 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                               {stop.confidence && stop.confidence !== 'high' && (
                                 <span
                                   className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-[10px] text-accent-orange cursor-help"
-                                  title={stop.confidence === 'medium'
-                                    ? 'Location is based on the team schedule but not 100% confirmed. Click "Verify" to double-check.'
-                                    : 'We\'re not sure about this game\'s location — the schedule may have changed. Click "Verify" to confirm before planning around it.'}
+                                  title={stop.source === 'hs-lookup' && !stop.isHome
+                                    ? `${stop.players.join(', ')} has an away game vs. ${stop.homeTeam}. We don't have the opponent's field address, so the location is estimated from ${stop.orgLabel}'s home area.`
+                                    : stop.confidence === 'medium'
+                                      ? `${stop.players.join(', ')}'s game is on the schedule but the exact venue isn't confirmed. Click "Verify" to double-check.`
+                                      : `We're not sure where ${stop.players.join(', ')}'s game will be played. The schedule may have changed. Click "Verify" to confirm before planning around it.`}
                                 >
-                                  {stop.confidence === 'medium' ? 'Likely' : 'Unconfirmed'}
+                                  {stop.source === 'hs-lookup' && !stop.isHome ? 'Est.' : stop.confidence === 'medium' ? 'Likely' : 'Unconfirmed'}
                                 </span>
                               )}
                               {stop.awayTeam === 'Spring Training' && (() => {
