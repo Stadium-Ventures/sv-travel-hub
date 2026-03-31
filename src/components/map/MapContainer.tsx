@@ -201,8 +201,8 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
   return (
     <div
       ref={mapRef}
-      className="w-full flex-1 rounded-lg border border-border"
-      style={{ minHeight: '400px' }}
+      className="w-full rounded-lg border border-border"
+      style={{ height: 'calc(100vh - 160px)', minHeight: '500px' }}
     />
   )
 }
