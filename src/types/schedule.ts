@@ -81,6 +81,7 @@ export interface FlyInVisit {
   sourceUrl?: string
   confidence?: VisitConfidence
   teamLabel?: string // the team whose schedule these games belong to
+  gameTime?: string // game time for single-venue fly-ins (ISO string)
   // Combo trip fields (fly-in + drive to nearby venues)
   isCombo?: boolean
   stops?: FlyInStop[]

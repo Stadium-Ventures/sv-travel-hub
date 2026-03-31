@@ -1355,6 +1355,7 @@ export async function generateTrips(
       sourceUrl: entry.sourceUrl,
       confidence: entry.confidence,
       teamLabel: entry.teamLabel,
+      gameTime: entry.gameTimeByDate.get(bestDate),
     })
 
     for (const name of entry.players) flyInCovered.add(name)

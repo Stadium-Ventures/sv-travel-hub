@@ -35,6 +35,9 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
       const L = await import('leaflet')
       leafletRef.current = L
 
+      // MarkerCluster expects L on window — attach before importing
+      ;(window as any).L = L
+
       // Leaflet CSS
       if (!document.querySelector('link[href*="leaflet@1"]')) {
         const link = document.createElement('link')
@@ -56,7 +59,7 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
         document.head.appendChild(link2)
       }
 
-      // Load MarkerCluster JS (attaches to L)
+      // Load MarkerCluster JS (attaches to window.L)
       await import('leaflet.markercluster')
 
       // Custom styles

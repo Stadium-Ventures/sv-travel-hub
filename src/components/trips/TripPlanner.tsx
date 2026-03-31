@@ -1793,7 +1793,22 @@ function FlyInCard({
   }
 
 
-  // Copy handler
+  // Check if the last game is early enough to fly home same day (before 3 PM ET)
+  const isEarlyGame = (gameTimeStr?: string): boolean => {
+    if (!gameTimeStr) return false
+    const d = new Date(gameTimeStr)
+    if (isNaN(d.getTime())) return false
+    // Convert to ET hours (America/New_York)
+    const etTime = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+    return etTime.getHours() < 15 // before 3 PM
+  }
+
+  // For single-venue: check visit.gameTime; for combo: check last stop's gameTime
+  const lastGameTime = visit.isCombo && visit.stops && visit.stops.length > 1
+    ? visit.stops[visit.stops.length - 1]!.gameTime
+    : visit.gameTime
+  const couldFlyHomeSameDay = isEarlyGame(lastGameTime)
+  const totalDaysShown = visit.isCombo && visit.stops ? visit.stops.length + 1 : visit.dates.length + 1
 
   // Source badge
   const sourceBadge = visit.source === 'mlb-api'
@@ -1844,7 +1859,17 @@ function FlyInCard({
 
         // Combo trip: multi-stop fly-in with driving between venues
         if (visit.isCombo && visit.stops && visit.stops.length > 1) {
-          const comboStops = visit.stops
+          // Sort combo stops by date, then by game time within the same day
+          const comboStops = [...visit.stops].sort((a, b) => {
+            const dateCmp = a.date.localeCompare(b.date)
+            if (dateCmp !== 0) return dateCmp
+            const aTime = a.gameTime ? new Date(a.gameTime).getTime() : Infinity
+            const bTime = b.gameTime ? new Date(b.gameTime).getTime() : Infinity
+            if (isNaN(aTime) && isNaN(bTime)) return 0
+            if (isNaN(aTime)) return 1
+            if (isNaN(bTime)) return -1
+            return aTime - bTime
+          })
           const nearestApt = findNearestAirport(comboStops[0]!.venue.coords)
           return (
           <div className="mt-4 space-y-3">
@@ -1901,7 +1926,7 @@ function FlyInCard({
                     )}
                   </div>
                   {isTueDay && <p className="mt-0.5 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>}
-                  <div className="mt-1.5 flex flex-wrap gap-1">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
                     {stop.playerNames.map((name) => {
                       const player = playerMap.get(name)
                       const tier = player?.tier ?? 4
@@ -1914,6 +1939,11 @@ function FlyInCard({
                         </span>
                       )
                     })}
+                    {stop.playerNames.length >= 2 && (
+                      <span className="text-[10px] text-accent-green/70 ml-1" title={`${stop.playerNames.length} SV players in the same game — efficient visit`}>
+                        {stop.playerNames.length} players, 1 game
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1921,12 +1951,26 @@ function FlyInCard({
             })}
 
             {/* Return day */}
-            <div className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-text-dim">Day {comboStops.length + 1}</span>
-                <span className="text-xs text-text-dim/50">Fly home</span>
+            {(() => {
+              const lastComboStop = comboStops[comboStops.length - 1]!
+              const returnAirport = findNearestAirport(lastComboStop.venue.coords)
+              const arrivalCode = visit.hubAirport || nearestApt.code
+              const showReturnAirport = returnAirport.code !== arrivalCode
+              return (
+              <div className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-text-dim">Day {comboStops.length + 1}</span>
+                  <span className="text-xs text-text-dim/50">Fly home</span>
+                </div>
+                {showReturnAirport && (
+                  <p className="mt-1 text-[11px] text-text-dim/50">Fly home from {returnAirport.code} ({returnAirport.name}) — closest to last stop</p>
+                )}
+                {couldFlyHomeSameDay && (
+                  <p className="mt-1 text-[11px] text-text-dim/50 italic">Early game — could fly home same day instead of Day {totalDaysShown}</p>
+                )}
               </div>
-            </div>
+              )
+            })()}
 
             {flyInWhy && <p className="text-xs italic text-text-dim/60">{flyInWhy}</p>}
           </div>
@@ -1978,7 +2022,7 @@ function FlyInCard({
                 {isTue && (
                   <p className="mt-1 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>
                 )}
-                <div className="mt-1.5 flex flex-wrap gap-1">
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
                   {visit.playerNames.map((name) => {
                     const player = playerMap.get(name)
                     const tier = player?.tier ?? 4
@@ -1991,6 +2035,11 @@ function FlyInCard({
                       </span>
                     )
                   })}
+                  {visit.playerNames.length >= 2 && (
+                    <span className="text-[10px] text-accent-green/70 ml-1" title={`${visit.playerNames.length} SV players in the same game — efficient visit`}>
+                      {visit.playerNames.length} players, 1 game
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -2015,6 +2064,9 @@ function FlyInCard({
                 <span className="text-xs text-text-dim/50">Fly home</span>
               </div>
             </div>
+            {couldFlyHomeSameDay && (
+              <p className="mt-1 text-[11px] text-text-dim/50 italic">Early game — could fly home same day instead of Day {totalDaysShown}</p>
+            )}
           </div>
 
           {flyInWhy && (

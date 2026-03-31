@@ -220,6 +220,18 @@ function assignStopsToDays(stops: VenueStop[], suggestedDays: string[]): Map<str
     }
   }
 
+  // Sort stops within each day by game time (earliest first)
+  for (const [_day, dayStops] of dayMap) {
+    dayStops.sort((a, b) => {
+      const aTime = a.gameTime ? new Date(a.gameTime).getTime() : Infinity
+      const bTime = b.gameTime ? new Date(b.gameTime).getTime() : Infinity
+      if (isNaN(aTime) && isNaN(bTime)) return 0
+      if (isNaN(aTime)) return 1
+      if (isNaN(bTime)) return -1
+      return aTime - bTime
+    })
+  }
+
   // Deduplicate players: each player should only appear on ONE day (their first/best day).
   // If a player shows up at multiple venues on different days, keep only the first occurrence.
   const playerAssignedDay = new Set<string>()
@@ -532,7 +544,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                               )}
                             </div>
                             {/* Players inline */}
-                            <div className="mt-1 flex flex-wrap gap-1">
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
                               {stop.players.map((name) => {
                                 const player = playerMap.get(name)
                                 const tier = player?.tier ?? 4
@@ -549,6 +561,11 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                                   </span>
                                 )
                               })}
+                              {stop.players.length >= 2 && (
+                                <span className="text-[10px] text-accent-green/70 ml-1" title={`${stop.players.length} SV players in the same game — efficient visit`}>
+                                  {stop.players.length} players, 1 game
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
