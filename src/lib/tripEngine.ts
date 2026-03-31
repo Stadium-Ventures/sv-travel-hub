@@ -1531,8 +1531,11 @@ export async function generateTrips(
       return { name, reason: 'All games on Sundays (blackout days)' }
     }
 
-    return { name, reason: `Has ${gamesInRange.length} game${gamesInRange.length !== 1 ? 's' : ''} in range but not selected for a trip — may overlap with higher-priority trips` }
-  })
+    // Player has games in range but wasn't selected for a trip.
+    // Don't list them as "unvisitable" — they're shown separately in the
+    // "Have games but not in a trip" section with clickable priority CTAs.
+    return null
+  }).filter((e): e is UnvisitablePlayer => e !== null)
 
   // Merge players filtered out by max flight range
   trulyUnreachable.push(...beyondFlightRange)
