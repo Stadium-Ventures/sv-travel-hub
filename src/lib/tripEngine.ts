@@ -1402,10 +1402,13 @@ export async function generateTrips(
     venuesSeen.add(venueKey)
 
     // Check if any player in this fly-in still has room
+    // Priority players get a higher cap (3) but not unlimited — prevents trip spam
     const hasRoom = visit.playerNames.some((n) => {
-      return (playerFlyInCount.get(n) ?? 0) < MAX_FLYINS_PER_PLAYER
+      const cap = prioritySet.has(n) ? 3 : MAX_FLYINS_PER_PLAYER
+      return (playerFlyInCount.get(n) ?? 0) < cap
     })
-    if (hasRoom || hasPriorityPlayer) {
+    if (!hasRoom) continue
+    if (hasRoom) {
       diverseFlyIns.push(visit)
       for (const name of visit.playerNames) {
         playerFlyInCount.set(name, (playerFlyInCount.get(name) ?? 0) + 1)
