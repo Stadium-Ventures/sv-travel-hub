@@ -543,6 +543,9 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                                   title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
                               )}
                             </div>
+                            {stop.source === 'hs-lookup' && !stop.isHome && (
+                              <p className="text-[10px] text-accent-orange/60 mt-0.5">📍 Location approximate — away game venue estimated from home field area</p>
+                            )}
                             {/* Players inline */}
                             <div className="mt-1 flex flex-wrap items-center gap-1">
                               {stop.players.map((name) => {

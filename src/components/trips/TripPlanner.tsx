@@ -938,6 +938,8 @@ export default function TripPlanner() {
                 otherUncovered={otherUncovered}
                 unvisitableMap={unvisitableMap}
                 onPlayerClick={setSelectedPlayer}
+                priorityPlayers={priorityPlayers}
+                setPriorityPlayers={setPriorityPlayers}
               />
             )}
             </>
@@ -1925,6 +1927,9 @@ function FlyInCard({
                       <a href={stop.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400" title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
                     )}
                   </div>
+                  {stop.source === 'hs-lookup' && !stop.isHome && (
+                    <p className="text-[10px] text-accent-orange/60 mt-0.5">📍 Location approximate — away game venue estimated from home field area</p>
+                  )}
                   {isTueDay && <p className="mt-0.5 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>}
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">
                     {stop.playerNames.map((name) => {
@@ -2019,6 +2024,9 @@ function FlyInCard({
                     <a href={visit.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400" title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
                   )}
                 </div>
+                {visit.source === 'hs-lookup' && !visit.isHome && (
+                  <p className="text-[10px] text-accent-orange/60 mt-0.5">📍 Location approximate — away game venue estimated from home field area</p>
+                )}
                 {isTue && (
                   <p className="mt-1 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>
                 )}
@@ -2100,6 +2108,7 @@ const APP_TIPS = [
 /* ── Not Covered Explainer ── shows who isn't in any trip and why ── */
 function NotCoveredExplainer({
   beyondFlight, noGamesInRange, noSchedule, otherUncovered, unvisitableMap, onPlayerClick,
+  priorityPlayers, setPriorityPlayers,
 }: {
   beyondFlight: RosterPlayer[]
   noGamesInRange: RosterPlayer[]
@@ -2107,6 +2116,8 @@ function NotCoveredExplainer({
   otherUncovered: RosterPlayer[]
   unvisitableMap: Map<string, string>
   onPlayerClick: (name: string) => void
+  priorityPlayers: string[]
+  setPriorityPlayers: (players: string[]) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const total = beyondFlight.length + noGamesInRange.length + noSchedule.length + otherUncovered.length
@@ -2191,6 +2202,13 @@ function NotCoveredExplainer({
             const sortedTiers = [...byTier.entries()].sort((a, b) => a[0] - b[0])
             const highTierCount = (byTier.get(1)?.length ?? 0) + (byTier.get(2)?.length ?? 0)
 
+            const canAddPriority = priorityPlayers.length < 3
+            const isAlreadyPriority = (name: string) => priorityPlayers.includes(name)
+            const addAsPriority = (name: string) => {
+              if (!canAddPriority || isAlreadyPriority(name)) return
+              setPriorityPlayers([...priorityPlayers, name])
+            }
+
             return (
             <div>
               <p className="text-[11px] font-medium text-text-dim mb-1">Have games but not in a trip ({otherUncovered.length})</p>
@@ -2199,8 +2217,15 @@ function NotCoveredExplainer({
                   ? `${highTierCount} high-priority player${highTierCount !== 1 ? 's' : ''} missed — try adding them as Priority Players. Lower-tier players are included when they're near higher-priority stops.`
                   : 'These are mostly lower-tier players. The engine prioritizes trips with must-see and high-priority players first. Add any of these as a Priority Player to force the engine to build a trip around them.'}
               </p>
+              {highTierCount > 0 && (
+                <p className="text-[10px] text-accent-blue/70 mb-2 italic">
+                  Click any must-see or high-priority player below to add them as a Priority Player — the engine will build trips around them.
+                </p>
+              )}
               <div className="space-y-2">
-                {sortedTiers.map(([tier, players]) => (
+                {sortedTiers.map(([tier, players]) => {
+                  const isClickableTier = tier <= 2
+                  return (
                   <div key={tier}>
                     <p className={`text-[10px] font-medium mb-1 ${TIER_COLOR[tier] ?? 'text-text-dim'}`}>
                       Tier {tier} — {TIER_EXPLAIN[tier] ?? 'Other'} ({players.length})
@@ -2209,15 +2234,31 @@ function NotCoveredExplainer({
                       {players.map((p) => {
                         const r = unvisitableMap.get(p.playerName)
                         const gameCount = r?.match(/Has (\d+) game/)?.[1]
+                        const alreadyPrio = isAlreadyPriority(p.playerName)
+                        const clickable = isClickableTier && canAddPriority && !alreadyPrio
                         return (
-                          <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
+                          <span
+                            key={p.playerName}
+                            className={`rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10 ${clickable ? 'ring-1 ring-accent-blue/30 hover:ring-accent-blue/60' : ''} ${alreadyPrio ? 'opacity-50' : ''}`}
+                            title={isClickableTier ? (alreadyPrio ? 'Already a Priority Player' : canAddPriority ? 'Click to add as Priority Player' : 'Priority Player slots full (max 3)') : undefined}
+                            onClick={() => {
+                              if (clickable) {
+                                addAsPriority(p.playerName)
+                              } else {
+                                onPlayerClick(p.playerName)
+                              }
+                            }}
+                          >
                             {p.playerName} <span className="text-text-dim/40">({p.org}{gameCount ? ` · ${gameCount} games` : ''})</span>
+                            {isClickableTier && canAddPriority && !alreadyPrio && <span className="text-accent-blue/60 ml-0.5">+</span>}
+                            {alreadyPrio && <span className="text-accent-green/60 ml-0.5">✓</span>}
                           </span>
                         )
                       })}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
             )
