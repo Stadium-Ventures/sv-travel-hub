@@ -14,7 +14,7 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<import('leaflet').Map | null>(null)
   const leafletRef = useRef<typeof import('leaflet') | null>(null)
-  const clusterGroupRef = useRef<import('leaflet').MarkerClusterGroup | null>(null)
+  const clusterGroupRef = useRef<import('leaflet').LayerGroup | null>(null)
   const homeMarkerRef = useRef<import('leaflet').Marker | null>(null)
   const radiusCircleRef = useRef<import('leaflet').Circle | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -50,26 +50,6 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
         document.head.appendChild(link)
       }
 
-      // MarkerCluster CSS
-      if (!document.querySelector('link[href*="MarkerCluster.css"]')) {
-        const link1 = document.createElement('link')
-        link1.rel = 'stylesheet'
-        link1.href = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css'
-        document.head.appendChild(link1)
-
-        const link2 = document.createElement('link')
-        link2.rel = 'stylesheet'
-        link2.href = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css'
-        document.head.appendChild(link2)
-      }
-
-      setInitStatus('Loading MarkerCluster...')
-      await import('leaflet.markercluster')
-
-      // Verify markerClusterGroup is available
-      if (typeof (L as any).markerClusterGroup !== 'function') {
-        throw new Error('leaflet.markercluster loaded but L.markerClusterGroup is not a function')
-      }
 
       // Custom styles
       injectMapStyles()
@@ -160,33 +140,14 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
     const L = leafletRef.current
     const map = mapInstance.current
 
-    // Remove old cluster group
+    // Remove old marker layer
     if (clusterGroupRef.current) {
       map.removeLayer(clusterGroupRef.current)
       clusterGroupRef.current = null
     }
 
-    // Create cluster group with custom icon function
-    const clusterGroup = (L as any).markerClusterGroup({
-      maxClusterRadius: 50,
-      spiderfyOnMaxZoom: true,
-      showCoverageOnHover: false,
-      iconCreateFunction: (cluster: any) => {
-        const children = cluster.getAllChildMarkers()
-        let bestTier = 4
-        for (const child of children) {
-          const tier = child.options.bestTier as number | undefined
-          if (tier !== undefined && tier < bestTier) bestTier = tier
-        }
-        const tierClass = `sv-cluster-t${bestTier}`
-        return L.divIcon({
-          className: '',
-          html: `<div class="sv-cluster ${tierClass}">${cluster.getChildCount()}</div>`,
-          iconSize: [40, 40],
-          iconAnchor: [20, 20],
-        })
-      },
-    }) as import('leaflet').MarkerClusterGroup
+    // Use a simple layer group (markercluster removed — Vite module compat issue)
+    const layerGroup = L.layerGroup()
 
     // Add venue markers
     for (const tm of tierMarkers) {
@@ -198,21 +159,18 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
         iconAnchor: [7, 7],
       })
 
-      const marker = L.marker([tm.coords.lat, tm.coords.lng], {
-        icon,
-        bestTier: tm.bestTier,
-      } as any)
+      const marker = L.marker([tm.coords.lat, tm.coords.lng], { icon })
 
       marker.bindPopup(buildVenuePopupHtml(tm), {
         maxWidth: 300,
         className: 'sv-dark-popup',
       })
 
-      clusterGroup.addLayer(marker)
+      layerGroup.addLayer(marker)
     }
 
-    map.addLayer(clusterGroup)
-    clusterGroupRef.current = clusterGroup
+    map.addLayer(layerGroup)
+    clusterGroupRef.current = layerGroup as any
   }, [loaded, tierMarkers])
 
   return (

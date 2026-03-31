@@ -88,7 +88,7 @@ export default function PlayerCoverageCard({ players, allGames, onPlayerClick, o
             </span>
           )}
           {estimatedCount > 0 && (
-            <span className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-accent-orange cursor-help" title={`${estimatedCount} players have estimated schedules — game dates are based on typical patterns, not confirmed data. Hit "Load all schedules" to try pulling real data.`}>
+            <span className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-accent-orange cursor-help" title={`${estimatedCount} players don't have confirmed schedule data yet. Pro players may not have an official affiliate assigned in the MLB Stats API — their schedules are estimated from last year's team. Hit "Load all schedules" to refresh.`}>
               {estimatedCount} estimated
             </span>
           )}
