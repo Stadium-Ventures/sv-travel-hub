@@ -691,7 +691,7 @@ export default function TripPlanner() {
         {/* Priority players */}
         <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
           <label className="mb-2 block text-xs font-medium text-text-dim">
-            Priority Players <span className="text-text-dim/50">(optional — engine will build trips around these players first)</span>
+            Priority Players <span className="text-text-dim/50">(optional — guarantees these players appear in your trip results, even if they require a flight)</span>
           </label>
           <div className="flex flex-wrap items-center gap-3">
             <PlayerSearchPicker
