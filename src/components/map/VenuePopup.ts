@@ -8,7 +8,7 @@ import { TIER_COLORS } from './hooks/useTierMarkers'
 export function buildVenuePopupHtml(marker: TierMarker): string {
   const sorted = [...marker.players].sort((a, b) => a.tier - b.tier)
 
-  let html = `<div style="font-family:system-ui,sans-serif;min-width:180px;max-width:280px">`
+  let html = `<div style="font-family:system-ui,sans-serif;min-width:180px;max-width:300px">`
 
   // Venue name
   html += `<div style="font-weight:700;font-size:13px;margin-bottom:6px;color:#f1f5f9">${marker.venueName}</div>`
@@ -23,16 +23,29 @@ export function buildVenuePopupHtml(marker: TierMarker): string {
     html += `</div>`
   }
 
-  // Game dates in window
+  // Game dates in window — expandable
   if (marker.gameDates.length > 0) {
-    const dateLabels = marker.gameDates.slice(0, 5).map((d) => {
+    const formatDate = (d: string) => {
       const date = new Date(d + 'T12:00:00Z')
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
       return `${months[date.getUTCMonth()]} ${date.getUTCDate()}`
-    })
-    const moreLabel = marker.gameDates.length > 5 ? ` +${marker.gameDates.length - 5} more` : ''
-    html += `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,0.15);font-size:10px;color:#64748b">`
-    html += `Games: ${dateLabels.join(', ')}${moreLabel}`
+    }
+
+    const visibleCount = 5
+    const visible = marker.gameDates.slice(0, visibleCount).map(formatDate)
+    const hidden = marker.gameDates.slice(visibleCount).map(formatDate)
+    const uid = `sv-dates-${marker.key.replace(/[^a-z0-9]/gi, '-')}`
+
+    html += `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,0.15);font-size:10px;color:#94a3b8">`
+    html += `Games: ${visible.join(', ')}`
+
+    if (hidden.length > 0) {
+      html += `<span id="${uid}-hidden" style="display:inline">`
+      html += ` <span onclick="document.getElementById('${uid}-hidden').style.display='none';document.getElementById('${uid}-full').style.display='inline'" style="cursor:pointer;color:#60a5fa;text-decoration:underline">+${hidden.length} more</span>`
+      html += `</span>`
+      html += `<span id="${uid}-full" style="display:none">, ${hidden.join(', ')}</span>`
+    }
+
     html += `</div>`
   }
 

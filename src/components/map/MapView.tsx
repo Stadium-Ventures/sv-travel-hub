@@ -89,6 +89,9 @@ export default function MapView() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
+      {/* Welcome explainer — dismissible */}
+      <MapWelcome />
+
       {/* Schedule banner */}
       {!hasSchedules && (
         <div className="rounded-lg bg-surface border border-border px-4 py-3 text-sm text-text-dim">
@@ -145,5 +148,34 @@ function MapTip() {
       <span className="font-medium text-accent-blue/90">TIP</span>{' '}
       {MAP_TIPS[tipIndex]}
     </p>
+  )
+}
+
+function MapWelcome() {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem('sv-map-welcome-dismissed') === '1' } catch { return false }
+  })
+  if (dismissed) return null
+  return (
+    <div className="rounded-lg bg-surface border border-border px-5 py-4 relative">
+      <button
+        onClick={() => { setDismissed(true); try { localStorage.setItem('sv-map-welcome-dismissed', '1') } catch {} }}
+        className="absolute top-3 right-4 text-xs text-text-dim hover:text-text"
+      >
+        Got it
+      </button>
+      <h3 className="text-sm font-semibold text-text mb-2">Player Map</h3>
+      <p className="text-xs text-text-dim leading-relaxed">
+        This map shows where your players have games in the selected date range.
+        Each dot is a venue — <span className="text-[#ef4444] font-medium">red</span> for must-see players,{' '}
+        <span className="text-[#f97316] font-medium">orange</span> for high priority,{' '}
+        <span className="text-[#6b7280] font-medium">gray</span> for standard.
+        The dashed circle shows what's drivable from your home base.
+      </p>
+      <p className="text-xs text-text-dim leading-relaxed mt-1.5">
+        Click any dot to see who's playing there and when. Click a player's name to view their full schedule.
+        Use the date range and home base controls above to explore different windows and locations.
+      </p>
+    </div>
   )
 }
