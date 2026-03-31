@@ -525,7 +525,7 @@ function ParseWarnings({ warnings }: { warnings: string[] }) {
   )
 }
 
-function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; springTraining: boolean }) {
+function VerifyResultsPanel({ log, springTraining: _springTraining }: { log: AssignmentChange[]; springTraining: boolean }) {
   const reassigned = log.filter((e) => e.action === 'reassigned')
   const notFound = log.filter((e) => e.action === 'not-found')
   const assignments = useScheduleStore((s) => s.playerTeamAssignments)
@@ -545,7 +545,7 @@ function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; 
         {estimatedCount > 0 && (
           <span className="flex items-center gap-1 text-accent-orange">
             <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
-            {estimatedCount} best guess
+            {estimatedCount} unconfirmed
           </span>
         )}
         {reassigned.length > 0 && (
@@ -571,7 +571,7 @@ function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; 
         )}
         {estimatedCount > 0 && (
           <p className="text-text-dim">
-            <span className="font-medium text-accent-orange">Best guess</span> — rosters aren't published yet{springTraining ? ' (spring training)' : ''}, so we're using last year's team + one level promotion. These will update automatically once official rosters are released.
+            <span className="font-medium text-accent-orange">Unconfirmed</span> — according to the MLB Stats API, {estimatedCount === 1 ? 'this player does' : 'these players do'} not have an official affiliate assigned yet. We're using last year's team + one level promotion as an estimate. Click "Check Assignments" to refresh.
           </p>
         )}
         {reassigned.length > 0 && (
@@ -629,7 +629,7 @@ function VerifyResultsPanel({ log, springTraining }: { log: AssignmentChange[]; 
         <p className="text-[11px] text-accent-green">All players verified on current rosters. No changes.</p>
       )}
       {reassigned.length === 0 && notFound.length === 0 && confirmedCount > 0 && estimatedCount > 0 && (
-        <p className="text-[11px] text-text-dim">{confirmedCount} confirmed, {estimatedCount} best guess. Check again after opening day for full accuracy.</p>
+        <p className="text-[11px] text-text-dim">{confirmedCount} confirmed, {estimatedCount} unconfirmed. Click "Check Assignments" to refresh from the MLB Stats API.</p>
       )}
     </div>
   )

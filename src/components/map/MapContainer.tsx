@@ -18,6 +18,8 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
   const homeMarkerRef = useRef<import('leaflet').Marker | null>(null)
   const radiusCircleRef = useRef<import('leaflet').Circle | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [initError, setInitError] = useState<string | null>(null)
+  const [initStatus, setInitStatus] = useState('Initializing map...')
 
   const homeBase = useTripStore((s) => s.homeBase)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
@@ -32,6 +34,8 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
     let cancelled = false
 
     async function init() {
+      try {
+      setInitStatus('Loading Leaflet...')
       const L = await import('leaflet')
       leafletRef.current = L
 
@@ -59,14 +63,20 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
         document.head.appendChild(link2)
       }
 
-      // Load MarkerCluster JS (attaches to window.L)
+      setInitStatus('Loading MarkerCluster...')
       await import('leaflet.markercluster')
+
+      // Verify markerClusterGroup is available
+      if (typeof (L as any).markerClusterGroup !== 'function') {
+        throw new Error('leaflet.markercluster loaded but L.markerClusterGroup is not a function')
+      }
 
       // Custom styles
       injectMapStyles()
 
       if (cancelled || !mapRef.current) return
 
+      setInitStatus('Creating map...')
       const { homeBase: hb } = useTripStore.getState()
       const map = L.map(mapRef.current).setView([hb.lat, hb.lng], 6)
 
@@ -93,7 +103,14 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
       })
 
       mapInstance.current = map
+      setInitStatus('')
       setLoaded(true)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('Map init failed:', err)
+        setInitError(msg)
+        setInitStatus('')
+      }
     }
 
     init()
@@ -199,10 +216,19 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
   }, [loaded, tierMarkers])
 
   return (
-    <div
-      ref={mapRef}
-      className="w-full rounded-lg border border-border"
-      style={{ height: 'calc(100vh - 160px)', minHeight: '500px' }}
-    />
+    <div className="relative w-full rounded-lg border border-border" style={{ height: 'calc(100vh - 160px)', minHeight: '500px' }}>
+      <div ref={mapRef} className="absolute inset-0 rounded-lg" />
+      {(initStatus || initError) && (
+        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-surface/80 z-[1000]">
+          <div className="text-center">
+            {initError ? (
+              <p className="text-sm text-accent-red">Map failed to load: {initError}</p>
+            ) : (
+              <p className="text-sm text-text-dim">{initStatus}</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
