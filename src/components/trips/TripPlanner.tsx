@@ -1928,7 +1928,10 @@ function FlyInCard({
                     )}
                   </div>
                   {stop.source === 'hs-lookup' && !stop.isHome && (
-                    <p className="text-[10px] text-accent-orange/60 mt-0.5">📍 Location approximate — away game venue estimated from home field area</p>
+                    <p className="text-[10px] text-accent-orange/60 mt-0.5">
+                      📍 Location approximate — away game venue estimated from home field area.{' '}
+                      <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${stop.teamLabel || stop.venue.name} high school baseball field`)}`} target="_blank" rel="noopener noreferrer" className="text-accent-blue/70 hover:text-accent-blue underline">Confirm on Google Maps ↗</a>
+                    </p>
                   )}
                   {isTueDay && <p className="mt-0.5 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>}
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -2025,7 +2028,10 @@ function FlyInCard({
                   )}
                 </div>
                 {visit.source === 'hs-lookup' && !visit.isHome && (
-                  <p className="text-[10px] text-accent-orange/60 mt-0.5">📍 Location approximate — away game venue estimated from home field area</p>
+                  <p className="text-[10px] text-accent-orange/60 mt-0.5">
+                    📍 Location approximate — away game venue estimated from home field area.{' '}
+                    <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${visit.teamLabel || visit.venue.name} high school baseball field`)}`} target="_blank" rel="noopener noreferrer" className="text-accent-blue/70 hover:text-accent-blue underline">Confirm on Google Maps ↗</a>
+                  </p>
                 )}
                 {isTue && (
                   <p className="mt-1 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>

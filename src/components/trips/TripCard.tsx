@@ -544,7 +544,17 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                               )}
                             </div>
                             {stop.source === 'hs-lookup' && !stop.isHome && (
-                              <p className="text-[10px] text-accent-orange/60 mt-0.5">📍 Location approximate — away game venue estimated from home field area</p>
+                              <p className="text-[10px] text-accent-orange/60 mt-0.5">
+                                📍 Location approximate — away game venue estimated from home field area.{' '}
+                                <a
+                                  href={`https://www.google.com/maps/search/${encodeURIComponent(`${stop.awayTeam || stop.venueName} high school baseball field`)}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-accent-blue/70 hover:text-accent-blue underline"
+                                >
+                                  Confirm on Google Maps ↗
+                                </a>
+                              </p>
                             )}
                             {/* Players inline */}
                             <div className="mt-1 flex flex-wrap items-center gap-1">
