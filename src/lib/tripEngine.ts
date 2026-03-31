@@ -1236,8 +1236,9 @@ export async function generateTrips(
       })
 
       for (const v of clusterVenues) {
-        // Skip if we've already added this venue (same coords, different team label)
-        const venueCoordStr = coordKey(v.entry.venue.coords)
+        // Skip if we've already added this venue (same coords within ~100m, different team label or game record)
+        // Use 3 decimal places (~100m) instead of coordKey's 4dp (~11m) to catch venues with slightly different coords
+        const venueCoordStr = `${v.entry.venue.coords.lat.toFixed(3)},${v.entry.venue.coords.lng.toFixed(3)}`
         if (usedVenueCoords.has(venueCoordStr)) continue
 
         // Don't extend a trip for T3-only stops — not worth an extra day of travel
