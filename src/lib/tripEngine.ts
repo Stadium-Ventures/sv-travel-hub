@@ -1236,10 +1236,14 @@ export async function generateTrips(
       })
 
       for (const v of clusterVenues) {
-        // Skip if we've already added this venue (same coords within ~100m, different team label or game record)
-        // Use 3 decimal places (~100m) instead of coordKey's 4dp (~11m) to catch venues with slightly different coords
+        // Skip if we've already added this venue (same coords within ~100m)
         const venueCoordStr = `${v.entry.venue.coords.lat.toFixed(3)},${v.entry.venue.coords.lng.toFixed(3)}`
         if (usedVenueCoords.has(venueCoordStr)) continue
+
+        // Skip if ALL players at this venue are already covered by existing stops
+        // (catches same-venue duplicates regardless of coord precision)
+        const newPlayers = [...v.entry.players].filter(n => !allPlayerNames.has(n))
+        if (newPlayers.length === 0 && stops.length >= 1) continue
 
         // Don't extend a trip for T3-only stops — not worth an extra day of travel
         const hasHighTier = [...v.entry.players].some(n => {
