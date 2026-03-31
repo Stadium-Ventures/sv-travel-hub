@@ -570,11 +570,17 @@ export default function TripPlanner() {
               <input
                 type="date"
                 value={startDate}
-                min={new Date().toISOString().slice(0, 10)}
                 onChange={(e) => {
-                  const today = new Date().toISOString().slice(0, 10)
-                  const val = e.target.value < today ? today : e.target.value
-                  setDateRange(val, endDate)
+                  const val = e.target.value
+                  if (!val) return
+                  // Auto-bump end date if start moves past it
+                  if (val > endDate) {
+                    const end = new Date(val + 'T12:00:00')
+                    end.setDate(end.getDate() + 7)
+                    setDateRange(val, end.toISOString().split('T')[0]!)
+                  } else {
+                    setDateRange(val, endDate)
+                  }
                 }}
                 className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
               />
@@ -679,7 +685,7 @@ export default function TripPlanner() {
             className="rounded border-border accent-accent-blue"
           />
           Prioritize overdue players
-          <span className="text-text-dim/50">(boost players who haven't been visited recently)</span>
+          <span className="text-text-dim/50">(boost players who haven't been visited recently according to the <a href="https://sv-heartbeat.vercel.app/" target="_blank" rel="noopener noreferrer" className="text-accent-blue hover:underline">Heartbeat app</a>)</span>
         </label>
 
         {/* Priority players */}
@@ -830,7 +836,12 @@ export default function TripPlanner() {
                         {r.status === 'fly-in-only' && tripNum > 0 && (
                           <>Too far to drive from {homeBaseName} — requires a flight. <span className="text-accent-blue font-medium">See Trip #{tripNum}.</span></>
                         )}
-                        {(r.status === 'included' || r.status === 'separate-trip' || r.status === 'fly-in-only') && tripNum === 0 && (
+                        {r.status === 'fly-in-only' && tripNum === 0 && (
+                          <span className="text-accent-orange">
+                            {r.reason ?? `Too far to drive from ${homeBaseName} — requires a flight, but no fly-in trip was generated. Try a wider date range or increase Max Flight.`}
+                          </span>
+                        )}
+                        {(r.status === 'included' || r.status === 'separate-trip') && tripNum === 0 && (
                           <span className="text-accent-orange">Has games but not in a numbered trip yet.</span>
                         )}
                         {r.status === 'unreachable' && (
