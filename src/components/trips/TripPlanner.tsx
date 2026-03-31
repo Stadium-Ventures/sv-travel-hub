@@ -246,6 +246,18 @@ export default function TripPlanner() {
   const endDate = useTripStore((s) => s.endDate)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const priorityPlayers = useTripStore((s) => s.priorityPlayers)
+
+  // Read ?priority=PlayerName from URL (cross-app link from Insight Engine)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const priority = params.get('priority')
+    if (priority && !priorityPlayers.includes(priority)) {
+      useTripStore.getState().setPriorityPlayers([priority])
+      // Clean URL without reload
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const tripPlan = useTripStore((s) => s.tripPlan)
   const computing = useTripStore((s) => s.computing)
   const progressStep = useTripStore((s) => s.progressStep)
