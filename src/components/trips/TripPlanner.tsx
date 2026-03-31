@@ -836,11 +836,27 @@ export default function TripPlanner() {
                         {r.status === 'fly-in-only' && tripNum > 0 && (
                           <>Too far to drive from {homeBaseName} — requires a flight. <span className="text-accent-blue font-medium">See Trip #{tripNum}.</span></>
                         )}
-                        {r.status === 'fly-in-only' && tripNum === 0 && (
-                          <span className="text-accent-orange">
-                            {r.reason ?? `Too far to drive from ${homeBaseName} — requires a flight, but no fly-in trip was generated. Try a wider date range or increase Max Flight.`}
+                        {r.status === 'fly-in-only' && tripNum === 0 && (() => {
+                          // Diagnostic: check why the fly-in isn't displayed
+                          const inFullList = tripPlan.flyInVisits.some(v => v.playerNames.includes(r.playerName))
+                          const inDisplayed = displayedFlyIns.some(v => v.playerNames.includes(r.playerName))
+                          const totalFlyIns = tripPlan.flyInVisits.length
+
+                          if (inDisplayed) {
+                            // In the list but not found by trip numbering — shouldn't happen
+                            return <span className="text-accent-orange">Fly-in exists but trip numbering failed — try regenerating.</span>
+                          }
+                          if (inFullList && !inDisplayed) {
+                            return <span className="text-accent-orange">
+                              Fly-in trip was generated but not displayed (showing {displayedFlyIns.length} of {totalFlyIns} fly-ins). This is a bug — please report.
+                            </span>
+                          }
+                          // Not in the fly-in list at all
+                          return <span className="text-accent-orange">
+                            Beyond driving range from {homeBaseName}. The engine found games but couldn't build a fly-in trip.
+                            {' '}Check that schedules are loaded (click "Load all schedules" above) and try a wider date range.
                           </span>
-                        )}
+                        })()}
                         {(r.status === 'included' || r.status === 'separate-trip') && tripNum === 0 && (
                           <span className="text-accent-orange">Has games but not in a numbered trip yet.</span>
                         )}
