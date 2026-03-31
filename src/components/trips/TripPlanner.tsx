@@ -851,10 +851,12 @@ export default function TripPlanner() {
                               Fly-in trip was generated but not displayed (showing {displayedFlyIns.length} of {totalFlyIns} fly-ins). This is a bug — please report.
                             </span>
                           }
-                          // Not in the fly-in list at all
+                          // Not in the fly-in list at all — show diagnostic trace
+                          const diag = tripPlan.flyInDiagnostic?.[r.playerName]
                           return <span className="text-accent-orange">
                             Beyond driving range from {homeBaseName}. The engine found games but couldn't build a fly-in trip.
                             {' '}Check that schedules are loaded (click "Load all schedules" above) and try a wider date range.
+                            {diag && <span className="block mt-1 text-[10px] text-text-dim/60 font-mono">Debug: {diag}</span>}
                           </span>
                         })()}
                         {(r.status === 'included' || r.status === 'separate-trip') && tripNum === 0 && (

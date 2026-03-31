@@ -1058,6 +1058,26 @@ export async function generateTrips(
   const flyInVisits: FlyInVisit[] = []
   const flyInCovered = new Set<string>()
 
+  // Diagnostic: trace fly-in pipeline for priority players
+  const flyInDiag = new Map<string, string[]>()
+  for (const pName of priorityPlayers) {
+    const inFlyInList = playersForFlyIns.includes(pName)
+    const gamesForPlayer = eligibleGames.filter(g => g.playerNames.includes(pName))
+    const gamesWithCoords = gamesForPlayer.filter(g => g.venue.coords.lat !== 0 || g.venue.coords.lng !== 0)
+    const gamesBeyondDrive = gamesWithCoords.filter(g => {
+      const dm = homeToVenue.get(coordKey(g.venue.coords)) ?? Infinity
+      return dm > maxDriveMinutes
+    })
+    flyInDiag.set(pName, [
+      `inFlyInList=${inFlyInList}`,
+      `eligibleGames=${gamesForPlayer.length}`,
+      `withCoords=${gamesWithCoords.length}`,
+      `beyondDrive=${gamesBeyondDrive.length}`,
+      gamesWithCoords.length > 0 ? `coords=${gamesWithCoords[0]!.venue.coords.lat.toFixed(2)},${gamesWithCoords[0]!.venue.coords.lng.toFixed(2)}` : 'no-coords',
+      gamesWithCoords.length > 0 ? `venue=${gamesWithCoords[0]!.venue.name}` : '',
+    ])
+  }
+
   // Confidence priority for taking highest per venue
   const confidenceRank: Record<string, number> = { high: 3, medium: 2, low: 1 }
 
@@ -1502,6 +1522,17 @@ export async function generateTrips(
     coveragePercent: totalTarget > 0 ? Math.round((totalCovered / eligiblePlayers.size) * 100) : 0,
     priorityResults: priorityResults.length > 0 ? priorityResults : undefined,
     nearMisses: filteredNearMisses.length > 0 ? filteredNearMisses : undefined,
+    flyInDiagnostic: (() => {
+      if (flyInDiag.size === 0) return undefined
+      const result: Record<string, string> = {}
+      for (const [name, traces] of flyInDiag) {
+        const inFlyIns = flyInVisits.some(v => v.playerNames.includes(name))
+        const inWeekMap = [...flyInWeekMap.values()].some(e => e.players.has(name))
+        traces.push(`inWeekMap=${inWeekMap}`, `inFinalFlyIns=${inFlyIns}`, `totalFlyIns=${flyInVisits.length}`)
+        result[name] = traces.filter(Boolean).join(' | ')
+      }
+      return result
+    })(),
   }
 }
 

@@ -125,4 +125,5 @@ export interface TripPlan {
   priorityResults?: PriorityResult[]
   nearMisses?: NearMiss[]
   doubleUps?: DoubleUp[]
+  flyInDiagnostic?: Record<string, string> // priority player name → diagnostic trace
 }
