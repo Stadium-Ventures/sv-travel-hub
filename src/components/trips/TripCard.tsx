@@ -17,7 +17,7 @@ interface Props {
 
 function formatGameTime(timeStr?: string, source?: ScheduleSource): string {
   if (!timeStr) return ''
-  if (source && source !== 'mlb-api') return 'TBD'
+  if (source && source !== 'mlb-api') return 'Unconfirmed'
   const d = new Date(timeStr)
   if (isNaN(d.getTime())) return ''
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }) + ' ET'
@@ -387,7 +387,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             // Check for TBD times on multi-stop days
             for (const [day, dayStops] of dayAssignments) {
               if (dayStops.length >= 2) {
-                const tbdStops = dayStops.filter(s => !formatGameTime(s.gameTime, s.source) || formatGameTime(s.gameTime, s.source) === 'TBD')
+                const tbdStops = dayStops.filter(s => !formatGameTime(s.gameTime, s.source) || formatGameTime(s.gameTime, s.source) === 'Unconfirmed')
                 if (tbdStops.length >= 2) {
                   const names = tbdStops.flatMap(s => s.players).join(', ')
                   items.push({
@@ -403,7 +403,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
               if (dayStops.length >= 2) {
                 const withTimes = dayStops
                   .map((s) => ({ stop: s, time: formatGameTime(s.gameTime, s.source) }))
-                  .filter((s) => s.time && s.time !== 'TBD')
+                  .filter((s) => s.time && s.time !== 'Unconfirmed')
                 // Group by time
                 const byTime = new Map<string, typeof withTimes>()
                 for (const s of withTimes) {
@@ -509,8 +509,8 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                               </span>
                               {gameTime && (
                                 <span
-                                  className={`text-[10px] text-text-dim/60 ${gameTime === 'TBD' ? 'cursor-help' : ''}`}
-                                  title={gameTime === 'TBD' ? 'Game time hasn\'t been posted yet. Check the team schedule closer to game day for the start time.' : undefined}
+                                  className={`text-[10px] text-text-dim/60 ${gameTime === 'Unconfirmed' ? 'cursor-help' : ''}`}
+                                  title={gameTime === 'Unconfirmed' ? 'Game time hasn\'t been posted yet. Check the team schedule closer to game day for the start time.' : undefined}
                                 >{gameTime}</span>
                               )}
                               {stop.confidence && stop.confidence !== 'high' && (
@@ -539,7 +539,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                               })()}
                               {stop.sourceUrl && (
                                 <a href={stop.sourceUrl} target="_blank" rel="noopener noreferrer"
-                                  className="text-[10px] text-text-dim/50 hover:text-accent-blue"
+                                  className="text-[11px] text-accent-blue/60 hover:text-accent-blue underline"
                                   title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
                               )}
                             </div>

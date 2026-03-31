@@ -135,7 +135,7 @@ function DoubleUpCard({
           <span className="text-[10px] text-accent-red" title="Not enough time between games">&#10007; Tight</span>
         )}
         {du.timeFeasible === null && (
-          <span className="text-[10px] text-accent-orange" title="Game times unknown">? Times TBD</span>
+          <span className="text-[10px] text-accent-orange" title="Game times unknown">? Times Unconfirmed</span>
         )}
       </div>
 
