@@ -1323,7 +1323,16 @@ export async function generateTrips(
     // Always count players as covered even if venue is in a combo
     for (const name of entry.players) flyInCovered.add(name)
     const venueCoordKey = coordKey(entry.venue.coords)
-    if (comboVenuesUsed.has(venueCoordKey)) continue // already in a combo
+    // Skip venues claimed by combos — UNLESS the entry has a priority player
+    // who isn't already in the combo's fly-in visit
+    if (comboVenuesUsed.has(venueCoordKey)) {
+      const hasPriorityNotInCombo = [...entry.players].some(n => {
+        if (!prioritySet.has(n)) return false
+        // Check if this player is already covered by a combo fly-in
+        return !flyInVisits.some(v => v.isCombo && v.playerNames.includes(n))
+      })
+      if (!hasPriorityNotInCombo) continue
+    }
     const sortedDates = [...entry.dates].sort()
     // Trim to a 3-day trip window centered on the best day (prefer Tuesday)
     const bestDate = sortedDates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY) ?? sortedDates[0]!
