@@ -329,7 +329,20 @@ export default function TripPlanner() {
   }
 
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
-  const flyInLimit = 5 // Hard cap on fly-in results
+  const flyInLimit = 5
+
+  // Always include fly-ins with priority players, then fill remaining slots up to limit
+  const displayedFlyIns = useMemo(() => {
+    if (!tripPlan) return []
+    const priorityFlyIns = tripPlan.flyInVisits.filter(v =>
+      v.playerNames.some(n => priorityPlayers.includes(n))
+    )
+    const otherFlyIns = tripPlan.flyInVisits.filter(v =>
+      !v.playerNames.some(n => priorityPlayers.includes(n))
+    )
+    const remaining = Math.max(0, flyInLimit - priorityFlyIns.length)
+    return [...priorityFlyIns, ...otherFlyIns.slice(0, remaining)]
+  }, [tripPlan, priorityPlayers, flyInLimit])
   const [showOverlaps, setShowOverlaps] = useState(false)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const cachedProTeamIds = useScheduleStore((s) => s.cachedProTeamIds)
@@ -770,7 +783,7 @@ export default function TripPlanner() {
               | { type: 'flyin'; visit: typeof tripPlan.flyInVisits[0] }
             const prUnified: PrUnifiedItem[] = [
               ...tripPlan.trips.map((trip) => ({ type: 'road' as const, trip })),
-              ...tripPlan.flyInVisits.slice(0, flyInLimit).map((visit) => ({ type: 'flyin' as const, visit })),
+              ...displayedFlyIns.map((visit) => ({ type: 'flyin' as const, visit })),
             ]
             if (sortBy === 'date') {
               prUnified.sort((a, b) => {
@@ -877,7 +890,7 @@ export default function TripPlanner() {
             return (
             <>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatCard label="Total Trips" value={tripPlan.trips.length + Math.min(tripPlan.flyInVisits.length, flyInLimit)} scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
+              <StatCard label="Total Trips" value={tripPlan.trips.length + displayedFlyIns.length} scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
               <div title={`${allTripPlayerNames.length} of your ${totalEligible} players appear in at least one trip option.`}>
                 <StatCard label="Players in Trips" value={allTripPlayerNames.length} accent="blue" scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
               </div>
@@ -912,7 +925,7 @@ export default function TripPlanner() {
               | { type: 'flyin'; visit: typeof tripPlan.flyInVisits[0] }
             const statusUnified: StatusUnified[] = [
               ...tripPlan.trips.map((trip) => ({ type: 'road' as const, trip })),
-              ...tripPlan.flyInVisits.slice(0, flyInLimit).map((visit) => ({ type: 'flyin' as const, visit })),
+              ...displayedFlyIns.map((visit) => ({ type: 'flyin' as const, visit })),
             ]
             if (sortBy === 'date') {
               statusUnified.sort((a, b) => {
@@ -984,7 +997,7 @@ export default function TripPlanner() {
                 trip,
                 sortDate: trip.anchorGame.date,
               })),
-              ...tripPlan.flyInVisits.slice(0, flyInLimit).map((visit) => ({
+              ...displayedFlyIns.map((visit) => ({
                 type: 'flyin' as const,
                 visit,
                 sortDate: visit.dates[0] ?? '',
