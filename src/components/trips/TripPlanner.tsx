@@ -852,9 +852,11 @@ export default function TripPlanner() {
                             </span>
                           }
                           // Not in the fly-in list at all — show diagnostic trace
+                          const diag = tripPlan.flyInDiagnostic?.[r.playerName]
                           return <span className="text-accent-orange">
                             Beyond driving range from {homeBaseName}. The engine found games but couldn't build a fly-in trip.
                             {' '}Check that schedules are loaded (click "Load all schedules" above) and try a wider date range.
+                            {diag && <span className="block mt-1 text-[10px] text-text-dim/60 font-mono">Debug: {diag}</span>}
                           </span>
                         })()}
                         {(r.status === 'included' || r.status === 'separate-trip') && tripNum === 0 && (
@@ -980,14 +982,19 @@ export default function TripPlanner() {
             const prioInTrip = priorityPlayers.filter((n) => findPrioTripNum(n) > 0)
             const prioMissing = priorityPlayers.filter((n) => findPrioTripNum(n) === 0)
             return (
-              <div className={`rounded-lg px-3 py-2 ${prioMissing.length > 0 ? 'bg-accent-red/10 border border-accent-red/30' : 'bg-accent-green/10 border border-accent-green/30'}`}>
+              <div className={`rounded-lg px-3 py-2 ${prioMissing.length > 0 ? 'bg-accent-orange/10 border border-accent-orange/30' : 'bg-accent-green/10 border border-accent-green/30'}`}>
                 <p className="text-sm font-medium">
-                  {prioMissing.length > 0
-                    ? <span className="text-accent-red">Priority player {prioMissing.join(', ')} not found in any trip option</span>
-                    : <span className="text-accent-green">
-                        {prioInTrip.map((n) => `${n} → Trip #${findPrioTripNum(n)}`).join(' · ')}
-                      </span>
-                  }
+                  {prioInTrip.length > 0 && (
+                    <span className="text-accent-green">
+                      {prioInTrip.map((n) => `${n} → Trip #${findPrioTripNum(n)}`).join(' · ')}
+                    </span>
+                  )}
+                  {prioInTrip.length > 0 && prioMissing.length > 0 && (
+                    <span className="text-text-dim/30 mx-2">|</span>
+                  )}
+                  {prioMissing.length > 0 && (
+                    <span className="text-accent-red">{prioMissing.join(', ')} not found in any trip option</span>
+                  )}
                 </p>
               </div>
             )
