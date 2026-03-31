@@ -1368,16 +1368,19 @@ export async function generateTrips(
   })
 
   for (const visit of flyInVisits) {
-    // Deduplicate venues — 1 fly-in per venue (keep best score, already sorted)
     const venueKey = `${visit.venue.coords.lat.toFixed(3)},${visit.venue.coords.lng.toFixed(3)}`
-    if (venuesSeen.has(venueKey)) continue
+    const hasPriorityPlayer = visit.playerNames.some(n => prioritySet.has(n))
+
+    // Deduplicate venues — 1 fly-in per venue (keep best score, already sorted)
+    // EXCEPTION: always keep fly-ins with priority players even if venue is taken
+    if (venuesSeen.has(venueKey) && !hasPriorityPlayer) continue
     venuesSeen.add(venueKey)
 
     // Check if any player in this fly-in still has room
     const hasRoom = visit.playerNames.some((n) => {
       return (playerFlyInCount.get(n) ?? 0) < MAX_FLYINS_PER_PLAYER
     })
-    if (hasRoom) {
+    if (hasRoom || hasPriorityPlayer) {
       diverseFlyIns.push(visit)
       for (const name of visit.playerNames) {
         playerFlyInCount.set(name, (playerFlyInCount.get(name) ?? 0) + 1)
