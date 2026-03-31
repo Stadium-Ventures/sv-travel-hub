@@ -3,7 +3,7 @@ import { useRosterStore } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useVenueStore } from '../../store/venueStore'
-import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, estimateDriveMinutes, HOME_BASE } from '../../lib/tripEngine'
+import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, estimateDriveMinutes } from '../../lib/tripEngine'
 import { formatDate, formatDriveTime } from '../../lib/formatters'
 import type { GameEvent } from '../../types/schedule'
 import type { Coordinates } from '../../types/roster'
@@ -43,6 +43,8 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
   const endDate = useTripStore((s) => s.endDate)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const maxFlightHours = useTripStore((s) => s.maxFlightHours)
+  const homeBase = useTripStore((s) => s.homeBase)
+  const homeBaseName = useTripStore((s) => s.homeBaseName)
   const venueState = useVenueStore((s) => s.venues)
 
   const [viewMode, setViewMode] = useState<ViewMode>('summary')
@@ -138,13 +140,13 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
       .filter(Boolean) as Array<{ tripNum: number; trip: import('../../types/schedule').TripCandidate; status?: string }>
   }, [tripPlan, tripStatuses, playerName])
 
-  // Compute drive minutes from Orlando for each game (for full schedule view)
+  // Compute drive minutes from home base for each game (for full schedule view)
   const gamesWithDrive = useMemo(() => {
     return allGames.map((g) => {
-      const driveMin = estimateDriveMinutes(HOME_BASE, g.venue.coords)
+      const driveMin = estimateDriveMinutes(homeBase, g.venue.coords)
       return { game: g, driveMin }
     })
-  }, [allGames])
+  }, [allGames, homeBase])
 
   // Determine range color for a drive time
   function getRangeInfo(driveMin: number): { label: string; color: string; borderColor: string; bgColor: string } {
@@ -426,7 +428,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                   </span>
                 </h3>
                 <p className="mt-0.5 text-[11px] text-text-dim">
-                  {formatDate(startDate)} — {formatDate(endDate)} | Drive times from Orlando
+                  {formatDate(startDate)} — {formatDate(endDate)} | Drive times from {homeBaseName}
                 </p>
               </div>
             </div>
@@ -517,7 +519,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                       </span>
 
                       {/* Drive time + range badge */}
-                      <span className={`text-right font-medium ${range.color} whitespace-nowrap`} title={`${range.label} — ${formatDriveTime(driveMin)} from Orlando`}>
+                      <span className={`text-right font-medium ${range.color} whitespace-nowrap`} title={`${range.label} — ${formatDriveTime(driveMin)} from ${homeBaseName}`}>
                         {formatDriveTime(driveMin)}
                       </span>
                     </div>
