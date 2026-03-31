@@ -1101,7 +1101,13 @@ export async function generateTrips(
   }>()
 
   const MAX_FLYIN_ENTRIES = 200 // cap fly-in map to prevent OOM
-  for (const game of eligibleGames) {
+  // Process priority player games first so they aren't cut by the cap
+  // (HS games are merged last in the array and get dropped on long date ranges)
+  const priorityGamesFirst = [
+    ...eligibleGames.filter(g => g.playerNames.some(n => prioritySet.has(n))),
+    ...eligibleGames.filter(g => !g.playerNames.some(n => prioritySet.has(n))),
+  ]
+  for (const game of priorityGamesFirst) {
     if (flyInWeekMap.size >= MAX_FLYIN_ENTRIES) break
     if (game.venue.coords.lat === 0 && game.venue.coords.lng === 0) continue
     const relevantPlayers = game.playerNames.filter((n) => playersForFlyIns.includes(n))
