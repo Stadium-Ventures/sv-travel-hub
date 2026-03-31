@@ -1352,6 +1352,19 @@ export async function generateTrips(
     for (const name of entry.players) flyInCovered.add(name)
   }
 
+  // Diagnostic: record pre-dedup state for priority players
+  for (const pName of priorityPlayers) {
+    const diag = flyInDiag.get(pName)
+    if (!diag) continue
+    const inPreDedup = flyInVisits.some(v => v.playerNames.includes(pName))
+    const comboUsedVenue = (() => {
+      // Check if this player's venue was claimed by a combo
+      const playerGames = eligibleGames.filter(g => g.playerNames.includes(pName) && g.venue.coords.lat !== 0)
+      return playerGames.some(g => comboVenuesUsed.has(coordKey(g.venue.coords)))
+    })()
+    diag.push(`comboClaimedVenue=${comboUsedVenue}`, `preDedupFlyIns=${inPreDedup}(${flyInVisits.filter(v => v.playerNames.includes(pName)).length})`)
+  }
+
   // Deduplicate fly-ins: keep at most 2 entries per player to ensure diversity.
   // For each player, keep their best fly-in (highest score) and best Tuesday fly-in.
   // This prevents a priority player from filling all 10 result slots.
@@ -1402,6 +1415,15 @@ export async function generateTrips(
   // filter out all others (priority players may only appear in 1-2 fly-ins)
   // Cap at 25 fly-ins — more than enough for display, saves computation
   const finalDiverseFlyIns = diverseFlyIns.slice(0, 25)
+
+  // Diagnostic: record post-dedup state for priority players
+  for (const pName of priorityPlayers) {
+    const diag = flyInDiag.get(pName)
+    if (!diag) continue
+    const inDiverse = diverseFlyIns.some(v => v.playerNames.includes(pName))
+    const inFinal25 = finalDiverseFlyIns.some(v => v.playerNames.includes(pName))
+    diag.push(`postDedup=${inDiverse}(${diverseFlyIns.filter(v => v.playerNames.includes(pName)).length})`, `inTop25=${inFinal25}`)
+  }
 
   // Replace flyInVisits with diverse set
   flyInVisits.length = 0
