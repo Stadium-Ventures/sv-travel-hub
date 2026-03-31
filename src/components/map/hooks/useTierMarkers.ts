@@ -26,6 +26,8 @@ export const TIER_COLORS: Record<number, string> = {
 export function useTierMarkers(
   venuePlayerMap: Map<string, VenuePlayer[]>,
   dateFilteredVenues: Set<string> | null,
+  filterStart?: string,
+  filterEnd?: string,
 ) {
   const venues = useVenueStore((s) => s.venues)
   const proGames = useScheduleStore((s) => s.proGames)
@@ -47,6 +49,9 @@ export function useTierMarkers(
       const gameDates = new Set<string>()
       const allGames = [...proGames, ...ncaaGames, ...hsGames]
       for (const game of allGames) {
+        // Filter to date range
+        if (filterStart && game.date < filterStart) continue
+        if (filterEnd && game.date > filterEnd) continue
         // Match game to this venue by coordinate proximity
         const dLat = venueInfo.coords.lat - game.venue.coords.lat
         const dLng = venueInfo.coords.lng - game.venue.coords.lng
@@ -57,6 +62,8 @@ export function useTierMarkers(
       // Also match pro venues by key pattern
       if (key.startsWith('pro-')) {
         for (const game of proGames) {
+          if (filterStart && game.date < filterStart) continue
+          if (filterEnd && game.date > filterEnd) continue
           const gameKey = `pro-${game.venue.name.toLowerCase().replace(/\s+/g, '-')}`
           if (gameKey === key) gameDates.add(game.date)
         }
@@ -76,5 +83,5 @@ export function useTierMarkers(
     }
 
     return markers
-  }, [venues, venuePlayerMap, dateFilteredVenues, proGames, ncaaGames, hsGames])
+  }, [venues, venuePlayerMap, dateFilteredVenues, filterStart, filterEnd, proGames, ncaaGames, hsGames])
 }

@@ -72,7 +72,10 @@ export function estimateDriveMinutes(a: Coordinates, b: Coordinates): number {
 // Estimate total travel time for a fly-in visit (hours)
 // Includes: drive to airport (0.5h) + security/boarding (1.5h) + flight + deplane/rental (1h)
 function estimateFlightHours(distanceKm: number): number {
-  const flightHours = distanceKm / 800 // ~800 km/h avg commercial speed
+  // Short flights are slower (more time climbing/descending)
+  // NYC→CLT (~965km) should be ~2h, not 1.2h at cruise speed
+  const effectiveSpeed = distanceKm < 800 ? 500 : distanceKm < 2000 ? 600 : 750
+  const flightHours = Math.max(1, distanceKm / effectiveSpeed)
   const overhead = 3 // airport + rental car on both ends
   return Math.round((flightHours + overhead) * 10) / 10
 }

@@ -49,6 +49,23 @@ export function injectMapStyles() {
     .sv-cluster-t2 { background: ${TIER_COLORS[2]}; }
     .sv-cluster-t3 { background: ${TIER_COLORS[3]}; }
     .sv-cluster-t4 { background: ${TIER_COLORS[4]}; }
+
+    /* Dark popup theme */
+    .leaflet-popup-content-wrapper {
+      background: #1e293b !important;
+      color: #f1f5f9 !important;
+      border-radius: 10px !important;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+    }
+    .leaflet-popup-tip {
+      background: #1e293b !important;
+    }
+    .leaflet-popup-close-button {
+      color: #94a3b8 !important;
+    }
+    .leaflet-popup-close-button:hover {
+      color: #f1f5f9 !important;
+    }
   `
   document.head.appendChild(style)
 }

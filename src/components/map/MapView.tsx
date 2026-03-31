@@ -38,7 +38,7 @@ export default function MapView() {
   // Data hooks
   const venuePlayerMap = useVenuePlayerMap()
   const dateFilteredVenues = useDateFilteredVenues(filterStart, filterEnd)
-  const tierMarkers = useTierMarkers(venuePlayerMap, dateFilteredVenues)
+  const tierMarkers = useTierMarkers(venuePlayerMap, dateFilteredVenues, filterStart, filterEnd)
 
   // Are any schedules loaded?
   const hasSchedules = proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0
@@ -108,6 +108,9 @@ export default function MapView() {
         venueCount={tierMarkers.length}
       />
 
+      {/* Tips */}
+      <MapTip />
+
       {/* Map */}
       <MapContainer tierMarkers={tierMarkers} />
 
@@ -119,5 +122,28 @@ export default function MapView() {
         />
       )}
     </div>
+  )
+}
+
+const MAP_TIPS = [
+  'Red dots = must-see players (Tier 1). Orange = high priority. Gray = standard.',
+  'Click any dot to see who plays there and when. Click a name to view their full schedule.',
+  'The dashed circle shows your drive radius from the Trip Planner starting location.',
+  'Change the date range to see where your players have games in any window.',
+  'Use "Next 30 days" to see the full upcoming month at a glance.',
+  'The map shows where players will be playing — away games appear at the opponent\'s venue.',
+]
+
+function MapTip() {
+  const [tipIndex, setTipIndex] = useState(0)
+  useEffect(() => {
+    const interval = setInterval(() => setTipIndex((i) => (i + 1) % MAP_TIPS.length), 8000)
+    return () => clearInterval(interval)
+  }, [])
+  return (
+    <p className="text-[11px] text-accent-blue/70">
+      <span className="font-medium text-accent-blue/90">TIP</span>{' '}
+      {MAP_TIPS[tipIndex]}
+    </p>
   )
 }
