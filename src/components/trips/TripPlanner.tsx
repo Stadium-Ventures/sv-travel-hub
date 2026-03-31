@@ -852,11 +852,9 @@ export default function TripPlanner() {
                             </span>
                           }
                           // Not in the fly-in list at all — show diagnostic trace
-                          const diag = tripPlan.flyInDiagnostic?.[r.playerName]
                           return <span className="text-accent-orange">
                             Beyond driving range from {homeBaseName}. The engine found games but couldn't build a fly-in trip.
                             {' '}Check that schedules are loaded (click "Load all schedules" above) and try a wider date range.
-                            {diag && <span className="block mt-1 text-[10px] text-text-dim/60 font-mono">Debug: {diag}</span>}
                           </span>
                         })()}
                         {(r.status === 'included' || r.status === 'separate-trip') && tripNum === 0 && (
@@ -1803,8 +1801,8 @@ function FlyInCard({
     : (visit.source === 'hs-lookup' && visit.confidence === 'high')
       ? { label: 'Home Game (MaxPreps)', color: 'bg-accent-green/15 text-accent-green', tip: 'Confirmed home game from MaxPreps schedule.' }
       : (visit.source === 'ncaa-lookup' && visit.confidence === 'high')
-        ? { label: 'School Visit (D1Baseball)', color: 'bg-accent-green/15 text-accent-green', tip: 'Confirmed from D1Baseball schedule.' }
-        : { label: 'School Visit (est.)', color: 'bg-accent-orange/15 text-accent-orange', tip: 'Location is estimated — we know the game exists but aren\'t sure of the exact venue. Click "Verify" to confirm.' }
+        ? { label: visit.isHome ? 'School Visit (D1Baseball)' : 'Away Game (D1Baseball)', color: visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400', tip: visit.isHome ? 'Confirmed home game from D1Baseball schedule.' : 'Away game — location is based on the opposing team\'s home venue.' }
+        : { label: visit.isHome ? 'School Visit (est.)' : 'Away Game (est.)', color: 'bg-accent-orange/15 text-accent-orange', tip: 'Location is estimated — we know the game exists but aren\'t sure of the exact venue. Click "Verify" to confirm.' }
 
   return (
     <div className={`rounded-xl border bg-surface p-5 ${isPriority ? 'border-purple-500/40' : 'border-border'}`}>

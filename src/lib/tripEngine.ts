@@ -1334,13 +1334,10 @@ export async function generateTrips(
       if (!hasPriorityNotInCombo) continue
     }
     const sortedDates = [...entry.dates].sort()
-    // Trim to a 3-day trip window centered on the best day (prefer Tuesday)
-    const bestDate = sortedDates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY) ?? sortedDates[0]!
-    const tripDates = getTripWindow(bestDate).filter(d => sortedDates.includes(d) || d === bestDate)
-    // Use the trip window dates (max 3 days)
-    const finalDates = tripDates.length > 0 ? tripDates : [bestDate]
+    // Use all actual game dates, capped at 3 days max trip length
+    const finalDates = sortedDates.slice(0, 3)
 
-    const isTuesday = new Date(bestDate + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY
+    const isTuesday = finalDates.some(d => new Date(d + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY)
     const flyInPlayerNames = [...entry.players]
     const flyInBreakdown = computeScoreBreakdown(flyInPlayerNames, playerMap, isTuesday, urgencyMap, [])
     flyInVisits.push({

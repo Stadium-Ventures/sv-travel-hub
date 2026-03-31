@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-// import { useTripStore } from '../../store/tripStore'
+import { useTripStore } from '../../store/tripStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
 // import { generateTripIcs, downloadIcs } from '../../lib/icsExport'
 import { haversineKm, HOME_BASE } from '../../lib/tripEngine'
@@ -238,14 +238,14 @@ function assignStopsToDays(stops: VenueStop[], suggestedDays: string[]): Map<str
   return dayMap
 }
 
-export function generateItineraryText(trip: TripCandidate, index: number, stops: VenueStop[], playerMap: Map<string, RosterPlayer>): string {
+export function generateItineraryText(trip: TripCandidate, index: number, stops: VenueStop[], playerMap: Map<string, RosterPlayer>, homeBase = 'Orlando, FL'): string {
   const startDate = formatDate(trip.suggestedDays[0]!)
   const endDate = formatDate(trip.suggestedDays[trip.suggestedDays.length - 1]!)
   const dayCount = trip.suggestedDays.length
   const dateLabel = dayCount === 1 ? startDate : `${startDate} – ${endDate}`
 
   let text = `Trip #${index} — ${dateLabel} (${dayCount} day${dayCount !== 1 ? 's' : ''})\n`
-  text += `Drive from Orlando: ~${formatDriveTime(trip.driveFromHomeMinutes)}\n`
+  text += `Drive from ${homeBase}: ~${formatDriveTime(trip.driveFromHomeMinutes)}\n`
 
   const dayAssignments = assignStopsToDays(stops, trip.suggestedDays)
   for (const [day, dayStops] of dayAssignments) {
@@ -276,6 +276,7 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
 }
 
 function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick, overlappingTrips: _overlappingTrips }: Props) {
+  const homeBaseName = useTripStore((s) => s.homeBaseName)
   const stops = useMemo(() => buildVenueStops(trip, playerMap), [trip, playerMap])
   const [expanded, setExpanded] = useState(defaultExpanded)
 
@@ -353,7 +354,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             {dateLabel} · {[...allPlayers].map(n => {
               const p = playerMap.get(n)
               return p ? n : n
-            }).join(', ')} · ~{formatDriveTime(trip.driveFromHomeMinutes)} from Orlando
+            }).join(', ')} · ~{formatDriveTime(trip.driveFromHomeMinutes)} from {homeBaseName}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2 text-[11px] text-text-dim/60">
@@ -456,7 +457,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                   )}
                   {dayIdx === 0 && trip.driveFromHomeMinutes > 0 && (
                     <span className="text-[11px] text-text-dim/60 ml-auto">
-                      Drive from Orlando: ~{formatDriveTime(trip.driveFromHomeMinutes)}
+                      Drive from {homeBaseName}: ~{formatDriveTime(trip.driveFromHomeMinutes)}
                     </span>
                   )}
                   {dayIdx === displayDays.length - 1 && lastStop && (
