@@ -421,7 +421,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
 
           {/* Warnings — TBD times, estimated locations */}
           {(() => {
-            const items: Array<{ summary: string; detail: string }> = []
+            const items: Array<{ summary: string; detail: string; defaultOpen?: boolean }> = []
 
             // Check for TBD times on multi-stop days
             for (const [day, dayStops] of dayAssignments) {
@@ -472,6 +472,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                 detail: isHsAway
                   ? `${playerList} has an away game vs. ${s.homeTeam}. We don't have the exact address of the opponent's field, so the map pin is placed near ${s.orgLabel}'s home field as a rough estimate. The actual game could be in a different location — check the schedule to confirm the venue before planning your route.`
                   : `The game for ${playerList} at ${s.orgLabel} is on the schedule, but we haven't confirmed the exact venue. Click "Verify" on the stop below to double-check the location.`,
+                defaultOpen: true,
               })
             }
 
@@ -479,7 +480,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             return (
               <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2 space-y-2">
                 {items.map((item, i) => (
-                  <ExpandableWarning key={i} summary={item.summary} detail={item.detail} />
+                  <ExpandableWarning key={i} summary={item.summary} detail={item.detail} defaultOpen={item.defaultOpen} />
                 ))}
               </div>
             )
@@ -639,8 +640,8 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
 }
 
 /* ── Expandable warning row ── click to show/hide details ── */
-function ExpandableWarning({ summary, detail }: { summary: string; detail: string }) {
-  const [open, setOpen] = useState(false)
+function ExpandableWarning({ summary, detail, defaultOpen = false }: { summary: string; detail: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <div>
       <button
