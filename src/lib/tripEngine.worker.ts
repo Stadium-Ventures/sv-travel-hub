@@ -14,6 +14,7 @@ export interface WorkerParams {
   maxFlightHours: number
   playerTeamAssignments?: Record<string, { teamId: number; sportId: number; teamName: string }>
   homeBase?: { lat: number; lng: number }
+  maxTripDays?: number
 }
 
 export type WorkerMessage =
@@ -45,6 +46,7 @@ self.onmessage = async (e: MessageEvent<WorkerParams>) => {
       params.maxFlightHours,
       params.playerTeamAssignments,
       params.homeBase,
+      params.maxTripDays,
     )
     self.postMessage({ type: 'result', plan } satisfies WorkerMessage)
   } catch (err) {

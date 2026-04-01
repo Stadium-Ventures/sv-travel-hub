@@ -271,6 +271,8 @@ export default function TripPlanner() {
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const setHomeBase = useTripStore((s) => s.setHomeBase)
+  const familyTrip = useTripStore((s) => s.familyTrip)
+  const setFamilyTrip = useTripStore((s) => s.setFamilyTrip)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const clearTrips = useTripStore((s) => s.clearTrips)
   const proGames = useScheduleStore((s) => s.proGames)
@@ -1241,6 +1243,21 @@ export default function TripPlanner() {
                     {label}
                   </button>
                 ))}
+                <span className="mx-1 text-text-dim/20">|</span>
+                <button
+                  onClick={() => {
+                    const next = !familyTrip
+                    setFamilyTrip(next)
+                  }}
+                  title={familyTrip
+                    ? 'Family trip mode ON — showing longer trips (up to 3 days / 2 nights). Click to switch back to short trips.'
+                    : 'Default: short trips (up to 2 days / 1 night). Turn on Family trip mode to allow longer trips.'}
+                  className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    familyTrip ? 'bg-purple-500/20 text-purple-400' : 'bg-gray-800/50 text-text-dim hover:text-text'
+                  }`}
+                >
+                  {familyTrip ? 'Family trip ON' : 'Family trip'}
+                </button>
               </div>
 
               <div className="space-y-4">

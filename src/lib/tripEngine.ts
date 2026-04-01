@@ -111,16 +111,24 @@ function getDatesInRange(start: string, end: string): string[] {
   return dates
 }
 
-// Get trip window around any anchor day (day before through 1 day after = 3 days max, excluding Sundays)
-function getTripWindow(anchorDate: string): string[] {
+// Get trip window around any anchor day, excluding Sundays.
+// maxDays=2: anchor + day after (1 night max). maxDays=3: day before + anchor + day after (2 nights max).
+function getTripWindow(anchorDate: string, maxDays = 3): string[] {
   const anchor = new Date(anchorDate + 'T12:00:00Z')
-  const dayBefore = new Date(anchor)
-  dayBefore.setUTCDate(dayBefore.getUTCDate() - 1)
   const dayAfter = new Date(anchor)
   dayAfter.setUTCDate(dayAfter.getUTCDate() + 1)
 
+  let rangeStart: string
+  if (maxDays >= 3) {
+    const dayBefore = new Date(anchor)
+    dayBefore.setUTCDate(dayBefore.getUTCDate() - 1)
+    rangeStart = dayBefore.toISOString().split('T')[0]!
+  } else {
+    rangeStart = anchorDate
+  }
+
   return getDatesInRange(
-    dayBefore.toISOString().split('T')[0]!,
+    rangeStart,
     dayAfter.toISOString().split('T')[0]!,
   ).filter(isDateAllowed) // Exclude Sundays
 }
@@ -494,6 +502,7 @@ export async function generateTrips(
   maxFlightHours: number = 4,
   playerTeamAssignments?: Record<string, { teamId: number; sportId: number; teamName: string }>,
   homeBase: Coordinates = DEFAULT_HOME_BASE,
+  maxTripDays: number = 2,
 ): Promise<TripPlan> {
   onProgress?.('Preparing', 'Filtering eligible players...')
 
@@ -634,7 +643,7 @@ export async function generateTrips(
       if (venueWeekCount >= 2) continue
       seenVenueWeeks.set(venueWeekKey, venueWeekCount + 1)
 
-      const window = getTripWindow(anchorDay)
+      const window = getTripWindow(anchorDay, maxTripDays)
 
       // Find nearby games within the trip window using date index (O(1) per day vs O(n) filter)
       const windowGames: typeof eligibleGames = []
@@ -714,10 +723,9 @@ export async function generateTrips(
 
       // Build suggested days: only include days with actual games + 1 return travel day if multi-venue
       const gameDays = [...new Set([anchor.date, ...nearbyGames.map((g) => g.date)])].sort()
-      // If there are multiple venues, add 1 return day (max 3 day trip total)
       const needsReturnDay = nearbyGames.length > 0 || homeToAnchor > 90 // >1.5h drive merits a return day
       let suggestedDays = gameDays
-      if (needsReturnDay && gameDays.length < 3) {
+      if (needsReturnDay && gameDays.length < maxTripDays) {
         const lastGameDay = new Date(gameDays[gameDays.length - 1]! + 'T12:00:00Z')
         const returnDay = new Date(lastGameDay)
         returnDay.setUTCDate(returnDay.getUTCDate() + 1)
@@ -1210,8 +1218,8 @@ export async function generateTrips(
 
       if (cluster.length < 2) continue // single-venue, handle as regular fly-in
 
-      // Build combo fly-in from this cluster (max 3 stops for a 3-day trip)
-      const clusterVenues = cluster.slice(0, 3).map((idx) => venues[idx]!)
+      // Build combo fly-in from this cluster (max stops = maxTripDays)
+      const clusterVenues = cluster.slice(0, maxTripDays).map((idx) => venues[idx]!)
 
       // Find best anchor date across all cluster venues (prefer Tuesday)
       const allDates = new Set<string>()
@@ -1220,7 +1228,7 @@ export async function generateTrips(
       }
       const sortedDates = [...allDates].sort()
       const bestDate = sortedDates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY) ?? sortedDates[0]!
-      const tripWindow = getTripWindow(bestDate)
+      const tripWindow = getTripWindow(bestDate, maxTripDays)
 
       // Assign one venue per day within the trip window (dedup by venue coords)
       const stops: import('../types/schedule').FlyInStop[] = []
