@@ -502,7 +502,7 @@ export async function generateTrips(
   maxFlightHours: number = 4,
   playerTeamAssignments?: Record<string, { teamId: number; sportId: number; teamName: string }>,
   homeBase: Coordinates = DEFAULT_HOME_BASE,
-  maxTripDays: number = 2,
+  maxTripDays: number = 3,
 ): Promise<TripPlan> {
   onProgress?.('Preparing', 'Filtering eligible players...')
 

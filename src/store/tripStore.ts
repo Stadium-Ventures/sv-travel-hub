@@ -42,7 +42,7 @@ interface TripState {
   maxFlightHours: number
   useHeartbeatBoost: boolean
   priorityPlayers: string[]
-  familyTrip: boolean
+  maxNights: number
   homeBase: Coordinates
   homeBaseName: string
   tripPlan: TripPlan | null
@@ -57,7 +57,7 @@ interface TripState {
   setMaxFlightHours: (hours: number) => void
   setPriorityPlayers: (players: string[]) => void
   setHomeBase: (coords: Coordinates, name: string) => void
-  setFamilyTrip: (v: boolean) => void
+  setMaxNights: (n: number) => void
   generateTrips: () => Promise<void>
   clearTrips: () => void
   setTripStatus: (tripKey: string, status: TripStatus | null) => void
@@ -77,7 +77,7 @@ export const useTripStore = create<TripState>()(
   maxFlightHours: 4,
   useHeartbeatBoost: false, // default OFF — Heartbeat data is a snapshot of now, not the future
   priorityPlayers: [],
-  familyTrip: false,
+  maxNights: 2,
   homeBase: DEFAULT_HOME_BASE,
   homeBaseName: 'Orlando, FL',
   tripPlan: null,
@@ -93,7 +93,7 @@ export const useTripStore = create<TripState>()(
   setUseHeartbeatBoost: (useHeartbeatBoost: boolean) => set({ useHeartbeatBoost }),
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
   setHomeBase: (homeBase, homeBaseName) => set({ homeBase, homeBaseName }),
-  setFamilyTrip: (familyTrip: boolean) => set({ familyTrip }),
+  setMaxNights: (maxNights: number) => set({ maxNights }),
   clearTrips: () => set({ tripPlan: null, selectedTripIndex: null }),
   setSelectedTripIndex: (selectedTripIndex) => set({ selectedTripIndex }),
   setTripStatus: (tripKey, status) => set((state) => {
@@ -108,7 +108,7 @@ export const useTripStore = create<TripState>()(
 
   generateTrips: async () => {
     if (get().computing) return
-    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers, useHeartbeatBoost, homeBase, homeBaseName, familyTrip } = get()
+    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers, useHeartbeatBoost, homeBase, homeBaseName, maxNights } = get()
     const players = useRosterStore.getState().players
     let scheduleState = useScheduleStore.getState()
 
@@ -274,7 +274,7 @@ export const useTripStore = create<TripState>()(
       maxFlightHours,
       playerTeamAssignments: scheduleState.playerTeamAssignments,
       homeBase,
-      maxTripDays: familyTrip ? 3 : 2,
+      maxTripDays: maxNights + 1,
     }
 
     const worker = new Worker(
@@ -341,7 +341,7 @@ export const useTripStore = create<TripState>()(
         useHeartbeatBoost: persisted?.useHeartbeatBoost ?? false,
         priorityPlayers: persisted?.priorityPlayers ?? [],
         tripStatuses: persisted?.tripStatuses ?? {},
-        familyTrip: persisted?.familyTrip ?? false,
+        maxNights: persisted?.maxNights ?? 2,
         homeBase: persisted?.homeBase ?? DEFAULT_HOME_BASE,
         homeBaseName: persisted?.homeBaseName ?? 'Orlando, FL',
       }),
@@ -353,7 +353,7 @@ export const useTripStore = create<TripState>()(
         maxDriveMinutes: state.maxDriveMinutes,
         maxFlightHours: state.maxFlightHours,
         useHeartbeatBoost: state.useHeartbeatBoost,
-        familyTrip: state.familyTrip,
+        maxNights: state.maxNights,
         priorityPlayers: state.priorityPlayers,
         tripStatuses: state.tripStatuses,
         homeBase: state.homeBase,
@@ -367,7 +367,7 @@ export const useTripStore = create<TripState>()(
           maxFlightHours: p?.maxFlightHours ?? 8,
           priorityPlayers: p?.priorityPlayers ?? [],
           tripStatuses: p?.tripStatuses ?? {},
-          familyTrip: p?.familyTrip ?? false,
+          maxNights: p?.maxNights ?? 2,
           homeBase: p?.homeBase ?? DEFAULT_HOME_BASE,
           homeBaseName: p?.homeBaseName ?? 'Orlando, FL',
           tripPlan: null, // Always start fresh

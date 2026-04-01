@@ -271,8 +271,8 @@ export default function TripPlanner() {
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const setHomeBase = useTripStore((s) => s.setHomeBase)
-  const familyTrip = useTripStore((s) => s.familyTrip)
-  const setFamilyTrip = useTripStore((s) => s.setFamilyTrip)
+  const maxNights = useTripStore((s) => s.maxNights)
+  const setMaxNights = useTripStore((s) => s.setMaxNights)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const clearTrips = useTripStore((s) => s.clearTrips)
   const proGames = useScheduleStore((s) => s.proGames)
@@ -303,7 +303,7 @@ export default function TripPlanner() {
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
   const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly' | 'multi' | 'anchor'>('all')
   const [tripLengthFilter, setTripLengthFilter] = useState<'all' | '1' | '2' | '3'>('all')
-  const [tierFilter, setTierFilter] = useState<'all' | 'priority'>('all')
+  // tierFilter removed — was adding clutter to the results toolbar
   const [anchorPlayerNames, setAnchorPlayerNames] = useState<string[]>([])
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
 
@@ -652,6 +652,28 @@ export default function TripPlanner() {
             />
             <p className="mt-0.5 text-[9px] text-text-dim/50" title="Total travel time including airport time and flight. Options beyond this limit won't be shown.">
               {maxFlightHours <= 4 ? 'Southeast US only' : maxFlightHours <= 6 ? 'Reaches Midwest, Northeast' : maxFlightHours <= 8 ? 'Most domestic destinations' : maxFlightHours <= 10 ? 'Coast-to-coast + Hawaii' : 'All domestic + nearby international'}
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-text-dim">
+              Max Trip: {maxNights} night{maxNights !== 1 ? 's' : ''}
+            </label>
+            <div className="flex gap-1">
+              {([1, 2, 3] as const).map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setMaxNights(n)}
+                  title={n === 1 ? 'Day trips and overnights only — back home the next day.' : n === 2 ? 'Up to 2 nights away — covers most multi-stop trips.' : 'Longer trips up to 3 nights — good when family is coming along.'}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                    maxNights === n ? 'bg-accent-blue/20 text-accent-blue ring-1 ring-accent-blue/30' : 'bg-gray-950 border border-border text-text-dim hover:text-text'
+                  }`}
+                >
+                  {n} night{n !== 1 ? 's' : ''}
+                </button>
+              ))}
+            </div>
+            <p className="mt-0.5 text-[9px] text-text-dim/50">
+              {maxNights === 1 ? 'Quick trips — 1-2 days max' : maxNights === 2 ? 'Standard trips — up to 3 days' : 'Extended trips — up to 4 days (family trips)'}
             </p>
           </div>
           <div>
@@ -1137,18 +1159,6 @@ export default function TripPlanner() {
                 if (actualDays !== targetDays) return false
               }
 
-              // Tier filter — must have at least one T1 or T2 player
-              if (tierFilter === 'priority') {
-                const names = item.type === 'road'
-                  ? [...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)]
-                  : item.visit.playerNames
-                const hasPriority = names.some(n => {
-                  const tier = playerMap.get(n)?.tier
-                  return tier === 1 || tier === 2
-                })
-                if (!hasPriority) return false
-              }
-
               return true
             }
 
@@ -1226,38 +1236,6 @@ export default function TripPlanner() {
                     {label}
                   </button>
                 ))}
-                <span className="mx-1 text-text-dim/20">|</span>
-                <span className="text-[11px] text-text-dim">Tier:</span>
-                {([
-                  { key: 'all', label: 'Any', tip: 'Show trips with players of any tier.' },
-                  { key: 'priority', label: '⭐ Must-see', tip: 'Only show trips with at least one must-see or high-priority player (Tier 1 or 2).' },
-                ] as const).map(({ key, label, tip }) => (
-                  <button
-                    key={key}
-                    onClick={() => setTierFilter(key)}
-                    title={tip}
-                    className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                      tierFilter === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-                <span className="mx-1 text-text-dim/20">|</span>
-                <button
-                  onClick={() => {
-                    const next = !familyTrip
-                    setFamilyTrip(next)
-                  }}
-                  title={familyTrip
-                    ? 'Family trip mode ON — showing longer trips (up to 3 days / 2 nights). Click to switch back to short trips.'
-                    : 'Default: short trips (up to 2 days / 1 night). Turn on Family trip mode to allow longer trips.'}
-                  className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                    familyTrip ? 'bg-purple-500/20 text-purple-400' : 'bg-gray-800/50 text-text-dim hover:text-text'
-                  }`}
-                >
-                  {familyTrip ? 'Family trip ON' : 'Family trip'}
-                </button>
               </div>
 
               <div className="space-y-4">
