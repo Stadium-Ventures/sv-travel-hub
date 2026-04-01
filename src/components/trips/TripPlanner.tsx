@@ -659,21 +659,21 @@ export default function TripPlanner() {
               Max Trip: {maxNights} night{maxNights !== 1 ? 's' : ''}
             </label>
             <div className="flex gap-1">
-              {([1, 2, 3] as const).map((n) => (
+              {([1, 2, 3, 4] as const).map((n) => (
                 <button
                   key={n}
                   onClick={() => setMaxNights(n)}
-                  title={n === 1 ? 'Day trips and overnights only — back home the next day.' : n === 2 ? 'Up to 2 nights away — covers most multi-stop trips.' : 'Longer trips up to 3 nights — good when family is coming along.'}
+                  title={n === 1 ? 'Day trips and overnights only — back home the next day.' : n === 2 ? 'Up to 2 nights away — covers most multi-stop trips.' : n === 3 ? 'Up to 3 nights — good when family is coming along.' : 'Extended trips up to 4 nights away.'}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                     maxNights === n ? 'bg-accent-blue/20 text-accent-blue ring-1 ring-accent-blue/30' : 'bg-gray-950 border border-border text-text-dim hover:text-text'
                   }`}
                 >
-                  {n} night{n !== 1 ? 's' : ''}
+                  {n}
                 </button>
               ))}
             </div>
             <p className="mt-0.5 text-[9px] text-text-dim/50">
-              {maxNights === 1 ? 'Quick trips — 1-2 days max' : maxNights === 2 ? 'Standard trips — up to 3 days' : 'Extended trips — up to 4 days (family trips)'}
+              {maxNights === 1 ? 'Quick trips — 1-2 days max' : maxNights === 2 ? 'Standard trips — up to 3 days' : maxNights === 3 ? 'Extended trips — up to 4 days' : 'Long trips — up to 5 days'}
             </p>
           </div>
           <div>
