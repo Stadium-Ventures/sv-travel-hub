@@ -6,6 +6,34 @@ import { buildVenuePopupHtml } from './VenuePopup'
 import { TIER_COLORS } from './hooks/useTierMarkers'
 import type { TierMarker } from './hooks/useTierMarkers'
 
+// Nearest preset city name for a dragged custom location
+const STARTING_LOCATIONS = [
+  { name: 'Orlando, FL', lat: 28.5383, lng: -81.3792 },
+  { name: 'Denver, CO', lat: 39.7392, lng: -104.9903 },
+  { name: 'Phoenix, AZ', lat: 33.4484, lng: -112.0740 },
+  { name: 'Dallas, TX', lat: 32.7767, lng: -96.7970 },
+  { name: 'Atlanta, GA', lat: 33.7490, lng: -84.3880 },
+  { name: 'Nashville, TN', lat: 36.1627, lng: -86.7816 },
+  { name: 'Charlotte, NC', lat: 35.2271, lng: -80.8431 },
+  { name: 'Miami, FL', lat: 25.7617, lng: -80.1918 },
+  { name: 'Los Angeles, CA', lat: 34.0522, lng: -118.2437 },
+  { name: 'Chicago, IL', lat: 41.8781, lng: -87.6298 },
+  { name: 'New York, NY', lat: 40.7128, lng: -74.0060 },
+  { name: 'Houston, TX', lat: 29.7604, lng: -95.3698 },
+]
+
+function nearestCityLabel(lat: number, lng: number): string {
+  let best = STARTING_LOCATIONS[0]!
+  let bestDist = Infinity
+  for (const loc of STARTING_LOCATIONS) {
+    const d = (loc.lat - lat) ** 2 + (loc.lng - lng) ** 2
+    if (d < bestDist) { bestDist = d; best = loc }
+  }
+  // If within ~50 miles (~0.7 deg) of a preset, use its name
+  if (bestDist < 0.5) return best.name
+  return `Custom (near ${best.name})`
+}
+
 interface MapContainerProps {
   tierMarkers: TierMarker[]
 }
@@ -24,6 +52,7 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
   const homeBase = useTripStore((s) => s.homeBase)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
+  const dragOriginRef = useRef(false) // suppress map re-center after drag
 
   // Initialize Leaflet + MarkerCluster
   const mapInitialized = useRef(false)
@@ -107,16 +136,29 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
     if (homeMarkerRef.current) { map.removeLayer(homeMarkerRef.current); homeMarkerRef.current = null }
     if (radiusCircleRef.current) { map.removeLayer(radiusCircleRef.current); radiusCircleRef.current = null }
 
-    // Home base star marker
+    // Home base star marker — draggable
     const starIcon = L.divIcon({
       className: '',
-      html: `<div style="font-size:22px;text-shadow:0 0 6px rgba(0,0,0,0.7);line-height:1;color:#fbbf24" title="${homeBaseName}">&#9733;</div>`,
+      html: `<div style="font-size:22px;text-shadow:0 0 6px rgba(0,0,0,0.7);line-height:1;color:#fbbf24;cursor:grab" title="Drag to move home base">&#9733;</div>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
     })
-    homeMarkerRef.current = L.marker([homeBase.lat, homeBase.lng], { icon: starIcon, zIndexOffset: 1000 })
+    homeMarkerRef.current = L.marker([homeBase.lat, homeBase.lng], {
+      icon: starIcon,
+      zIndexOffset: 1000,
+      draggable: true,
+    })
       .addTo(map)
-      .bindPopup(`<div style="font-family:system-ui;font-size:12px;color:#f1f5f9"><strong>${homeBaseName}</strong><br/>Home Base</div>`)
+      .bindPopup(`<div style="font-family:system-ui;font-size:12px;color:#f1f5f9"><strong>${homeBaseName}</strong><br/>Home Base · Drag to move</div>`)
+
+    // Update store when marker is dragged to a new position
+    homeMarkerRef.current.on('dragend', () => {
+      const pos = homeMarkerRef.current?.getLatLng()
+      if (!pos) return
+      const label = nearestCityLabel(pos.lat, pos.lng)
+      dragOriginRef.current = true // prevent map re-center
+      useTripStore.getState().setHomeBase({ lat: pos.lat, lng: pos.lng }, label)
+    })
 
     // Drive radius circle
     const radiusKm = (maxDriveMinutes / 60) * 95 / 1.2
@@ -130,8 +172,12 @@ export default function MapContainer({ tierMarkers }: MapContainerProps) {
       fillOpacity: 0.03,
     }).addTo(map)
 
-    // Center map on new home base
-    map.setView([homeBase.lat, homeBase.lng], map.getZoom())
+    // Center map on new home base (skip if change came from dragging the marker)
+    if (dragOriginRef.current) {
+      dragOriginRef.current = false
+    } else {
+      map.setView([homeBase.lat, homeBase.lng], map.getZoom())
+    }
   }, [loaded, homeBase, homeBaseName, maxDriveMinutes])
 
   // Render/update markers when tierMarkers change

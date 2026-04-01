@@ -41,6 +41,7 @@ export default function DateRangeBar({
   const setHomeBase = useTripStore((s) => s.setHomeBase)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
+  const isPresetCity = STARTING_LOCATIONS.some((l) => l.name === homeBaseName)
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-surface border border-border px-3 py-2">
@@ -84,14 +85,17 @@ export default function DateRangeBar({
 
       {/* Home base */}
       <select
-        value={homeBaseName}
+        value={isPresetCity ? homeBaseName : '__custom__'}
         onChange={(e) => {
           const loc = STARTING_LOCATIONS.find((l) => l.name === e.target.value)
           if (loc) setHomeBase({ lat: loc.coords.lat, lng: loc.coords.lng }, loc.name)
         }}
-        title="Where are you based? Controls the star marker and drive radius circle."
+        title="Where are you based? Drag the star on the map to set a custom location."
         className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
       >
+        {!isPresetCity && (
+          <option value="__custom__">{homeBaseName}</option>
+        )}
         {STARTING_LOCATIONS.map((loc) => (
           <option key={loc.name} value={loc.name}>{loc.name}</option>
         ))}
