@@ -13,6 +13,7 @@ interface Props {
   defaultExpanded?: boolean
   onPlayerClick?: (playerName: string) => void
   overlappingTrips?: number[]
+  alternativeTrips?: TripCandidate[] // same players/destination, different dates
 }
 
 function formatGameTime(timeStr?: string, source?: ScheduleSource): string {
@@ -287,9 +288,12 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
   return text
 }
 
-function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick, overlappingTrips: _overlappingTrips }: Props) {
+function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick, overlappingTrips: _overlappingTrips, alternativeTrips }: Props) {
   const homeBaseName = useTripStore((s) => s.homeBaseName)
-  const stops = useMemo(() => buildVenueStops(trip, playerMap), [trip, playerMap])
+  const [selectedAltIndex, setSelectedAltIndex] = useState(-1) // -1 = primary trip
+  const allVariants = useMemo(() => [trip, ...(alternativeTrips ?? [])], [trip, alternativeTrips])
+  const activeTrip = selectedAltIndex === -1 ? trip : (allVariants[selectedAltIndex + 1] ?? trip)
+  const stops = useMemo(() => buildVenueStops(activeTrip, playerMap), [activeTrip, playerMap])
   const [expanded, setExpanded] = useState(defaultExpanded)
 
 
@@ -299,7 +303,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
   }
 
   // Compute total drive
-  let totalDrive = trip.driveFromHomeMinutes
+  let totalDrive = activeTrip.driveFromHomeMinutes
   for (const s of stops) totalDrive += s.driveFromPrev
   const lastStop = stops[stops.length - 1]
   if (lastStop) {
@@ -309,17 +313,17 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
 
   // Assign stops to days, then remove empty days (no reason to show "flex days" with no games)
   const { dayAssignments, displayDays } = useMemo(() => {
-    const assignments = assignStopsToDays(stops, trip.suggestedDays)
+    const assignments = assignStopsToDays(stops, activeTrip.suggestedDays)
     // Keep only days that have games, plus the last day as "return home" if it's after a game day
-    const daysWithGames = trip.suggestedDays.filter((d) => (assignments.get(d) ?? []).length > 0)
+    const daysWithGames = activeTrip.suggestedDays.filter((d) => (assignments.get(d) ?? []).length > 0)
     let days: string[]
     if (daysWithGames.length === 0) {
-      days = [trip.suggestedDays[0]!] // fallback
+      days = [activeTrip.suggestedDays[0]!] // fallback
     } else {
       const lastGameDay = daysWithGames[daysWithGames.length - 1]!
-      const lastSuggested = trip.suggestedDays[trip.suggestedDays.length - 1]!
+      const lastSuggested = activeTrip.suggestedDays[activeTrip.suggestedDays.length - 1]!
       // Add a return-home day after the last game day if there's one in the original window
-      if (lastGameDay !== lastSuggested && trip.suggestedDays.indexOf(lastSuggested) > trip.suggestedDays.indexOf(lastGameDay)) {
+      if (lastGameDay !== lastSuggested && activeTrip.suggestedDays.indexOf(lastSuggested) > activeTrip.suggestedDays.indexOf(lastGameDay)) {
         days = [...daysWithGames, lastSuggested]
       } else {
         days = [...daysWithGames]
@@ -327,7 +331,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
     }
 
     return { dayAssignments: assignments, displayDays: days }
-  }, [stops, trip.suggestedDays])
+  }, [stops, activeTrip.suggestedDays])
 
   const startDate = formatDate(displayDays[0]!)
   const endDate = formatDate(displayDays[displayDays.length - 1]!)
@@ -366,15 +370,50 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             {dateLabel} · {[...allPlayers].map(n => {
               const p = playerMap.get(n)
               return p ? n : n
-            }).join(', ')} · ~{formatDriveTime(trip.driveFromHomeMinutes)} from {homeBaseName}
+            }).join(', ')} · ~{formatDriveTime(activeTrip.driveFromHomeMinutes)} from {homeBaseName}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2 text-[11px] text-text-dim/60">
           <span>{dayCount} day{dayCount !== 1 ? 's' : ''}</span>
           <span className="text-text-dim/20">·</span>
-          <span>~{formatDriveTime(trip.driveFromHomeMinutes)} drive</span>
+          <span>~{formatDriveTime(activeTrip.driveFromHomeMinutes)} drive</span>
+          {allVariants.length > 1 && (
+            <span className="rounded-full bg-accent-blue/15 px-2 py-0.5 text-[10px] font-bold text-accent-blue">
+              {allVariants.length} dates
+            </span>
+          )}
         </div>
       </div>
+
+      {/* Alternative date selector — shown when multiple date options exist */}
+      {allVariants.length > 1 && expanded && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-text-dim mr-1">Dates:</span>
+          {allVariants.map((variant, vi) => {
+            const vDays = variant.suggestedDays
+            const vStart = formatDate(vDays[0]!)
+            const vEnd = vDays.length > 1 ? formatDate(vDays[vDays.length - 1]!) : null
+            const label = vEnd ? `${vStart} – ${vEnd}` : vStart
+            const isActive = vi === 0 ? selectedAltIndex === -1 : selectedAltIndex === vi - 1
+            const isTue = vDays.some(d => new Date(d + 'T12:00:00Z').getUTCDay() === 2)
+            return (
+              <button
+                key={vi}
+                onClick={(e) => { e.stopPropagation(); setSelectedAltIndex(vi === 0 ? -1 : vi - 1) }}
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  isActive
+                    ? 'bg-accent-blue/20 text-accent-blue ring-1 ring-accent-blue/30'
+                    : 'bg-gray-800/50 text-text-dim hover:text-text hover:bg-gray-700/50'
+                }`}
+              >
+                {label}
+                {isTue && <span className="ml-1 text-[9px] opacity-70">Tue</span>}
+                {vi === 0 && <span className="ml-1 text-[9px] opacity-50">best</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* Expanded: Day-by-day plan (each stop assigned to ONE day) */}
       {expanded && (
@@ -467,9 +506,9 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                       DOUBLE UP · {dayStops.length} games
                     </span>
                   )}
-                  {dayIdx === 0 && trip.driveFromHomeMinutes > 0 && (
+                  {dayIdx === 0 && activeTrip.driveFromHomeMinutes > 0 && (
                     <span className="text-[11px] text-text-dim/60 ml-auto">
-                      Drive from {homeBaseName}: ~{formatDriveTime(trip.driveFromHomeMinutes)}
+                      Drive from {homeBaseName}: ~{formatDriveTime(activeTrip.driveFromHomeMinutes)}
                     </span>
                   )}
                   {dayIdx === displayDays.length - 1 && lastStop && (

@@ -1052,25 +1052,60 @@ export default function TripPlanner() {
               })),
             ]
 
-            // Sort by date (chronological), or by score (road trips first by value, then fly-ins)
-            if (sortBy === 'date') {
-              unified.sort((a, b) => a.sortDate.localeCompare(b.sortDate))
-            } else {
-              unified.sort((a, b) => {
-                const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : (a.visit.visitValue)
-                const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : (b.visit.visitValue)
-                return scoreB - scoreA
-              })
+            // Sort by score first (best trips on top), then use date as tiebreaker
+            unified.sort((a, b) => {
+              const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : (a.visit.visitValue)
+              const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : (b.visit.visitValue)
+              return scoreB - scoreA
+            })
+
+            // --- Alternative Dates Grouping ---
+            // Group trips with the same players + destination into one card with date alternatives.
+            // Signature: type + sorted player names + venue coords (3 decimal places)
+            function getGroupKey(item: UnifiedItem): string {
+              if (item.type === 'road') {
+                const players = new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)])
+                const venueKey = `${item.trip.anchorGame.venue.coords.lat.toFixed(3)},${item.trip.anchorGame.venue.coords.lng.toFixed(3)}`
+                return `road|${[...players].sort().join(',')}|${venueKey}`
+              } else {
+                const venueKey = `${item.visit.venue.coords.lat.toFixed(3)},${item.visit.venue.coords.lng.toFixed(3)}`
+                return `flyin|${[...item.visit.playerNames].sort().join(',')}|${venueKey}`
+              }
             }
 
-            // Number trips sequentially — one counter across both types
-            const numbered = unified.map((item, i) => ({
-              ...item,
+            type GroupedItem = {
+              primary: UnifiedItem
+              alternatives: UnifiedItem[] // other date options (sorted by score, best first)
+            }
+
+            const groupMap = new Map<string, GroupedItem>()
+            const groupOrder: string[] = [] // preserve insertion order (= score order)
+            for (const item of unified) {
+              const key = getGroupKey(item)
+              const existing = groupMap.get(key)
+              if (existing) {
+                existing.alternatives.push(item)
+              } else {
+                groupMap.set(key, { primary: item, alternatives: [] })
+                groupOrder.push(key)
+              }
+            }
+            const grouped: GroupedItem[] = groupOrder.map(k => groupMap.get(k)!)
+
+            // Apply final sort to grouped list
+            if (sortBy === 'date') {
+              grouped.sort((a, b) => a.primary.sortDate.localeCompare(b.primary.sortDate))
+            }
+            // (score sort is already applied — primary is the best-scored variant)
+
+            // Number trips sequentially — one counter across groups
+            const numbered = grouped.map((group, i) => ({
+              ...group,
               displayIndex: i + 1,
             }))
 
-            // Apply all filters (transport type, trip length, tier)
-            const filtered = numbered.filter((item) => {
+            // Filter helper — works on the primary item of each group
+            function passesFilters(item: UnifiedItem): boolean {
               // Transport type filter
               if (tripFilter === 'drive' && item.type !== 'road') return false
               if (tripFilter === 'fly' && item.type !== 'flyin') return false
@@ -1113,17 +1148,21 @@ export default function TripPlanner() {
               }
 
               return true
-            })
+            }
 
+            const filtered = numbered.filter((group) => passesFilters(group.primary))
+
+            const totalCollapsed = unified.length - grouped.length // how many trips were collapsed
             return (
             <div id="section-road-trips">
               <div className="mb-3">
                 <h3 className="text-sm font-semibold text-text">
                   Your Trips
                   <span className="ml-2 text-xs font-normal text-text-dim">
-                    {filtered.length === unified.length
-                      ? `${unified.length} trip options`
-                      : `${filtered.length} of ${unified.length} trips`}
+                    {filtered.length === grouped.length
+                      ? `${grouped.length} trip options`
+                      : `${filtered.length} of ${grouped.length} trips`}
+                    {totalCollapsed > 0 && ` (${totalCollapsed} alt dates merged)`}
                   </span>
                 </h3>
               </div>
@@ -1205,24 +1244,32 @@ export default function TripPlanner() {
               </div>
 
               <div className="space-y-4">
-                {filtered.map((item, i) => {
-                  if (item.type === 'road') {
+                {filtered.map((group, i) => {
+                  const { primary, alternatives } = group
+                  if (primary.type === 'road') {
+                    const altTrips = alternatives
+                      .filter((a): a is typeof a & { type: 'road' } => a.type === 'road')
+                      .map(a => a.trip)
                     return (
                       <TripCard
-                        key={`road-${item.displayIndex}`}
-                        trip={item.trip}
-                        index={item.displayIndex}
+                        key={`road-${group.displayIndex}`}
+                        trip={primary.trip}
+                        index={group.displayIndex}
                         playerMap={playerMap}
                         defaultExpanded={i === 0}
                         onPlayerClick={setSelectedPlayer}
+                        alternativeTrips={altTrips.length > 0 ? altTrips : undefined}
                       />
                     )
                   } else {
+                    const altVisits = alternatives
+                      .filter((a): a is typeof a & { type: 'flyin' } => a.type === 'flyin')
+                      .map(a => a.visit)
                     return (
                       <FlyInCard
-                        key={`flyin-${item.displayIndex}`}
-                        visit={item.visit}
-                        index={item.displayIndex}
+                        key={`flyin-${group.displayIndex}`}
+                        visit={primary.visit}
+                        index={group.displayIndex}
                         players={players}
                         playerMap={playerMap}
                         priorityPlayers={priorityPlayers}
@@ -1230,6 +1277,7 @@ export default function TripPlanner() {
                         setCopiedFlyIn={setCopiedFlyIn}
                         onPlayerClick={setSelectedPlayer}
                         defaultExpanded={i === 0 && tripPlan.trips.length === 0}
+                        alternativeVisits={altVisits.length > 0 ? altVisits : undefined}
                       />
                     )
                   }
@@ -1758,6 +1806,7 @@ function TripAnchor({
 function FlyInCard({
   visit, index, players, playerMap, priorityPlayers,
   dateConflicts: _dateConflicts, copiedFlyIn: _copiedFlyIn, setCopiedFlyIn: _setCopiedFlyIn, onPlayerClick, defaultExpanded,
+  alternativeVisits,
 }: {
   visit: import('../../types/schedule').FlyInVisit
   index: number
@@ -1769,35 +1818,39 @@ function FlyInCard({
   setCopiedFlyIn: (key: string | null) => void
   onPlayerClick: (name: string) => void
   defaultExpanded?: boolean
+  alternativeVisits?: import('../../types/schedule').FlyInVisit[]
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded ?? false)
+  const [selectedAltIndex, setSelectedAltIndex] = useState(-1) // -1 = primary visit
+  const allVariants = useMemo(() => [visit, ...(alternativeVisits ?? [])], [visit, alternativeVisits])
+  const activeVisit = selectedAltIndex === -1 ? visit : (allVariants[selectedAltIndex + 1] ?? visit)
   const flyInHomeBaseName = useTripStore((s) => s.homeBaseName)
 
   // Derive org label — prefer teamLabel from trip engine (accurate per-team grouping)
-  const firstPlayer = players.find((p) => visit.playerNames.includes(p.playerName))
-  let orgLabel = visit.teamLabel ?? ''
+  const firstPlayer = players.find((p) => activeVisit.playerNames.includes(p.playerName))
+  let orgLabel = activeVisit.teamLabel ?? ''
   if (!orgLabel) {
-    if (visit.source === 'hs-lookup' && firstPlayer) orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
-    else if (visit.source === 'ncaa-lookup' && firstPlayer) orgLabel = firstPlayer.org
-    else if (visit.source === 'mlb-api' && firstPlayer) orgLabel = firstPlayer.org
+    if (activeVisit.source === 'hs-lookup' && firstPlayer) orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
+    else if (activeVisit.source === 'ncaa-lookup' && firstPlayer) orgLabel = firstPlayer.org
+    else if (activeVisit.source === 'mlb-api' && firstPlayer) orgLabel = firstPlayer.org
   }
 
-  const milesDisplay = Math.round(visit.distanceKm * 0.621).toLocaleString()
+  const milesDisplay = Math.round(activeVisit.distanceKm * 0.621).toLocaleString()
 
   // Date formatting
-  const firstDate = visit.dates[0]
-  const lastDate = visit.dates[visit.dates.length - 1]
+  const firstDate = activeVisit.dates[0]
+  const lastDate = activeVisit.dates[activeVisit.dates.length - 1]
   const dateLabel = firstDate && lastDate && firstDate !== lastDate
     ? `${formatDate(firstDate)} – ${formatDate(lastDate)}`
     : firstDate ? formatDate(firstDate) : ''
 
   // Natural language summary
-  const t1Names = visit.playerNames.filter((n) => playerMap.get(n)?.tier === 1)
-  const t2Names = visit.playerNames.filter((n) => playerMap.get(n)?.tier === 2)
-  const isPriority = visit.playerNames.some((n) => priorityPlayers.includes(n))
-  let summary = `Fly to ${visit.venue.name} to see ${visit.playerNames.length} player${visit.playerNames.length !== 1 ? 's' : ''}`
-  summary += ` — ${visit.isHome ? `${orgLabel || 'team'} home game` : `${orgLabel || 'team'} away series`}.`
-  summary += ` ~${visit.estimatedTravelHours}h travel (${milesDisplay} mi). Rental car likely needed.`
+  const t1Names = activeVisit.playerNames.filter((n) => playerMap.get(n)?.tier === 1)
+  const t2Names = activeVisit.playerNames.filter((n) => playerMap.get(n)?.tier === 2)
+  const isPriority = activeVisit.playerNames.some((n) => priorityPlayers.includes(n))
+  let summary = `Fly to ${activeVisit.venue.name} to see ${activeVisit.playerNames.length} player${activeVisit.playerNames.length !== 1 ? 's' : ''}`
+  summary += ` — ${activeVisit.isHome ? `${orgLabel || 'team'} home game` : `${orgLabel || 'team'} away series`}.`
+  summary += ` ~${activeVisit.estimatedTravelHours}h travel (${milesDisplay} mi). Rental car likely needed.`
   if (t1Names.length > 0) summary += ` Top priority: ${t1Names.join(', ')}.`
   if (t2Names.length > 0) summary += ` Also seeing: ${t2Names.join(', ')}.`
 
@@ -1809,8 +1862,8 @@ function FlyInCard({
     flyInWhy = `Only way to reach ${t1Names[0]} this window.`
   } else if (t1Names.length === 1) {
     flyInWhy = `Worth the flight — sees ${t1Names[0]} (must-see).`
-  } else if (visit.playerNames.length >= 3) {
-    flyInWhy = `Worth the flight — sees ${visit.playerNames.length} players at one venue.`
+  } else if (activeVisit.playerNames.length >= 3) {
+    flyInWhy = `Worth the flight — sees ${activeVisit.playerNames.length} players at one venue.`
   }
 
 
@@ -1824,21 +1877,21 @@ function FlyInCard({
     return etTime.getHours() < 15 // before 3 PM
   }
 
-  // For single-venue: check visit.gameTime; for combo: check last stop's gameTime
-  const lastGameTime = visit.isCombo && visit.stops && visit.stops.length > 1
-    ? visit.stops[visit.stops.length - 1]!.gameTime
-    : visit.gameTime
+  // For single-venue: check activeVisit.gameTime; for combo: check last stop's gameTime
+  const lastGameTime = activeVisit.isCombo && activeVisit.stops && activeVisit.stops.length > 1
+    ? activeVisit.stops[activeVisit.stops.length - 1]!.gameTime
+    : activeVisit.gameTime
   const couldFlyHomeSameDay = isEarlyGame(lastGameTime)
-  const totalDaysShown = visit.isCombo && visit.stops ? visit.stops.length + 1 : visit.dates.length + 1
+  const totalDaysShown = activeVisit.isCombo && activeVisit.stops ? activeVisit.stops.length + 1 : activeVisit.dates.length + 1
 
   // Source badge
-  const sourceBadge = visit.source === 'mlb-api'
-    ? { label: visit.isHome ? 'Home Game' : 'Away Game', color: visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400', tip: visit.isHome ? 'Confirmed home game from the MLB/MiLB schedule.' : 'Away game — location is based on the opposing team\'s home venue.' }
-    : (visit.source === 'hs-lookup' && visit.confidence === 'high')
+  const sourceBadge = activeVisit.source === 'mlb-api'
+    ? { label: activeVisit.isHome ? 'Home Game' : 'Away Game', color: activeVisit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400', tip: activeVisit.isHome ? 'Confirmed home game from the MLB/MiLB schedule.' : 'Away game — location is based on the opposing team\'s home venue.' }
+    : (activeVisit.source === 'hs-lookup' && activeVisit.confidence === 'high')
       ? { label: 'Home Game (MaxPreps)', color: 'bg-accent-green/15 text-accent-green', tip: 'Confirmed home game from MaxPreps schedule.' }
-      : (visit.source === 'ncaa-lookup' && visit.confidence === 'high')
-        ? { label: visit.isHome ? 'School Visit (D1Baseball)' : 'Away Game (D1Baseball)', color: visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400', tip: visit.isHome ? 'Confirmed home game from D1Baseball schedule.' : 'Away game — location is based on the opposing team\'s home venue.' }
-        : { label: visit.isHome ? 'School Visit (est.)' : 'Away Game (est.)', color: 'bg-accent-orange/15 text-accent-orange', tip: 'Location is estimated — we know the game exists but aren\'t sure of the exact venue. Click "Verify" to confirm.' }
+      : (activeVisit.source === 'ncaa-lookup' && activeVisit.confidence === 'high')
+        ? { label: activeVisit.isHome ? 'School Visit (D1Baseball)' : 'Away Game (D1Baseball)', color: activeVisit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400', tip: activeVisit.isHome ? 'Confirmed home game from D1Baseball schedule.' : 'Away game — location is based on the opposing team\'s home venue.' }
+        : { label: activeVisit.isHome ? 'School Visit (est.)' : 'Away Game (est.)', color: 'bg-accent-orange/15 text-accent-orange', tip: 'Location is estimated — we know the game exists but aren\'t sure of the exact venue. Click "Verify" to confirm.' }
 
   return (
     <div className={`rounded-xl border bg-surface p-5 ${isPriority ? 'border-purple-500/40' : 'border-border'}`}>
@@ -1857,31 +1910,66 @@ function FlyInCard({
             <h3 className="text-base font-semibold text-text">
               Trip #{index} <span className="text-sm">✈️</span>
               <span className="ml-1.5 text-sm font-medium text-purple-400">
-                Fly to {findNearestAirport(visit.venue.coords).name}
+                Fly to {findNearestAirport(activeVisit.venue.coords).name}
               </span>
             </h3>
           </div>
           <p className="mt-0.5 text-sm text-text-dim">
-            {dateLabel} · {visit.playerNames.join(', ')}
+            {dateLabel} · {activeVisit.playerNames.join(', ')}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2 text-[11px] text-text-dim/60">
-          <span>{visit.dates.length + 1} days</span>
+          <span>{activeVisit.dates.length + 1} days</span>
           <span className="text-text-dim/20">·</span>
-          <span>~{Math.round(visit.estimatedTravelHours - 3)}h flight</span>
+          <span>~{Math.round(activeVisit.estimatedTravelHours - 3)}h flight</span>
+          {allVariants.length > 1 && (
+            <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-bold text-purple-400">
+              {allVariants.length} dates
+            </span>
+          )}
         </div>
       </div>
 
+      {/* Alternative date selector — shown when multiple date options exist */}
+      {allVariants.length > 1 && expanded && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-text-dim mr-1">Dates:</span>
+          {allVariants.map((variant, vi) => {
+            const vDates = variant.dates
+            const vStart = formatDate(vDates[0]!)
+            const vEnd = vDates.length > 1 ? formatDate(vDates[vDates.length - 1]!) : null
+            const label = vEnd ? `${vStart} – ${vEnd}` : vStart
+            const isActive = vi === 0 ? selectedAltIndex === -1 : selectedAltIndex === vi - 1
+            const isTue = vDates.some(d => new Date(d + 'T12:00:00Z').getUTCDay() === 2)
+            return (
+              <button
+                key={vi}
+                onClick={(e) => { e.stopPropagation(); setSelectedAltIndex(vi === 0 ? -1 : vi - 1) }}
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  isActive
+                    ? 'bg-purple-500/20 text-purple-400 ring-1 ring-purple-500/30'
+                    : 'bg-gray-800/50 text-text-dim hover:text-text hover:bg-gray-700/50'
+                }`}
+              >
+                {label}
+                {isTue && <span className="ml-1 text-[9px] opacity-70">Tue</span>}
+                {vi === 0 && <span className="ml-1 text-[9px] opacity-50">best</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Expanded content — day-by-day itinerary */}
       {expanded && (() => {
-        const bestDay = visit.dates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === 2) ?? visit.dates[0]!
+        const bestDay = activeVisit.dates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === 2) ?? activeVisit.dates[0]!
         const isTue = new Date(bestDay + 'T12:00:00Z').getUTCDay() === 2
-        const hasMultipleDays = visit.dates.length > 1
+        const hasMultipleDays = activeVisit.dates.length > 1
 
         // Combo trip: multi-stop fly-in with driving between venues
-        if (visit.isCombo && visit.stops && visit.stops.length > 1) {
+        if (activeVisit.isCombo && activeVisit.stops && activeVisit.stops.length > 1) {
           // Sort combo stops by date, then by game time within the same day
-          const comboStops = [...visit.stops].sort((a, b) => {
+          const comboStops = [...activeVisit.stops].sort((a, b) => {
             const dateCmp = a.date.localeCompare(b.date)
             if (dateCmp !== 0) return dateCmp
             const aTime = a.gameTime ? new Date(a.gameTime).getTime() : Infinity
@@ -1896,7 +1984,7 @@ function FlyInCard({
           <div className="mt-4 space-y-3">
             {/* Natural language summary */}
             <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
-              {formatDate(comboStops[0]!.date)} – {formatDate(comboStops[comboStops.length - 1]!.date)}: Fly to {nearestApt.name} ({nearestApt.code}) (~{Math.round(visit.estimatedTravelHours - 3)}h flight).
+              {formatDate(comboStops[0]!.date)} – {formatDate(comboStops[comboStops.length - 1]!.date)}: Fly to {nearestApt.name} ({nearestApt.code}) (~{Math.round(activeVisit.estimatedTravelHours - 3)}h flight).
               {comboStops.map((s, i) => {
                 const names = s.playerNames.map((n) => {
                   const p = playerMap.get(n)
@@ -1926,7 +2014,7 @@ function FlyInCard({
                       </span>
                     )}
                   </div>
-                  {i === 0 && <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{Math.round(visit.estimatedTravelHours - 3)}h flight</span>}
+                  {i === 0 && <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{Math.round(activeVisit.estimatedTravelHours - 3)}h flight</span>}
                 </div>
                 <div className="ml-4">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -1981,7 +2069,7 @@ function FlyInCard({
             {(() => {
               const lastComboStop = comboStops[comboStops.length - 1]!
               const returnAirport = findNearestAirport(lastComboStop.venue.coords)
-              const arrivalCode = visit.hubAirport || nearestApt.code
+              const arrivalCode = activeVisit.hubAirport || nearestApt.code
               const showReturnAirport = returnAirport.code !== arrivalCode
               return (
               <div className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
@@ -2010,10 +2098,10 @@ function FlyInCard({
           {/* Natural language summary */}
           <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
             {(() => {
-              const apt = findNearestAirport(visit.venue.coords)
-              return `${formatDate(bestDay)}${hasMultipleDays ? ` – ${formatDate(visit.dates[visit.dates.length - 1]!)}` : ''}: Fly to ${apt.name} (${apt.code}) (~${Math.round(visit.estimatedTravelHours - 3)}h flight).`
+              const apt = findNearestAirport(activeVisit.venue.coords)
+              return `${formatDate(bestDay)}${hasMultipleDays ? ` – ${formatDate(activeVisit.dates[activeVisit.dates.length - 1]!)}` : ''}: Fly to ${apt.name} (${apt.code}) (~${Math.round(activeVisit.estimatedTravelHours - 3)}h flight).`
             })()}
-            {' '}See {visit.playerNames.map((n) => {
+            {' '}See {activeVisit.playerNames.map((n) => {
               const p = playerMap.get(n)
               return p ? `${n} (${p.org})` : n
             }).join(' and ')}{isTue ? ' (Tuesday — best day for position players)' : ''}.
@@ -2027,36 +2115,36 @@ function FlyInCard({
                 <span className="text-xs font-bold text-purple-400">Day 1</span>
                 <span className="text-xs text-text-dim">{formatDate(bestDay)}{isTue ? ' (best day)' : ''}</span>
               </div>
-              <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{Math.round(visit.estimatedTravelHours - 3)}h flight</span>
+              <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{Math.round(activeVisit.estimatedTravelHours - 3)}h flight</span>
             </div>
 
             <div className="ml-4 space-y-2">
               <div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-sm font-medium text-text">
-                    {orgLabel || visit.venue.name}
+                    {orgLabel || activeVisit.venue.name}
                   </span>
-                  {orgLabel && orgLabel !== visit.venue.name && (
-                    <span className="text-[11px] text-text-dim/60">{visit.venue.name}</span>
+                  {orgLabel && orgLabel !== activeVisit.venue.name && (
+                    <span className="text-[11px] text-text-dim/60">{activeVisit.venue.name}</span>
                   )}
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium cursor-help ${sourceBadge.color}`} title={sourceBadge.tip}>
                     {sourceBadge.label}
                   </span>
-                  {visit.sourceUrl && (
-                    <a href={visit.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400" title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
+                  {activeVisit.sourceUrl && (
+                    <a href={activeVisit.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400" title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
                   )}
                 </div>
-                {visit.source === 'hs-lookup' && !visit.isHome && (
+                {activeVisit.source === 'hs-lookup' && !activeVisit.isHome && (
                   <p className="text-[10px] text-accent-orange/60 mt-0.5">
                     📍 Location approximate — away game venue estimated from home field area.{' '}
-                    <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${visit.teamLabel || visit.venue.name} high school baseball field`)}`} target="_blank" rel="noopener noreferrer" className="text-accent-blue/70 hover:text-accent-blue underline">Confirm on Google Maps ↗</a>
+                    <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${activeVisit.teamLabel || activeVisit.venue.name} high school baseball field`)}`} target="_blank" rel="noopener noreferrer" className="text-accent-blue/70 hover:text-accent-blue underline">Confirm on Google Maps ↗</a>
                   </p>
                 )}
                 {isTue && (
                   <p className="mt-1 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>
                 )}
                 <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  {visit.playerNames.map((name) => {
+                  {activeVisit.playerNames.map((name) => {
                     const player = playerMap.get(name)
                     const tier = player?.tier ?? 4
                     const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
@@ -2068,9 +2156,9 @@ function FlyInCard({
                       </span>
                     )
                   })}
-                  {visit.playerNames.length >= 2 && (
-                    <span className="text-[10px] text-accent-green/70 ml-1" title={`${visit.playerNames.length} SV players in the same game — efficient visit`}>
-                      {visit.playerNames.length} players, 1 game
+                  {activeVisit.playerNames.length >= 2 && (
+                    <span className="text-[10px] text-accent-green/70 ml-1" title={`${activeVisit.playerNames.length} SV players in the same game — efficient visit`}>
+                      {activeVisit.playerNames.length} players, 1 game
                     </span>
                   )}
                 </div>
@@ -2079,7 +2167,7 @@ function FlyInCard({
           </div>
 
           {/* Day 2+ if multi-day */}
-          {hasMultipleDays && visit.dates.filter(d => d !== bestDay).map((d, i) => (
+          {hasMultipleDays && activeVisit.dates.filter(d => d !== bestDay).map((d, i) => (
             <div key={d} className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-text-dim">Day {i + 2}</span>
@@ -2093,7 +2181,7 @@ function FlyInCard({
           <div className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-text-dim">Day {visit.dates.length + 1}</span>
+                <span className="text-xs font-bold text-text-dim">Day {activeVisit.dates.length + 1}</span>
                 <span className="text-xs text-text-dim/50">Fly home</span>
               </div>
             </div>
