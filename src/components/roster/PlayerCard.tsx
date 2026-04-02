@@ -65,6 +65,16 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
       >
         <td className="px-4 py-2.5">
           <span className="font-medium text-text">{player.playerName}</span>
+          {player.status && (
+            <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[9px] font-medium ${
+              player.status.toLowerCase() === 'injured' ? 'bg-accent-red/15 text-accent-red'
+              : player.status.toLowerCase() === 'transferred' ? 'bg-accent-orange/15 text-accent-orange'
+              : player.status.toLowerCase() === 'drafted' ? 'bg-accent-blue/15 text-accent-blue'
+              : 'bg-gray-700/50 text-text-dim'
+            }`}>
+              {player.status}
+            </span>
+          )}
         </td>
         <td className="px-4 py-2.5 text-text-dim">{player.org}</td>
         {showAffiliate && (

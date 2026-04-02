@@ -26,6 +26,13 @@ export interface RosterPlayer {
   email: string
   father: string
   mother: string
+  status: string // e.g. 'Injured', 'Transferred', 'Drafted', or '' for active
+}
+
+// Statuses that exclude a player from trip generation
+export const INACTIVE_STATUSES = ['injured', 'transferred', 'drafted', 'out', 'inactive', 'released']
+export function isPlayerInactive(status: string): boolean {
+  return INACTIVE_STATUSES.includes(status.toLowerCase().trim())
 }
 
 export const TIER_VISIT_TARGETS: Record<number, number> = {

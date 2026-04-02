@@ -938,17 +938,25 @@ export default function TripPlanner() {
             const uncoveredPlayers = players.filter((p) => !coveredSet.has(p.playerName))
             const unvisitableMap = new Map(tripPlan.unvisitablePlayers.map((u) => [u.name, u.reason]))
 
-            // Group by reason
-            const beyondFlight = uncoveredPlayers.filter((p) => unvisitableMap.get(p.playerName)?.startsWith('Beyond max flight'))
-            const noGamesInRange = uncoveredPlayers.filter((p) => {
+            // Group by reason — inactive players (from skippedPlayers) first
+            const skippedMap = new Map(tripPlan.skippedPlayers.map((s) => [s.name, s.reason]))
+            const inactivePlayers = uncoveredPlayers.filter((p) => {
+              const reason = skippedMap.get(p.playerName)
+              return reason && reason !== 'Tier 4 — no visits required'
+            })
+            const inactiveSet = new Set(inactivePlayers.map(p => p.playerName))
+            const remainingUncovered = uncoveredPlayers.filter(p => !inactiveSet.has(p.playerName))
+
+            const beyondFlight = remainingUncovered.filter((p) => unvisitableMap.get(p.playerName)?.startsWith('Beyond max flight'))
+            const noGamesInRange = remainingUncovered.filter((p) => {
               const r = unvisitableMap.get(p.playerName)
               return r && !r.includes('not selected') && (r.includes('No games in date range') || r.includes('season may be over'))
             })
-            const noSchedule = uncoveredPlayers.filter((p) => {
+            const noSchedule = remainingUncovered.filter((p) => {
               const r = unvisitableMap.get(p.playerName)
               return r && (r.includes('No schedule') || r.includes('No venue') || r.includes('geocoding'))
             })
-            const otherUncovered = uncoveredPlayers.filter((p) =>
+            const otherUncovered = remainingUncovered.filter((p) =>
               !beyondFlight.includes(p) && !noGamesInRange.includes(p) && !noSchedule.includes(p)
             )
 
@@ -970,6 +978,8 @@ export default function TripPlanner() {
             {/* Not Covered explainer — expandable */}
             {notCoveredCount > 0 && (
               <NotCoveredExplainer
+                inactivePlayers={inactivePlayers}
+                skippedMap={skippedMap}
                 beyondFlight={beyondFlight}
                 noGamesInRange={noGamesInRange}
                 noSchedule={noSchedule}
@@ -2281,9 +2291,12 @@ const APP_TIPS = [
 
 /* ── Not Covered Explainer ── shows who isn't in any trip and why ── */
 function NotCoveredExplainer({
+  inactivePlayers, skippedMap,
   beyondFlight, noGamesInRange, noSchedule, otherUncovered, unvisitableMap, onPlayerClick,
   priorityPlayers, setPriorityPlayers,
 }: {
+  inactivePlayers: RosterPlayer[]
+  skippedMap: Map<string, string>
   beyondFlight: RosterPlayer[]
   noGamesInRange: RosterPlayer[]
   noSchedule: RosterPlayer[]
@@ -2294,7 +2307,7 @@ function NotCoveredExplainer({
   setPriorityPlayers: (players: string[]) => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const total = beyondFlight.length + noGamesInRange.length + noSchedule.length + otherUncovered.length
+  const total = inactivePlayers.length + beyondFlight.length + noGamesInRange.length + noSchedule.length + otherUncovered.length
   if (total === 0) return null
 
   return (
@@ -2310,6 +2323,22 @@ function NotCoveredExplainer({
       </button>
       {expanded && (
         <div className="border-t border-accent-orange/10 px-4 py-3 space-y-3">
+          {inactivePlayers.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium text-accent-red mb-1">Inactive ({inactivePlayers.length})</p>
+              <p className="text-[10px] text-text-dim/60 mb-1.5">These players are marked as unavailable in the roster and excluded from trip planning.</p>
+              <div className="flex flex-wrap gap-1">
+                {inactivePlayers.map((p) => {
+                  const reason = skippedMap.get(p.playerName) ?? p.status
+                  return (
+                    <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
+                      {p.playerName} <span className="rounded bg-accent-red/15 px-1 py-0.5 text-[9px] font-medium text-accent-red ml-0.5">{reason}</span>
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           {beyondFlight.length > 0 && (
             <div>
               <p className="text-[11px] font-medium text-accent-orange mb-1">Too far to reach ({beyondFlight.length})</p>

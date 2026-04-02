@@ -1,7 +1,7 @@
 import type { Coordinates } from '../types/roster'
 import type { RosterPlayer } from '../types/roster'
 import type { GameEvent, TripCandidate, TripPlan, PriorityResult, VisitConfidence, FlyInVisit, ScoreBreakdown, NearMiss, UnvisitablePlayer } from '../types/schedule'
-import { TIER_VISIT_TARGETS } from '../types/roster'
+import { TIER_VISIT_TARGETS, isPlayerInactive } from '../types/roster'
 import { isSpringTraining, getSpringTrainingSite } from '../data/springTraining'
 import { resolveMLBTeamId, resolveNcaaName } from '../data/aliases'
 import { NCAA_VENUES } from '../data/ncaaVenues'
@@ -512,10 +512,15 @@ export async function generateTrips(
     playerMap.set(p.playerName, p)
   }
 
-  // Track players skipped (only Tier 4 with 0 visits — everyone else is eligible)
+  // Track players skipped — Tier 4 with no visits, or inactive status (Injured/Transferred/Drafted)
   const skippedPlayers: Array<{ name: string; reason: string }> = []
   for (const p of players) {
-    if (p.tier === 4 && p.visitsRemaining <= 0) {
+    if (p.status && isPlayerInactive(p.status)) {
+      skippedPlayers.push({
+        name: p.playerName,
+        reason: p.status,
+      })
+    } else if (p.tier === 4 && p.visitsRemaining <= 0) {
       skippedPlayers.push({
         name: p.playerName,
         reason: 'Tier 4 — no visits required',
@@ -525,8 +530,13 @@ export async function generateTrips(
 
   // ALL players are eligible for trip planning (not just those with visits remaining).
   // Players with completed visits still appear but score lower via visitsRemaining weight.
+  // Players with inactive status are excluded entirely.
   const eligiblePlayers = new Set(
-    players.filter((p) => !(p.tier === 4 && p.visitsRemaining <= 0)).map((p) => p.playerName),
+    players.filter((p) => {
+      if (p.status && isPlayerInactive(p.status)) return false
+      if (p.tier === 4 && p.visitsRemaining <= 0) return false
+      return true
+    }).map((p) => p.playerName),
   )
 
   // Clamp start date to today if in the past — no point planning trips to yesterday

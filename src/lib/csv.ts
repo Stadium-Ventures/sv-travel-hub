@@ -121,6 +121,7 @@ export async function fetchRoster(): Promise<RosterParseResult> {
         email: findColumn(r, ['Email', 'Email Address']),
         father: findColumn(r, ['Father', "Father's Name", 'Dad']),
         mother: findColumn(r, ['Mother', "Mother's Name", 'Mom']),
+        status: findColumn(r, ['Status', 'Player Status', 'Availability', 'Notes']),
       }
     })
 
