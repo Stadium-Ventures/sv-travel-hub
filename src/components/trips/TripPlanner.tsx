@@ -1165,6 +1165,30 @@ export default function TripPlanner() {
             const filtered = numbered.filter((group) => passesFilters(group.primary))
 
             const totalCollapsed = unified.length - grouped.length // how many trips were collapsed
+
+            // Confidence summary: count games by source across all trips
+            const confidenceCounts = { mlb: 0, d1: 0, hsConfirmed: 0, estimated: 0 }
+            const countedGameIds = new Set<string>()
+            function countGame(g: { id: string; source: import('../../types/schedule').ScheduleSource; confidence?: import('../../types/schedule').VisitConfidence }) {
+              if (countedGameIds.has(g.id)) return
+              countedGameIds.add(g.id)
+              if (g.source === 'mlb-api') confidenceCounts.mlb++
+              else if (g.source === 'ncaa-lookup' && g.confidence === 'high') confidenceCounts.d1++
+              else if (g.source === 'hs-lookup' && g.confidence === 'high') confidenceCounts.hsConfirmed++
+              else confidenceCounts.estimated++
+            }
+            for (const item of unified) {
+              if (item.type === 'road') {
+                countGame(item.trip.anchorGame)
+                for (const g of item.trip.nearbyGames) countGame(g)
+              } else if (item.visit.isCombo && item.visit.stops) {
+                for (const s of item.visit.stops) countGame({ id: `${s.venue.name}-${s.date}`, source: s.source, confidence: s.confidence })
+              } else {
+                countGame({ id: `${item.visit.venue.name}-${item.visit.dates[0]}`, source: item.visit.source, confidence: item.visit.confidence })
+              }
+            }
+            const totalGames = confidenceCounts.mlb + confidenceCounts.d1 + confidenceCounts.hsConfirmed + confidenceCounts.estimated
+
             return (
             <div id="section-road-trips">
               <div className="mb-3">
@@ -1177,6 +1201,18 @@ export default function TripPlanner() {
                     {totalCollapsed > 0 && ` (${totalCollapsed} alt dates merged)`}
                   </span>
                 </h3>
+                {totalGames > 0 && (
+                  <p className="mt-1 text-[11px] text-text-dim/70">
+                    Data quality: {' '}
+                    {confidenceCounts.mlb > 0 && <span className="text-accent-green">{confidenceCounts.mlb} confirmed <span className="text-text-dim/40">(MLB API)</span></span>}
+                    {confidenceCounts.mlb > 0 && (confidenceCounts.d1 + confidenceCounts.hsConfirmed + confidenceCounts.estimated > 0) && <span className="text-text-dim/30"> · </span>}
+                    {confidenceCounts.d1 > 0 && <span className="text-accent-blue/70">{confidenceCounts.d1} likely <span className="text-text-dim/40">(D1Baseball)</span></span>}
+                    {confidenceCounts.d1 > 0 && (confidenceCounts.hsConfirmed + confidenceCounts.estimated > 0) && <span className="text-text-dim/30"> · </span>}
+                    {confidenceCounts.hsConfirmed > 0 && <span className="text-accent-blue/70">{confidenceCounts.hsConfirmed} confirmed <span className="text-text-dim/40">(MaxPreps)</span></span>}
+                    {confidenceCounts.hsConfirmed > 0 && confidenceCounts.estimated > 0 && <span className="text-text-dim/30"> · </span>}
+                    {confidenceCounts.estimated > 0 && <span className="text-accent-orange">{confidenceCounts.estimated} estimated <span className="text-text-dim/40">(location approximate)</span></span>}
+                  </p>
+                )}
               </div>
 
               {/* Compact toolbar */}
@@ -2083,6 +2119,7 @@ function FlyInCard({
             })()}
 
             {flyInWhy && <p className="text-xs italic text-text-dim/60">{flyInWhy}</p>}
+            <FlyInScoreExplainer breakdown={activeVisit.scoreBreakdown} />
           </div>
           )
         }
@@ -2188,10 +2225,39 @@ function FlyInCard({
           {flyInWhy && (
             <p className="text-xs italic text-text-dim/60">{flyInWhy}</p>
           )}
+          <FlyInScoreExplainer breakdown={activeVisit.scoreBreakdown} />
 
         </div>
         )
       })()}
+    </div>
+  )
+}
+
+/* ── Score explainer for fly-in cards ── */
+function FlyInScoreExplainer({ breakdown }: { breakdown?: import('../../types/schedule').ScoreBreakdown }) {
+  const [open, setOpen] = useState(false)
+  if (!breakdown) return null
+  const parts: string[] = []
+  if (breakdown.tier1Count > 0) parts.push(`${breakdown.tier1Count} must-see (${breakdown.tier1Points}pts)`)
+  if (breakdown.tier2Count > 0) parts.push(`${breakdown.tier2Count} high-priority (${breakdown.tier2Points}pts)`)
+  if (breakdown.tier3Count > 0) parts.push(`${breakdown.tier3Count} standard (${breakdown.tier3Points}pts)`)
+  if (breakdown.tuesdayBonus) parts.push('Tuesday bonus (+20%)')
+  if (breakdown.pitcherMatchBonus > 0) parts.push(`Pitcher match (+${Math.round(breakdown.pitcherMatchBonus * 100)}%)`)
+  return (
+    <div className="text-[11px]">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+        className="text-text-dim/50 hover:text-text-dim transition-colors"
+      >
+        {open ? '▾' : '▸'} Why this ranking? <span className="text-text-dim/30">Score: {Math.round(breakdown.finalScore)}</span>
+      </button>
+      {open && (
+        <div className="mt-1 ml-3 text-text-dim/60 space-y-0.5">
+          {parts.map((p, i) => <div key={i}>· {p}</div>)}
+          <div className="text-text-dim/30 mt-1">Raw: {Math.round(breakdown.rawScore)} → Final: {Math.round(breakdown.finalScore)}</div>
+        </div>
+      )}
     </div>
   )
 }

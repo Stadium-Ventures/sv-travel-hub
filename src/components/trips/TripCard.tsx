@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { useTripStore } from '../../store/tripStore'
-import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
+import type { TripCandidate, VisitConfidence, ScheduleSource, ScoreBreakdown } from '../../types/schedule'
 // import { generateTripIcs, downloadIcs } from '../../lib/icsExport'
 import { haversineKm, HOME_BASE } from '../../lib/tripEngine'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
@@ -419,6 +419,11 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
       {expanded && (
         <div className="mt-4 space-y-3">
 
+          {/* Score explainer */}
+          {activeTrip.scoreBreakdown && (
+            <ScoreExplainer breakdown={activeTrip.scoreBreakdown} driveMinutes={activeTrip.driveFromHomeMinutes} />
+          )}
+
           {/* Warnings — TBD times, estimated locations */}
           {(() => {
             const items: Array<{ summary: string; detail: string; defaultOpen?: boolean }> = []
@@ -633,6 +638,36 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
           {/* Action buttons removed — keeping trip cards clean */}
 
 
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Score explainer ── shows why this trip is ranked where it is ── */
+function ScoreExplainer({ breakdown, driveMinutes }: { breakdown: ScoreBreakdown; driveMinutes: number }) {
+  const [open, setOpen] = useState(false)
+  const parts: string[] = []
+  if (breakdown.tier1Count > 0) parts.push(`${breakdown.tier1Count} must-see (${breakdown.tier1Points}pts)`)
+  if (breakdown.tier2Count > 0) parts.push(`${breakdown.tier2Count} high-priority (${breakdown.tier2Points}pts)`)
+  if (breakdown.tier3Count > 0) parts.push(`${breakdown.tier3Count} standard (${breakdown.tier3Points}pts)`)
+  if (breakdown.tuesdayBonus) parts.push('Tuesday bonus (+20%)')
+  if (breakdown.pitcherMatchBonus > 0) parts.push(`Pitcher match (+${Math.round(breakdown.pitcherMatchBonus * 100)}%)`)
+  const driveHours = driveMinutes / 60
+  if (driveHours > 3) parts.push(`Long drive penalty (${Math.round(driveHours)}h)`)
+
+  return (
+    <div className="text-[11px]">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+        className="text-text-dim/50 hover:text-text-dim transition-colors"
+      >
+        {open ? '▾' : '▸'} Why this ranking? <span className="text-text-dim/30">Score: {Math.round(breakdown.finalScore)}</span>
+      </button>
+      {open && (
+        <div className="mt-1 ml-3 text-text-dim/60 space-y-0.5">
+          {parts.map((p, i) => <div key={i}>· {p}</div>)}
+          <div className="text-text-dim/30 mt-1">Raw: {Math.round(breakdown.rawScore)} → Final: {Math.round(breakdown.finalScore)}</div>
         </div>
       )}
     </div>
