@@ -4,6 +4,8 @@ import type { PlayerTeamAssignment } from '../../store/scheduleStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { useSummerStore } from '../../store/summerStore'
+import { useRehabStore } from '../../store/rehabStore'
+import { describeRehabWindow } from '../../lib/rehab'
 import { resolveMLBTeamId } from '../../data/aliases'
 
 const TIER_COLORS: Record<number, string> = {
@@ -144,15 +146,12 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
                       <span className="ml-1 text-[9px] text-accent-orange" title="Estimated from last year + promotion">~est</span>
                     )}
                     {/* MLB-level player currently on a MiLB affiliate roster —
-                        commonly rehab assignment or option. Surface so Kent
-                        doesn't double-take when Whitlock shows up at Worcester. */}
+                        commonly rehab assignment or option. We now look up the
+                        rehab window from the transactions API where available
+                        and show the estimated end date so Kent doesn't plan a
+                        trip for a player who'll have been recalled by then. */}
                     {player.level === 'Pro' && affiliate.sportId !== 1 && affiliate.sportId >= 11 && affiliate.sportId <= 14 && (
-                      <span
-                        className="ml-1 rounded bg-accent-orange/15 px-1 py-0 text-[9px] text-accent-orange"
-                        title={`${player.playerName} is currently on the ${affiliate.teamName} (${SPORT_LABELS[affiliate.sportId] ?? `L${affiliate.sportId}`}) roster — likely rehab assignment or option. Verify in MLB transactions before planning.`}
-                      >
-                        @ {SPORT_LABELS[affiliate.sportId] ?? 'MiLB'} · rehab?
-                      </span>
+                      <RehabChip playerName={player.playerName} affiliateTeam={affiliate.teamName} sportLabel={SPORT_LABELS[affiliate.sportId] ?? 'MiLB'} />
                     )}
                   </>
                 ) : <span className="text-text-dim/40">— assign —</span>}
@@ -326,4 +325,48 @@ function Detail({ label, value }: { label: string; value: string }) {
       <span className="text-text">{value}</span>
     </div>
   )
+}
+
+/**
+ * Rehab chip for MLB-level players currently on MiLB affiliates. Pulls the
+ * rehab window from rehabStore — if transactions data is available, shows
+ * the actual assignment date + estimated return; otherwise shows an
+ * "estimated" badge with a 14-day cap from today.
+ */
+function RehabChip({ playerName, affiliateTeam, sportLabel }: { playerName: string; affiliateTeam: string; sportLabel: string }) {
+  const win = useRehabStore((s) => s.windows[playerName.trim().toLowerCase()])
+  const loading = useRehabStore((s) => s.loading[playerName.trim().toLowerCase()])
+
+  // Without rehab data yet: keep the old "@ AAA · rehab?" treatment.
+  if (!win) {
+    return (
+      <span
+        className="ml-1 rounded bg-accent-orange/15 px-1 py-0 text-[9px] text-accent-orange"
+        title={`${playerName} is currently on the ${affiliateTeam} (${sportLabel}) roster — likely rehab assignment or option. ${loading ? 'Checking MLB transactions…' : 'Verify in MLB transactions before planning.'}`}
+      >
+        @ {sportLabel} · rehab?{loading && ' …'}
+      </span>
+    )
+  }
+
+  // With rehab data: show source attribution and estimated return.
+  const isVerified = win.source === 'transactions'
+  const bgClass = isVerified ? 'bg-accent-blue/15 text-accent-blue' : 'bg-accent-orange/15 text-accent-orange'
+  const summary = describeRehabWindow(win)
+  const sourceTag = isVerified ? '✓ from MLB transactions' : '~est from MiLB roster only'
+
+  return (
+    <span
+      className={`ml-1 rounded px-1 py-0 text-[9px] ${bgClass}`}
+      title={`${summary}\n${sourceTag}\nGames at ${affiliateTeam} after ~${formatShort(win.estimatedEndDate)} are hidden from trips.`}
+    >
+      @ {sportLabel} · rehab · back ~{formatShort(win.estimatedEndDate)}
+      {!isVerified && ' (est)'}
+    </span>
+  )
+}
+
+function formatShort(iso: string): string {
+  const d = new Date(iso + 'T12:00:00Z')
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 }

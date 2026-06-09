@@ -121,6 +121,8 @@ export interface MLBRosterEntry {
   teamId: number
   teamName: string
   sportId: number
+  /** Position code from the roster API. "P" = pitcher; otherwise position player. */
+  positionCode?: string
 }
 
 export async function fetchTeamRoster(teamId: number, sportId: number, season?: number): Promise<MLBRosterEntry[]> {
@@ -134,12 +136,14 @@ export async function fetchTeamRoster(teamId: number, sportId: number, season?: 
 
   return (data.roster ?? []).map((entry: Record<string, unknown>) => {
     const person = entry.person as Record<string, unknown> | undefined
+    const position = entry.position as Record<string, unknown> | undefined
     return {
       playerId: (person?.id as number) ?? 0,
       fullName: (person?.fullName as string) ?? '',
       teamId,
       teamName: '', // Will be filled in by caller
       sportId,
+      positionCode: (position?.code as string) ?? undefined,
     }
   })
 }
@@ -309,4 +313,50 @@ export async function fetchAllTransactions(
   }
 
   return { transactions: all, failedTeamIds }
+}
+
+// --- Rehab assignment detection ---
+
+export interface RehabAssignmentTxn {
+  playerName: string
+  playerId: number
+  toTeamId?: number
+  toTeamName?: string
+  /** Effective date of the rehab assignment, ISO YYYY-MM-DD. */
+  effectiveDate: string
+  description: string
+}
+
+/**
+ * Filter a list of transactions down to just rehab assignments. The MLB API
+ * doesn't expose a clean typeCode for rehab — we match on the description
+ * containing "rehab" (and not "ended" / "completed"). Returns the most recent
+ * rehab assignment per player within the window.
+ */
+export function extractActiveRehabAssignments(
+  transactions: MLBTransaction[],
+): RehabAssignmentTxn[] {
+  const byPlayer = new Map<number, RehabAssignmentTxn>()
+  for (const t of transactions) {
+    const desc = (t.typeDesc ?? '').toLowerCase()
+    if (!desc.includes('rehab')) continue
+    // Skip "ended/completed/returned" — only count outbound rehab starts
+    if (/ended|completed|returned|recalled|reinstated/.test(desc)) continue
+    const playerId = t.player.id
+    if (!playerId) continue
+    const existing = byPlayer.get(playerId)
+    // Keep the most recent effective date per player
+    const effective = t.effectiveDate || t.date
+    if (!existing || effective > existing.effectiveDate) {
+      byPlayer.set(playerId, {
+        playerName: t.player.fullName,
+        playerId,
+        toTeamId: t.toTeam?.id,
+        toTeamName: t.toTeam?.name,
+        effectiveDate: effective,
+        description: t.typeDesc,
+      })
+    }
+  }
+  return Array.from(byPlayer.values())
 }

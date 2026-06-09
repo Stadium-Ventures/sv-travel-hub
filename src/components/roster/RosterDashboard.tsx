@@ -5,6 +5,7 @@ import { useScheduleStore } from '../../store/scheduleStore'
 import type { AssignmentChange } from '../../store/scheduleStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { useSummerStore } from '../../store/summerStore'
+import { useRehabStore } from '../../store/rehabStore'
 import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '../../data/aliases'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
@@ -52,6 +53,9 @@ export default function RosterDashboard() {
   const summerFetchedAt = useSummerStore((s) => s.fetchedAt)
   const rosterMovesCheckedAt = useScheduleStore((s) => s.rosterMovesCheckedAt)
 
+  const refreshRehab = useRehabStore((s) => s.refresh)
+  const rehabRefreshedAt = useRehabStore((s) => s.refreshedAt)
+
   const initialized = useRef(false)
   useEffect(() => {
     if (initialized.current) return
@@ -71,6 +75,25 @@ export default function RosterDashboard() {
       setTimeout(() => { checkRosterMoves() }, 3000)
     }
   }, [fetchRoster, fetchHeartbeat, heartbeatLastFetched, loadSummerAssignments, summerFetchedAt, rosterMovesCheckedAt, checkRosterMoves])
+
+  // Refresh rehab windows whenever the set of "Pro player on MiLB affiliate"
+  // candidates changes. Cached for 6h to avoid hammering the MLB API.
+  useEffect(() => {
+    const stale = !rehabRefreshedAt || (Date.now() - rehabRefreshedAt > 6 * 3600000)
+    if (!stale) return
+    const candidates: Array<{ playerName: string; teamId: number; sportId: number }> = []
+    for (const p of players) {
+      if (p.level !== 'Pro') continue
+      const a = playerTeamAssignments[p.playerName]
+      if (!a) continue
+      if (a.sportId >= 11 && a.sportId <= 14) {
+        candidates.push({ playerName: p.playerName, teamId: a.teamId, sportId: a.sportId })
+      }
+    }
+    if (candidates.length > 0) {
+      refreshRehab(candidates)
+    }
+  }, [players, playerTeamAssignments, refreshRehab, rehabRefreshedAt])
 
   const playerCount = players.length
 

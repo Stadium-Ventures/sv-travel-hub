@@ -14,6 +14,7 @@ import { fetchScheduleCsv } from '../lib/scheduleCsv'
 import { useRosterStore } from './rosterStore'
 import { useVenueStore } from './venueStore'
 import { useDiagnosticsStore } from './diagnosticsStore'
+import { useRehabStore } from './rehabStore'
 import { BUNDLED_HS_SCHEDULES } from '../data/hsSchedules.generated'
 import { HS_VENUE_COORDS } from '../data/hsVenueCoords'
 
@@ -106,6 +107,12 @@ interface ScheduleState {
   checkRosterMoves: () => Promise<void>
   fetchNcaaSchedules: (playerOrgs: Array<{ playerName: string; org: string }>, opts?: { merge?: boolean; forceRefresh?: boolean }) => Promise<void>
   fetchHsSchedules: (playerOrgs: Array<{ playerName: string; org: string; state: string }>, opts?: { merge?: boolean; forceRefresh?: boolean }) => Promise<void>
+}
+
+function addDaysISOInline(iso: string, days: number): string {
+  const d = new Date(iso + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
 }
 
 function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[]): GameEvent | null {
@@ -601,6 +608,32 @@ export const useScheduleStore = create<ScheduleState>()(
           else playersByTeamId.set(assignment.teamId, [playerName])
         }
 
+        // Pull rehab windows. The static import above is a cycle with
+        // rehabStore — safe under ESM because we only ACCESS the binding at
+        // runtime, not at module init.
+        const rehabWindows = useRehabStore.getState().windows
+
+        // For Pro players on MiLB affiliates, drop their name from games
+        // dated AFTER their rehab estimatedEndDate — they likely won't be
+        // there. Source attribution is preserved on the window object for UI.
+        function clipPlayersForGame(_teamId: number, gameDate: string, players: string[]): string[] {
+          return players.filter((name) => {
+            const assignment = assignments[name]
+            if (!assignment) return true
+            // Only Pro players on MiLB affiliates are subject to clipping
+            if (assignment.sportId < 11 || assignment.sportId > 14) return true
+            const win = rehabWindows[name.trim().toLowerCase()]
+            if (!win) {
+              // No rehab data yet — fall back to a conservative 14-day window
+              // from today so we don't show 3-week-out MiLB games as definite.
+              const today = new Date().toISOString().slice(0, 10)
+              const cap = addDaysISOInline(today, 14)
+              return gameDate <= cap
+            }
+            return gameDate <= win.estimatedEndDate
+          })
+        }
+
         // Re-process cached raw game data
         const allGames: GameEvent[] = []
         const seenIds = new Set<string>()
@@ -610,7 +643,10 @@ export const useScheduleStore = create<ScheduleState>()(
           if (teamPlayers.length === 0) continue
 
           for (const game of games) {
-            const event = mlbGameToEvent(game, teamId, teamPlayers)
+            const gameDate = game.gameDate.split('T')[0]!
+            const clipped = clipPlayersForGame(teamId, gameDate, teamPlayers)
+            if (clipped.length === 0) continue
+            const event = mlbGameToEvent(game, teamId, clipped)
             if (event && !seenIds.has(event.id)) {
               seenIds.add(event.id)
               allGames.push(event)
