@@ -1,5 +1,10 @@
-import { useState, useCallback } from 'react'
+import { useCallback } from 'react'
 import { useTripStore } from '../../../store/tripStore'
+
+// Map date range is now a thin wrapper over tripStore so Map and Trip Planner
+// share a single date window — Kent's 2026-06-08 ask: "filter parity needs to
+// exist between the map and trip planner tab." Picking dates on either surface
+// updates the other.
 
 function toISO(d: Date): string {
   return d.toISOString().split('T')[0]!
@@ -19,29 +24,26 @@ function next30Days(): { start: string; end: string } {
   return { start: toISO(now), end: toISO(end) }
 }
 
-const defaultRange = next7Days()
-
 export function useMapDateRange() {
-  const [filterStart, setFilterStart] = useState(defaultRange.start)
-  const [filterEnd, setFilterEnd] = useState(defaultRange.end)
+  const filterStart = useTripStore((s) => s.startDate)
+  const filterEnd = useTripStore((s) => s.endDate)
+  const setDateRange = useTripStore((s) => s.setDateRange)
+
+  const setFilterStart = useCallback((v: string) => setDateRange(v, filterEnd), [setDateRange, filterEnd])
+  const setFilterEnd = useCallback((v: string) => setDateRange(filterStart, v), [setDateRange, filterStart])
 
   const setNext7Days = useCallback(() => {
     const r = next7Days()
-    setFilterStart(r.start)
-    setFilterEnd(r.end)
-  }, [])
+    setDateRange(r.start, r.end)
+  }, [setDateRange])
 
   const setNext30Days = useCallback(() => {
     const r = next30Days()
-    setFilterStart(r.start)
-    setFilterEnd(r.end)
-  }, [])
+    setDateRange(r.start, r.end)
+  }, [setDateRange])
 
-  const syncFromTrip = useCallback(() => {
-    const { startDate, endDate } = useTripStore.getState()
-    setFilterStart(startDate)
-    setFilterEnd(endDate)
-  }, [])
+  // Retained for API compatibility — now a no-op because we ARE the trip range.
+  const syncFromTrip = useCallback(() => { /* unified — nothing to sync */ }, [])
 
   return {
     filterStart,

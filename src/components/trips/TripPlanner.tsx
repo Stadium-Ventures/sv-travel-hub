@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
+import { useSummerStore } from '../../store/summerStore'
+import CityPicker from '../ui/CityPicker'
 import TripCard from './TripCard'
 import PlayerCoverageCard from './PlayerCoverageCard'
 // ICS export removed from main UI — kept in individual trip cards
@@ -303,6 +305,7 @@ export default function TripPlanner() {
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
   const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly' | 'multi' | 'anchor'>('all')
   const [tripLengthFilter, setTripLengthFilter] = useState<'all' | '1' | '2' | '3'>('all')
+  const [showAllTrips, setShowAllTrips] = useState(false)
   // tierFilter removed — was adding clutter to the results toolbar
   const [anchorPlayerNames, setAnchorPlayerNames] = useState<string[]>([])
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
@@ -331,7 +334,7 @@ export default function TripPlanner() {
   const canGenerate = players.length > 0 && !computing
 
 
-  function handlePriorityChange(slot: 0 | 1 | 2, value: string) {
+  function handlePriorityChange(slot: number, value: string) {
     const next = [...priorityPlayers]
     if (value === '') {
       next.splice(slot, 1)
@@ -341,6 +344,9 @@ export default function TripPlanner() {
     // Remove duplicates and empty slots
     setPriorityPlayers([...new Set(next.filter(Boolean))])
   }
+
+  // 5 priority slots per Kent's interview ("if I select five players...")
+  const PRIORITY_SLOTS = 5
 
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
   const flyInLimit = 5
@@ -361,6 +367,81 @@ export default function TripPlanner() {
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const cachedProTeamIds = useScheduleStore((s) => s.cachedProTeamIds)
 
+  // ----------------------------------------------------------------------
+  // Shared trip-numbering helper. Used by Priority Player Results, status
+  // banner, AND the rendered trip list — so the displayed "Trip #N" matches
+  // everywhere. Previously each site re-derived the order on its own and they
+  // diverged when same-player+same-venue trips got merged into alt-date cards.
+  // (Bug reported 2026-06-08: "Cade Doughty → Trip #8" pointed at the wrong
+  // card because numbering didn't account for the merge.)
+  //
+  // Also applies a priority-first sort: when priorityPlayers is non-empty,
+  // trips containing any priority player get pushed to the top so Kent
+  // doesn't have to scroll past 8 irrelevant trips to find his guys.
+  // ----------------------------------------------------------------------
+  const tripDisplayInfo = useMemo(() => {
+    if (!tripPlan) return { findTripNum: (_n: string) => 0, groupCount: 0 }
+    type Item =
+      | { type: 'road'; trip: import('../../types/schedule').TripCandidate; sortDate: string }
+      | { type: 'flyin'; visit: import('../../types/schedule').FlyInVisit; sortDate: string }
+    const items: Item[] = [
+      ...tripPlan.trips.map((trip): Item => ({ type: 'road', trip, sortDate: trip.anchorGame.date })),
+      ...displayedFlyIns.map((visit): Item => ({ type: 'flyin', visit, sortDate: visit.dates[0] ?? '' })),
+    ]
+    const prioSet = new Set(priorityPlayers)
+    function hasPriority(item: Item): boolean {
+      if (prioSet.size === 0) return false
+      if (item.type === 'road') {
+        if (item.trip.anchorGame.playerNames.some((n) => prioSet.has(n))) return true
+        return item.trip.nearbyGames.some((g) => g.playerNames.some((n) => prioSet.has(n)))
+      }
+      return item.visit.playerNames.some((n) => prioSet.has(n))
+    }
+    // Sort: priority-bearing first (when priority set), then by score (or date)
+    items.sort((a, b) => {
+      if (prioSet.size > 0) {
+        const ap = hasPriority(a) ? 0 : 1
+        const bp = hasPriority(b) ? 0 : 1
+        if (ap !== bp) return ap - bp
+      }
+      if (sortBy === 'date') return a.sortDate.localeCompare(b.sortDate)
+      const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : a.visit.visitValue
+      const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : b.visit.visitValue
+      return scoreB - scoreA
+    })
+    // Group identical trips by player-set + venue coords (same key the
+    // render path uses for alternative-dates collapsing).
+    function getGroupKey(item: Item): string {
+      if (item.type === 'road') {
+        const players = new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap((g) => g.playerNames)])
+        const venueKey = `${item.trip.anchorGame.venue.coords.lat.toFixed(3)},${item.trip.anchorGame.venue.coords.lng.toFixed(3)}`
+        return `road|${[...players].sort().join(',')}|${venueKey}`
+      }
+      const venueKey = `${item.visit.venue.coords.lat.toFixed(3)},${item.visit.venue.coords.lng.toFixed(3)}`
+      return `flyin|${[...item.visit.playerNames].sort().join(',')}|${venueKey}`
+    }
+    const playerToTripNum = new Map<string, number>()
+    const seenGroups = new Set<string>()
+    let displayIdx = 0
+    for (const item of items) {
+      const key = getGroupKey(item)
+      if (seenGroups.has(key)) continue
+      seenGroups.add(key)
+      displayIdx++
+      const playerNames = item.type === 'road'
+        ? new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap((g) => g.playerNames)])
+        : new Set(item.visit.playerNames)
+      // First occurrence wins — that's the lowest displayIndex containing this player
+      for (const name of playerNames) {
+        if (!playerToTripNum.has(name)) playerToTripNum.set(name, displayIdx)
+      }
+    }
+    return {
+      findTripNum: (playerName: string) => playerToTripNum.get(playerName) ?? 0,
+      groupCount: displayIdx,
+    }
+  }, [tripPlan, displayedFlyIns, priorityPlayers, sortBy])
+
   const anyScheduleLoading = schedulesLoading || ncaaLoading || hsLoading
   const allSchedulesLoaded = proGames.length > 0 && ncaaGames.length > 0 && (!hasHsPlayers || hsGames.length > 0)
 
@@ -370,6 +451,25 @@ export default function TripPlanner() {
   const STALE_THRESHOLD = 24 * 60 * 60 * 1000 // 24 hours
   const proStale = proFetchedAt ? (now - proFetchedAt > STALE_THRESHOLD) : false
   const anyStale = proStale
+
+  // Summer assignment + game counts for the freshness pill
+  const summerAssignmentsCount = useSummerStore((s) => s.assignments.length)
+  const summerActiveCount = useSummerStore((s) => s.assignments.filter((a) => a.active).length)
+  const summerGamesCount = useSummerStore((s) => s.summerGames.length)
+  const summerUnresolved = useSummerStore((s) => s.unresolvedPlayers.length)
+  const summerFetchedAt = useSummerStore((s) => s.fetchedAt)
+  const rosterMovesCount = useScheduleStore((s) => s.rosterMoves.length)
+  const rosterMovesCheckedAt = useScheduleStore((s) => s.rosterMovesCheckedAt)
+
+  // Freshness helper — formats a timestamp as "5h ago" / "2d ago"
+  function relativeAge(iso: string | null | undefined): string {
+    if (!iso) return 'never'
+    const ageMs = Date.now() - new Date(iso).getTime()
+    const h = ageMs / 3600000
+    if (h < 1) return 'just now'
+    if (h < 24) return `${Math.round(h)}h ago`
+    return `${Math.round(h / 24)}d ago`
+  }
 
   // (formatAge removed — schedule badges simplified)
 
@@ -466,6 +566,16 @@ export default function TripPlanner() {
         schedStore.fetchHsSchedules(hsOrgs)
       }
     }
+
+    // 4. Summer — fetch live partner-league schedules (CCBL, MLBD)
+    const summerStore = useSummerStore.getState()
+    if (summerStore.assignments.length === 0) {
+      await summerStore.loadAssignments()
+    }
+    if (useSummerStore.getState().assignments.length > 0) {
+      const y = new Date().getFullYear()
+      summerStore.loadSchedules(`${y}-05-20`, `${y}-08-31`)
+    }
   }
 
 
@@ -502,6 +612,36 @@ export default function TripPlanner() {
               </span>
             )}
           </div>
+
+          {/* Freshness row — small status pills for each data layer */}
+          {allSchedulesLoaded && !anyScheduleLoading && (
+            <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-text-dim">
+              <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title={`Pro schedules last fetched ${relativeAge(proFetchedAt ? new Date(proFetchedAt).toISOString() : null)}. Live from MLB Stats API.`}>
+                Pro · {proGames.length} games · {proStale ? <span className="text-accent-orange">stale</span> : relativeAge(proFetchedAt ? new Date(proFetchedAt).toISOString() : null)}
+              </span>
+              <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title="NCAA schedules are bundled from D1Baseball generation. Static.">
+                NCAA · {ncaaGames.length} games · bundled
+              </span>
+              {hasHsPlayers && (
+                <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title="HS schedules are bundled from a generated CSV. Static.">
+                  HS · {hsGames.length} games · bundled
+                </span>
+              )}
+              {summerAssignmentsCount > 0 && (
+                <span className="rounded bg-gray-800/60 px-1.5 py-0.5"
+                  title={`${summerActiveCount} active summer assignment(s); ${summerGamesCount} games loaded${summerUnresolved > 0 ? `; ${summerUnresolved} player(s) without fetchable schedule (PGCBL/NECBL/FCBL pending)` : ''}.`}>
+                  Summer · {summerGamesCount} games · {relativeAge(summerFetchedAt)}
+                  {summerUnresolved > 0 && <span className="ml-1 text-accent-orange">({summerUnresolved} pending)</span>}
+                </span>
+              )}
+              {rosterMovesCheckedAt && (
+                <span className="rounded bg-gray-800/60 px-1.5 py-0.5"
+                  title={`MLB transactions checked ${relativeAge(rosterMovesCheckedAt)}. ${rosterMovesCount} player movement(s) detected.`}>
+                  Roster moves · {rosterMovesCount === 0 ? 'none' : `${rosterMovesCount} detected`} · {relativeAge(rosterMovesCheckedAt)}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Per-source progress bars — only during active network fetches, not cached restores */}
           {anyScheduleLoading && !allSchedulesLoaded && (
@@ -575,6 +715,9 @@ export default function TripPlanner() {
               {label}
             </button>
           ))}
+          <span className="ml-auto text-[10px] text-text-dim/50" title="Date range, drive radius, and starting city are shared between Map and Trip Planner — change in either, both update.">
+            synced w/ Map
+          </span>
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
@@ -617,6 +760,21 @@ export default function TripPlanner() {
               </span>
             </div>
           </div>
+
+          {/* Starting From — moved here (was on far right), now uses the same
+              combobox + autocomplete as the Map. Kent's 2026-06-08 ask:
+              custom cities + relocated UI position. */}
+          <div>
+            <label className="mb-1 block text-xs text-text-dim">Starting From</label>
+            <CityPicker
+              value={homeBaseName}
+              onChange={(coords, name) => setHomeBase(coords, name)}
+              presets={STARTING_LOCATIONS.map((l) => ({ name: l.name, coords: { lat: l.coords.lat, lng: l.coords.lng } }))}
+              buttonClass="min-w-[160px] py-1.5 text-sm"
+              title="Where you'll be traveling from. Type any city or pick from common ones."
+            />
+          </div>
+
           <div>
             <label className="mb-1 block text-xs text-text-dim">
               Max Drive: {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''}
@@ -643,15 +801,16 @@ export default function TripPlanner() {
             </label>
             <input
               type="range"
-              min={3}
-              max={12}
+              min={1}
+              max={8}
               step={0.5}
               value={maxFlightHours}
               onChange={(e) => setMaxFlightHours(parseFloat(e.target.value))}
               className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
             />
-            <p className="mt-0.5 text-[9px] text-text-dim/50" title="Total travel time including airport time and flight. Options beyond this limit won't be shown.">
-              {maxFlightHours <= 4 ? 'Southeast US only' : maxFlightHours <= 6 ? 'Reaches Midwest, Northeast' : maxFlightHours <= 8 ? 'Most domestic destinations' : maxFlightHours <= 10 ? 'Coast-to-coast + Hawaii' : 'All domestic + nearby international'}
+            <p className="mt-0.5 text-[9px] text-text-dim/50" title="Pure flight (air) time only — does not include airport / rental car overhead. Add ~3h for door-to-door.">
+              {maxFlightHours <= 1.5 ? 'Short hops only (NY→BOS, ATL→CLT)' : maxFlightHours <= 2.5 ? 'Reaches NE corridor / Midwest' : maxFlightHours <= 4 ? 'Most domestic (coast-to-coast tight)' : maxFlightHours <= 5.5 ? 'Coast-to-coast comfortable' : 'All domestic + Hawaii'}
+              {' · pure flight, not door-to-door'}
             </p>
           </div>
           <div>
@@ -676,22 +835,8 @@ export default function TripPlanner() {
               {maxNights === 1 ? 'Quick trips — 1-2 days max' : maxNights === 2 ? 'Standard trips — up to 3 days' : maxNights === 3 ? 'Extended trips — up to 4 days' : 'Long trips — up to 5 days'}
             </p>
           </div>
-          <div>
-            <label className="mb-1 block text-xs text-text-dim">Starting From</label>
-            <select
-              value={homeBaseName}
-              onChange={(e) => {
-                const loc = STARTING_LOCATIONS.find((l) => l.name === e.target.value)
-                if (loc) setHomeBase({ lat: loc.coords.lat, lng: loc.coords.lng }, loc.name)
-              }}
-              title="Where are you traveling from? This changes which trips are drivable and which require a flight."
-              className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
-            >
-              {STARTING_LOCATIONS.map((loc) => (
-                <option key={loc.name} value={loc.name}>{loc.name}</option>
-              ))}
-            </select>
-          </div>
+          {/* Starting From was previously rendered here on the right; moved
+              up to sit next to End Date. */}
           {startDate > endDate && (
             <p className="self-center text-xs text-accent-red">End date is before start date</p>
           )}
@@ -730,27 +875,16 @@ export default function TripPlanner() {
             Priority Players <span className="text-text-dim/50">(optional — guarantees these players appear in your trip results, even if they require a flight)</span>
           </label>
           <div className="flex flex-wrap items-center gap-3">
-            <PlayerSearchPicker
-              value={priorityPlayers[0] ?? ''}
-              players={eligibleForPriority}
-              excludeNames={priorityPlayers.filter((_, i) => i !== 0)}
-              placeholder="Type to search player 1..."
-              onChange={(name) => handlePriorityChange(0, name)}
-            />
-            <PlayerSearchPicker
-              value={priorityPlayers[1] ?? ''}
-              players={eligibleForPriority}
-              excludeNames={priorityPlayers.filter((_, i) => i !== 1)}
-              placeholder="Type to search player 2..."
-              onChange={(name) => handlePriorityChange(1, name)}
-            />
-            <PlayerSearchPicker
-              value={priorityPlayers[2] ?? ''}
-              players={eligibleForPriority}
-              excludeNames={priorityPlayers.filter((_, i) => i !== 2)}
-              placeholder="Type to search player 3..."
-              onChange={(name) => handlePriorityChange(2, name)}
-            />
+            {Array.from({ length: PRIORITY_SLOTS }, (_, i) => (
+              <PlayerSearchPicker
+                key={i}
+                value={priorityPlayers[i] ?? ''}
+                players={eligibleForPriority}
+                excludeNames={priorityPlayers.filter((_, j) => j !== i)}
+                placeholder={`Type to search player ${i + 1}...`}
+                onChange={(name) => handlePriorityChange(i, name)}
+              />
+            ))}
             {priorityPlayers.length > 0 && (
               <button
                 onClick={() => setPriorityPlayers([])}
@@ -817,95 +951,111 @@ export default function TripPlanner() {
       {/* Results */}
       {tripPlan && (
         <>
-          {/* Priority player results */}
+          {/* Priority player results — compact rows + split-region banner.
+              Kent's 2026-06-08 question: when 2 priority players are in
+              different regions (e.g. Tampa drive vs Phoenix flight), don't
+              force-combine into one impractical 4-day trip — show them
+              separately AND name the situation up-front. */}
           {tripPlan.priorityResults && tripPlan.priorityResults.length > 0 && (() => {
-            // Build unified list matching the displayed trip order exactly
-            type PrUnifiedItem =
-              | { type: 'road'; trip: typeof tripPlan.trips[0] }
-              | { type: 'flyin'; visit: typeof tripPlan.flyInVisits[0] }
-            const prUnified: PrUnifiedItem[] = [
-              ...tripPlan.trips.map((trip) => ({ type: 'road' as const, trip })),
-              ...displayedFlyIns.map((visit) => ({ type: 'flyin' as const, visit })),
-            ]
-            if (sortBy === 'date') {
-              prUnified.sort((a, b) => {
-                const dateA = a.type === 'road' ? a.trip.anchorGame.date : (a.visit.dates[0] ?? '')
-                const dateB = b.type === 'road' ? b.trip.anchorGame.date : (b.visit.dates[0] ?? '')
-                return dateA.localeCompare(dateB)
-              })
-            } else {
-              prUnified.sort((a, b) => {
-                const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : a.visit.visitValue
-                const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : b.visit.visitValue
-                return scoreB - scoreA
-              })
+            const findUnifiedTripNum = tripDisplayInfo.findTripNum
+            const assignments = useScheduleStore.getState().playerTeamAssignments
+
+            // Build per-player display rows with transport mode + city
+            type PrRow = {
+              name: string
+              teamName: string
+              city: string
+              tripNum: number
+              mode: 'drive' | 'flight' | 'none'
+              note?: string
             }
-            function findUnifiedTripNum(playerName: string): number {
-              const idx = prUnified.findIndex((item) =>
-                item.type === 'road'
-                  ? (item.trip.anchorGame.playerNames.includes(playerName) || item.trip.nearbyGames.some((g) => g.playerNames.includes(playerName)))
-                  : item.visit.playerNames.includes(playerName)
-              )
-              return idx >= 0 ? idx + 1 : 0
-            }
+            const rows: PrRow[] = tripPlan.priorityResults.map((r) => {
+              const player = playerMap.get(r.playerName)
+              const assignment = assignments[r.playerName]
+              const teamName = assignment?.teamName ?? player?.org ?? ''
+              const tripNum = findUnifiedTripNum(r.playerName)
+              // Derive city from the matched trip when possible
+              let city = ''
+              if (tripNum > 0) {
+                const t = tripPlan.trips.find((trip) =>
+                  trip.anchorGame.playerNames.includes(r.playerName) ||
+                  trip.nearbyGames.some((g) => g.playerNames.includes(r.playerName)))
+                if (t) {
+                  // Pull the venue name + extract city-ish suffix if no separate field
+                  city = t.anchorGame.venue.name
+                } else {
+                  const fv = tripPlan.flyInVisits.find((v) => v.playerNames.includes(r.playerName))
+                  if (fv) city = fv.venue.name
+                }
+              }
+              const mode: 'drive' | 'flight' | 'none' =
+                (r.status === 'included' || r.status === 'separate-trip') ? 'drive'
+                : r.status === 'fly-in-only' ? 'flight'
+                : 'none'
+              let note: string | undefined
+              if (mode === 'none') {
+                note = r.status === 'unreachable'
+                  ? `No games in date range${r.reason ? ` — ${r.reason}` : ''}`
+                  : 'Has games but not yet matched to a trip'
+              } else if (tripNum === 0) {
+                note = 'Trip generated but not displayed — widen filters or date range'
+              }
+              return { name: r.playerName, teamName, city, tripNum, mode, note }
+            })
+
+            const driveCount = rows.filter((r) => r.mode === 'drive').length
+            const flightCount = rows.filter((r) => r.mode === 'flight').length
+            // Unique flight destinations (rough: split by city — different
+            // venue names imply different geographies)
+            const flightCities = new Set(rows.filter((r) => r.mode === 'flight').map((r) => r.city.toLowerCase()))
+            const splitRegions = (driveCount > 0 && flightCount > 0) || flightCities.size > 1
+
             return (
             <div className="rounded-xl border border-accent-blue/30 bg-accent-blue/5 p-4">
               <h3 className="mb-2 text-sm font-semibold text-accent-blue">Priority Player Results</h3>
-              <div className="space-y-3">
-                {tripPlan.priorityResults.map((r) => {
-                  const player = playerMap.get(r.playerName)
-                  const assignments = useScheduleStore.getState().playerTeamAssignments
-                  const assignment = assignments[r.playerName]
-                  const teamName = assignment?.teamName ?? player?.org ?? ''
-                  const tripNum = findUnifiedTripNum(r.playerName)
 
+              {splitRegions && (
+                <div className="mb-3 rounded-md border border-accent-blue/30 bg-accent-blue/10 px-3 py-2 text-xs text-accent-blue/90 leading-relaxed">
+                  <strong>Your priority players are in different regions.</strong>{' '}
+                  Visiting them all in one trip would require multiple flights and 4+ days.
+                  The trips below show each one planned <em>separately</em> — pick the dates that work for each.
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                {rows.map((r) => {
+                  const modeBadge = r.mode === 'drive'
+                    ? { icon: '🚗', label: 'Drive', color: 'bg-accent-green/15 text-accent-green' }
+                    : r.mode === 'flight'
+                    ? { icon: '✈', label: 'Flight', color: 'bg-accent-blue/15 text-accent-blue' }
+                    : { icon: '—', label: 'No trip', color: 'bg-gray-700/40 text-text-dim' }
                   return (
-                    <div key={r.playerName} className="rounded-lg bg-surface/50 px-3 py-2">
-                      <p className="text-sm text-text">
-                        <span className="font-medium">{r.playerName}</span>
-                        {teamName && <span className="text-text-dim"> ({teamName})</span>}
-                      </p>
-                      <p className="mt-0.5 text-xs text-text-dim">
-                        {(r.status === 'included' || r.status === 'separate-trip') && tripNum > 0 && (
-                          <>Within driving range. <span className="text-accent-green font-medium">See him on Trip #{tripNum}.</span></>
-                        )}
-                        {r.status === 'fly-in-only' && tripNum > 0 && (
-                          <>Too far to drive from {homeBaseName} — requires a flight. <span className="text-accent-blue font-medium">See Trip #{tripNum}.</span></>
-                        )}
-                        {r.status === 'fly-in-only' && tripNum === 0 && (() => {
-                          // Diagnostic: check why the fly-in isn't displayed
-                          const inFullList = tripPlan.flyInVisits.some(v => v.playerNames.includes(r.playerName))
-                          const inDisplayed = displayedFlyIns.some(v => v.playerNames.includes(r.playerName))
-                          const totalFlyIns = tripPlan.flyInVisits.length
-
-                          if (inDisplayed) {
-                            // In the list but not found by trip numbering — shouldn't happen
-                            return <span className="text-accent-orange">Fly-in exists but trip numbering failed — try regenerating.</span>
-                          }
-                          if (inFullList && !inDisplayed) {
-                            return <span className="text-accent-orange">
-                              Fly-in trip was generated but not displayed (showing {displayedFlyIns.length} of {totalFlyIns} fly-ins). This is a bug — please report.
-                            </span>
-                          }
-                          // Not in the fly-in list at all — show diagnostic trace
-                          const diag = tripPlan.flyInDiagnostic?.[r.playerName]
-                          return <span className="text-accent-orange">
-                            Beyond driving range from {homeBaseName}. The engine found games but couldn't build a fly-in trip.
-                            {' '}Check that schedules are loaded (click "Load all schedules" above) and try a wider date range.
-                            {diag && <span className="block mt-1 text-[10px] text-text-dim/60 font-mono">Debug: {diag}</span>}
+                    <div key={r.name} className="flex flex-wrap items-center gap-2 rounded-md bg-surface/50 px-3 py-1.5 text-sm">
+                      <span className="font-medium text-text">{r.name}</span>
+                      {r.teamName && <span className="text-xs text-text-dim">· {r.teamName}</span>}
+                      <span className="ml-auto flex items-center gap-2">
+                        {r.tripNum > 0 ? (
+                          <span className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium ${modeBadge.color}`}>
+                            <span>{modeBadge.icon}</span>
+                            <span>{modeBadge.label} · Trip #{r.tripNum}</span>
                           </span>
-                        })()}
-                        {(r.status === 'included' || r.status === 'separate-trip') && tripNum === 0 && (
-                          <span className="text-accent-orange">Has games but not in a numbered trip yet.</span>
+                        ) : (
+                          <span className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium ${r.mode === 'none' ? 'bg-accent-red/15 text-accent-red' : 'bg-accent-orange/15 text-accent-orange'}`}>
+                            {r.note ?? 'Not matched'}
+                          </span>
                         )}
-                        {r.status === 'unreachable' && (
-                          <span className="text-accent-red">No games found in the date range{r.reason ? ` — ${r.reason}` : ''}.</span>
-                        )}
-                      </p>
+                      </span>
                     </div>
                   )
                 })}
               </div>
+
+              {splitRegions && (
+                <p className="mt-2 text-[11px] text-text-dim/60">
+                  Want to bundle them anyway? Plan the closer one first, then book a one-way flight after.
+                  A true multi-modal "drive + fly" itinerary builder is on the roadmap.
+                </p>
+              )}
             </div>
             )})()}
 
@@ -996,35 +1146,8 @@ export default function TripPlanner() {
 
           {/* Priority player status — the most important thing */}
           {priorityPlayers.length > 0 && (() => {
-            // Build unified list matching displayed trip order exactly
-            type StatusUnified =
-              | { type: 'road'; trip: typeof tripPlan.trips[0] }
-              | { type: 'flyin'; visit: typeof tripPlan.flyInVisits[0] }
-            const statusUnified: StatusUnified[] = [
-              ...tripPlan.trips.map((trip) => ({ type: 'road' as const, trip })),
-              ...displayedFlyIns.map((visit) => ({ type: 'flyin' as const, visit })),
-            ]
-            if (sortBy === 'date') {
-              statusUnified.sort((a, b) => {
-                const dateA = a.type === 'road' ? a.trip.anchorGame.date : (a.visit.dates[0] ?? '')
-                const dateB = b.type === 'road' ? b.trip.anchorGame.date : (b.visit.dates[0] ?? '')
-                return dateA.localeCompare(dateB)
-              })
-            } else {
-              statusUnified.sort((a, b) => {
-                const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : a.visit.visitValue
-                const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : b.visit.visitValue
-                return scoreB - scoreA
-              })
-            }
-            function findPrioTripNum(playerName: string): number {
-              const idx = statusUnified.findIndex((item) =>
-                item.type === 'road'
-                  ? (item.trip.anchorGame.playerNames.includes(playerName) || item.trip.nearbyGames.some((g) => g.playerNames.includes(playerName)))
-                  : item.visit.playerNames.includes(playerName)
-              )
-              return idx >= 0 ? idx + 1 : 0
-            }
+            // Use shared tripDisplayInfo for matching trip numbers.
+            const findPrioTripNum = tripDisplayInfo.findTripNum
             const prioInTrip = priorityPlayers.filter((n) => findPrioTripNum(n) > 0)
             const prioMissing = priorityPlayers.filter((n) => findPrioTripNum(n) === 0)
             return (
@@ -1086,8 +1209,24 @@ export default function TripPlanner() {
               })),
             ]
 
-            // Sort by score first (best trips on top), then use date as tiebreaker
+            // Sort: when priority players are set, trips containing them
+            // rank FIRST (Kent 2026-06-08: "frustrating to get trips that do
+            // not include those players"). Within each group, by score desc.
+            const prioritySet = new Set(priorityPlayers)
+            function itemHasPriorityPlayer(item: UnifiedItem): boolean {
+              if (prioritySet.size === 0) return false
+              if (item.type === 'road') {
+                if (item.trip.anchorGame.playerNames.some((n) => prioritySet.has(n))) return true
+                return item.trip.nearbyGames.some((g) => g.playerNames.some((n) => prioritySet.has(n)))
+              }
+              return item.visit.playerNames.some((n) => prioritySet.has(n))
+            }
             unified.sort((a, b) => {
+              if (prioritySet.size > 0) {
+                const ap = itemHasPriorityPlayer(a) ? 0 : 1
+                const bp = itemHasPriorityPlayer(b) ? 0 : 1
+                if (ap !== bp) return ap - bp
+              }
               const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : (a.visit.visitValue)
               const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : (b.visit.visitValue)
               return scoreB - scoreA
@@ -1173,6 +1312,21 @@ export default function TripPlanner() {
             }
 
             const filtered = numbered.filter((group) => passesFilters(group.primary))
+
+            // When priority players are set, also hide trips that don't
+            // include any of them. Kent's principle 2026-06-08: "fewer
+            // options and just make sure the ones we suggest are good and
+            // relevant to the filters."
+            const relevantToFilters = prioritySet.size > 0
+              ? filtered.filter((g) => itemHasPriorityPlayer(g.primary))
+              : filtered
+
+            // Cap displayed trips (default 5) with a Show all expander —
+            // fewer options surfaced by default. Kent's principle: quality
+            // over quantity.
+            const DEFAULT_TRIP_CAP = 5
+            const capped = showAllTrips ? relevantToFilters : relevantToFilters.slice(0, DEFAULT_TRIP_CAP)
+            const hasMore = relevantToFilters.length > capped.length
 
             const totalCollapsed = unified.length - grouped.length // how many trips were collapsed
 
@@ -1284,8 +1438,17 @@ export default function TripPlanner() {
                 ))}
               </div>
 
+              {/* Heading copy reflects "fewer + relevant" — when priority
+                  players are set, surface that the list is filtered to them. */}
+              {prioritySet.size > 0 && relevantToFilters.length !== filtered.length && (
+                <p className="mb-3 text-[11px] text-accent-blue">
+                  Showing {relevantToFilters.length} trip{relevantToFilters.length !== 1 ? 's' : ''} that include your priority player{prioritySet.size !== 1 ? 's' : ''}
+                  <span className="text-text-dim/50"> · {filtered.length - relevantToFilters.length} other trip{filtered.length - relevantToFilters.length !== 1 ? 's' : ''} hidden</span>
+                </p>
+              )}
+
               <div className="space-y-4">
-                {filtered.map((group, i) => {
+                {capped.map((group, i) => {
                   const { primary, alternatives } = group
                   if (primary.type === 'road') {
                     const altTrips = alternatives
@@ -1330,6 +1493,29 @@ export default function TripPlanner() {
                   <p className="py-4 text-center text-sm text-text-dim">
                     No trips match these filters. Try loosening the Days or Tier filter.
                   </p>
+                )}
+                {prioritySet.size > 0 && filtered.length > 0 && relevantToFilters.length === 0 && (
+                  <p className="py-4 text-center text-sm text-accent-orange">
+                    None of the generated trips include your priority player{prioritySet.size !== 1 ? 's' : ''}.
+                    {' '}Try widening the date range, raising the drive/flight caps, or removing a priority filter.
+                  </p>
+                )}
+                {hasMore && (
+                  <button
+                    onClick={() => setShowAllTrips(true)}
+                    className="w-full rounded-lg border border-border bg-surface/40 px-4 py-2 text-xs text-text-dim hover:text-text hover:border-accent-blue/40 transition-colors"
+                  >
+                    Show all {relevantToFilters.length} trips
+                    <span className="text-text-dim/40"> · {relevantToFilters.length - capped.length} more</span>
+                  </button>
+                )}
+                {showAllTrips && relevantToFilters.length > DEFAULT_TRIP_CAP && (
+                  <button
+                    onClick={() => setShowAllTrips(false)}
+                    className="w-full rounded-lg border border-border/30 bg-transparent px-4 py-1.5 text-[11px] text-text-dim/60 hover:text-text-dim transition-colors"
+                  >
+                    Collapse to top {DEFAULT_TRIP_CAP}
+                  </button>
                 )}
               </div>
             </div>

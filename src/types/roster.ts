@@ -11,6 +11,8 @@ export interface RosterPlayer {
   org: string
   level: PlayerLevel
   mlbPlayerId: number | null // MLB player ID (Pro players only)
+  /** Perfect Game integer profile ID — global, stable, links to perfectgame.org/Players/Playerprofile.aspx?ID=<n>. Optional column on the roster sheet (PG_ID / PG Player ID / Perfect Game ID). */
+  pgPlayerId: number | null
   position: string
   state: string
   draftClass: string

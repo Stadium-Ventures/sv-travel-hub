@@ -10,6 +10,8 @@ import { useRosterStore } from './rosterStore'
 import { useScheduleStore } from './scheduleStore'
 import { useVenueStore } from './venueStore'
 import { useHeartbeatStore } from './heartbeatStore'
+import { useSummerStore } from './summerStore'
+import { isInSummerWindow } from '../data/summerLeagues'
 
 // Default: 3-day trip starting 1 week from now
 function toISO(d: Date): string {
@@ -160,6 +162,23 @@ export const useTripStore = create<TripState>()(
     const scheduledGames = scheduleState.proGames
     const realNcaaGames = scheduleState.ncaaGames
 
+    // Pull in summer-league games if the date window overlaps summer. Most
+    // SV-relevant summer schedules (CCBL, MLB Draft League) come straight from
+    // the MLB Stats API; PrestoSports leagues will join later.
+    const summerStore = useSummerStore.getState()
+    const summerInRange = (() => {
+      try {
+        return isInSummerWindow(new Date(startDate)) || isInSummerWindow(new Date(endDate))
+      } catch { return false }
+    })()
+    if (summerInRange && summerStore.assignments.length > 0 && summerStore.summerGames.length === 0) {
+      // Don't await — let the trip computation kick off; summer games will
+      // appear on the next Generate Trips press. We only block on the first
+      // load when there are zero summer games but assignments exist.
+      await summerStore.loadSchedules(startDate, endDate)
+    }
+    const summerGames = useSummerStore.getState().summerGames
+
     // Read custom aliases from schedule store
     const customMlbAliases = scheduleState.customMlbAliases
     const customNcaaAliases = scheduleState.customNcaaAliases
@@ -207,9 +226,22 @@ export const useTripStore = create<TripState>()(
       startDate, endDate, hsVenues,
     )
 
+    // During summer, an NCAA player's summer-team games should replace their
+    // (essentially absent) college games. Filter out synthetic NCAA events for
+    // any player who has an active summer assignment.
+    const summerByPlayer = useSummerStore.getState().byPlayer
+    const ncaaSyntheticFiltered = ncaaSyntheticEvents
+      .map((g) => {
+        const kept = g.playerNames.filter((n) => !summerByPlayer[n]?.active)
+        if (kept.length === 0) return null
+        if (kept.length === g.playerNames.length) return g
+        return { ...g, playerNames: kept }
+      })
+      .filter((g): g is typeof ncaaSyntheticEvents[number] => g !== null)
+
     // Merge all game sources and deduplicate by venue+date+playerSet
     // This prevents synthetic events from duplicating real schedule data
-    const rawGames = [...scheduledGames, ...stEvents, ...realNcaaGames, ...ncaaSyntheticEvents, ...realHsGames, ...hsSyntheticEvents]
+    const rawGames = [...scheduledGames, ...stEvents, ...realNcaaGames, ...ncaaSyntheticFiltered, ...realHsGames, ...hsSyntheticEvents, ...summerGames]
     const gameMap = new Map<string, typeof rawGames[0]>()
     for (const game of rawGames) {
       // Prefer real (high confidence) games over synthetic ones at same venue+date
@@ -248,6 +280,31 @@ export const useTripStore = create<TripState>()(
             : 1.25
           urgencyMap.set(p.playerName, boost)
         }
+      }
+    }
+
+    // Cross-agent visit coverage — if another SV agent already has a planned
+    // visit to a player within the trip window, down-weight that player so
+    // the engine doesn't recommend Tom double up. Always applied (not gated
+    // on useHeartbeatBoost) because Kent specifically asked for this.
+    {
+      const heartbeatState = useHeartbeatStore.getState()
+      for (const p of players) {
+        const vc = heartbeatState.getVisitCount(p.playerName)
+        const planned = vc?.nextPlannedDate
+        if (!planned) continue
+        // Only count if the planned visit falls inside (or within 14d of) the trip window
+        const plannedISO = planned.length > 10 ? planned.slice(0, 10) : planned
+        if (plannedISO < startDate) continue
+        const windowEnd = new Date(endDate)
+        windowEnd.setDate(windowEnd.getDate() + 14)
+        const windowEndISO = windowEnd.toISOString().split('T')[0]!
+        if (plannedISO > windowEndISO) continue
+        // Multiply existing urgency by 0.4 (or set to 0.4 if no entry yet).
+        // 0.4 = noticeable de-prioritization without zeroing out — if Mike
+        // cancels his visit, this player still shows up in trip generation.
+        const existing = urgencyMap.get(p.playerName) ?? 1.0
+        urgencyMap.set(p.playerName, existing * 0.4)
       }
     }
 

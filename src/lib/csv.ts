@@ -77,6 +77,13 @@ export async function fetchRoster(): Promise<RosterParseResult> {
 
   const players = parsed.data
     .filter((r) => findColumn(r, ['Name', 'Player Name', 'Player']))
+    // Drop coaches — the sheet flags them with "Is Coach: Yes" but they
+    // aren't players to plan visits around. Kent's feedback 2026-06-08.
+    .filter((r) => {
+      const isCoach = findColumn(r, ['Is Coach', 'IsCoach', 'Coach', 'Role'])
+      const v = isCoach.toLowerCase().trim()
+      return !(v === 'yes' || v === 'y' || v === 'true' || v === 'coach' || v === 'head coach' || v === 'assistant coach')
+    })
     .map((r) => {
       const playerName = findColumn(r, ['Name', 'Player Name', 'Player'])
 
@@ -106,6 +113,7 @@ export async function fetchRoster(): Promise<RosterParseResult> {
         org: findColumn(r, ['Org', 'Organization', 'Team', 'School']),
         level,
         mlbPlayerId: parseNumber(findColumn(r, ['MLB_ID', 'MLB Id', 'MLB ID', 'MLBId'])),
+        pgPlayerId: parseNumber(findColumn(r, ['PG_ID', 'PG Id', 'PG ID', 'PG Player ID', 'Perfect Game ID', 'PerfectGameId'])),
         position: findColumn(r, ['Position', 'Pos']),
         state: findColumn(r, ['State', 'Home State']),
         draftClass: findColumn(r, ['Draft Class', 'Class', 'Draft Year']),

@@ -71,13 +71,22 @@ export function estimateDriveMinutes(a: Coordinates, b: Coordinates): number {
 
 // Estimate total travel time for a fly-in visit (hours)
 // Includes: drive to airport (0.5h) + security/boarding (1.5h) + flight + deplane/rental (1h)
+// Door-to-door travel estimate (flight + ~3h airport/rental overhead).
+// IMPORTANT: maxFlightHours is now compared against PURE FLIGHT time
+// (= estimatedTravelHours - AIRPORT_OVERHEAD_HOURS), per Kent's 2026-06-08
+// feedback: "Max Flight should be the flight time and let Kent factor in
+// getting to the airport."
+const AIRPORT_OVERHEAD_HOURS = 3
 function estimateFlightHours(distanceKm: number): number {
   // Short flights are slower (more time climbing/descending)
   // NYC→CLT (~965km) should be ~2h, not 1.2h at cruise speed
   const effectiveSpeed = distanceKm < 800 ? 500 : distanceKm < 2000 ? 600 : 750
   const flightHours = Math.max(1, distanceKm / effectiveSpeed)
-  const overhead = 3 // airport + rental car on both ends
-  return Math.round((flightHours + overhead) * 10) / 10
+  return Math.round((flightHours + AIRPORT_OVERHEAD_HOURS) * 10) / 10
+}
+/** Pure flight time only (no airport/rental overhead). Used for cap checks. */
+function purePilotFlightHours(estimatedTravelHours: number): number {
+  return Math.max(0, estimatedTravelHours - AIRPORT_OVERHEAD_HOURS)
 }
 
 // Get ISO week number for venue-week deduplication
@@ -928,13 +937,14 @@ export async function generateTrips(
             const minTravelHours = playerFlyInGames.length > 0
               ? Math.min(...playerFlyInGames.map(g => estimateFlightHours(haversineKm(homeBase, g.venue.coords))))
               : Infinity
-            const beyondFlight = minTravelHours > maxFlightHours
+            const minPureFlight = purePilotFlightHours(minTravelHours)
+            const beyondFlight = minPureFlight > maxFlightHours
             if (beyondFlight) {
               missingFromFlight.push(pName)
               priorityResults.push({
                 playerName: pName,
                 status: 'fly-in-only',
-                reason: `${pName} requires ~${Math.round(minTravelHours * 10) / 10}h travel but max flight is ${maxFlightHours}h — increase Max Flight to see options`,
+                reason: `${pName} requires ~${Math.round(minPureFlight * 10) / 10}h flight but max flight is ${maxFlightHours}h — increase Max Flight to see options`,
               })
             } else {
               missingFromDrive.push(pName)
@@ -1406,12 +1416,18 @@ export async function generateTrips(
     diag.push(`comboClaimedVenue=${comboUsedVenue}`, `preDedupFlyIns=${inPreDedup}(${flyInVisits.filter(v => v.playerNames.includes(pName)).length})`)
   }
 
-  // Deduplicate fly-ins: keep at most 2 entries per player to ensure diversity.
-  // For each player, keep their best fly-in (highest score) and best Tuesday fly-in.
-  // This prevents a priority player from filling all 10 result slots.
+  // Deduplicate fly-ins to ensure diversity.
+  // Non-priority players: cap at 2 — prevents one popular player from
+  //   spamming all result slots when the user hasn't expressed preference.
+  // Priority players: cap at 8 — when the user explicitly asks to see a
+  //   player, surface ALL the home-stand windows that work (otherwise the
+  //   alt-date grouping in the display layer has nothing to group). Old
+  //   cap of 1 was leaving 90% of options invisible — Kent flagged this
+  //   2026-06-08 ("3-month window, Jake Munroe, only 1 trip shown").
   const playerFlyInCount = new Map<string, number>()
   const venuesSeen = new Set<string>()
   const MAX_FLYINS_PER_PLAYER = 2
+  const MAX_FLYINS_PER_PRIORITY_PLAYER = 8
   const diverseFlyIns: FlyInVisit[] = []
 
   // Sort by score first so we pick the best ones per player
@@ -1426,14 +1442,15 @@ export async function generateTrips(
     const hasPriorityPlayer = visit.playerNames.some(n => prioritySet.has(n))
 
     // Deduplicate venues — 1 fly-in per venue (keep best score, already sorted)
-    // EXCEPTION: always keep fly-ins with priority players even if venue is taken
+    // EXCEPTION: always keep fly-ins with priority players even if venue is
+    // taken. This lets the display layer collapse them as alt-date variants
+    // of the same "Fly to Seattle to see Jake" card (10+ date options).
     if (venuesSeen.has(venueKey) && !hasPriorityPlayer) continue
     venuesSeen.add(venueKey)
 
-    // Check if any player in this fly-in still has room
-    // Priority players get exactly 1 fly-in (their best one); non-priority keep default cap of 2
+    // Check if any player in this fly-in still has room under the per-player cap
     const hasRoom = visit.playerNames.some((n) => {
-      const cap = prioritySet.has(n) ? 1 : MAX_FLYINS_PER_PLAYER
+      const cap = prioritySet.has(n) ? MAX_FLYINS_PER_PRIORITY_PLAYER : MAX_FLYINS_PER_PLAYER
       return (playerFlyInCount.get(n) ?? 0) < cap
     })
     if (!hasRoom) continue
@@ -1456,9 +1473,11 @@ export async function generateTrips(
   })
 
   // When priority players are set, prefer fly-ins that include them — but don't
-  // filter out all others (priority players may only appear in 1-2 fly-ins)
-  // Cap at 25 fly-ins — more than enough for display, saves computation
-  const finalDiverseFlyIns = diverseFlyIns.slice(0, 25)
+  // filter out all others. Cap raised from 25 to 50 to give the display layer
+  // headroom for alt-date grouping (one card with 8 dates only renders as 1
+  // group, not 8 cards). Display still slices to its DEFAULT_TRIP_CAP for the
+  // collapsed list.
+  const finalDiverseFlyIns = diverseFlyIns.slice(0, 50)
 
   // Diagnostic: record post-dedup state for priority players
   for (const pName of priorityPlayers) {
@@ -1473,11 +1492,13 @@ export async function generateTrips(
   flyInVisits.length = 0
   flyInVisits.push(...finalDiverseFlyIns)
 
-  // Filter out fly-in visits beyond max flight range
+  // Filter out fly-in visits beyond max flight range. maxFlightHours is
+  // compared against PURE flight time (no airport overhead) per Kent's
+  // 2026-06-08 ask — he factors in the airport himself.
   // EXCEPTION: Always keep fly-ins that include a priority player — never silently drop them
   const beyondFlightRange: UnvisitablePlayer[] = []
   const filteredFlyIns = flyInVisits.filter((v) => {
-    if (v.estimatedTravelHours <= maxFlightHours) return true
+    if (purePilotFlightHours(v.estimatedTravelHours) <= maxFlightHours) return true
     // Keep fly-ins for priority players even if beyond max flight
     const hasPriority = v.playerNames.some(n => prioritySet.has(n))
     if (hasPriority) return true
@@ -1485,13 +1506,13 @@ export async function generateTrips(
     for (const name of v.playerNames) {
       if (flyInCovered.has(name)) {
         const otherFlyIn = flyInVisits.some(
-          (other) => other !== v && other.estimatedTravelHours <= maxFlightHours && other.playerNames.includes(name),
+          (other) => other !== v && purePilotFlightHours(other.estimatedTravelHours) <= maxFlightHours && other.playerNames.includes(name),
         )
         if (!otherFlyIn) {
           flyInCovered.delete(name)
           beyondFlightRange.push({
             name,
-            reason: `Beyond max flight range (${v.estimatedTravelHours}h travel)`,
+            reason: `Beyond max flight range (~${purePilotFlightHours(v.estimatedTravelHours).toFixed(1)}h flight)`,
           })
         }
       }

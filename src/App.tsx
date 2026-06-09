@@ -1,8 +1,10 @@
-import { Component, type ReactNode } from 'react'
+import { Component, useEffect, type ReactNode } from 'react'
 import AppShell from './components/layout/AppShell'
 import RosterDashboard from './components/roster/RosterDashboard'
 import TripPlanner from './components/trips/TripPlanner'
 import MapView from './components/map/MapView'
+import DataTab from './components/data/DataTab'
+import { useSummerStore } from './store/summerStore'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null }
@@ -43,6 +45,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 export default function App() {
+  // Pull the summer assignment sheet at the top level so player-card badges
+  // populate regardless of which tab the user lands on first. Stale check: 6h.
+  const loadSummerAssignments = useSummerStore((s) => s.loadAssignments)
+  const summerFetchedAt = useSummerStore((s) => s.fetchedAt)
+  useEffect(() => {
+    const stale = !summerFetchedAt || (Date.now() - new Date(summerFetchedAt).getTime() > 6 * 3600000)
+    if (stale) loadSummerAssignments()
+  }, [loadSummerAssignments, summerFetchedAt])
+
   return (
     <ErrorBoundary>
       <AppShell>
@@ -50,6 +61,7 @@ export default function App() {
           roster: <RosterDashboard />,
           trips: <TripPlanner />,
           map: <MapView />,
+          data: <DataTab />,
         }}
       </AppShell>
     </ErrorBoundary>

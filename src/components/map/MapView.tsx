@@ -14,6 +14,9 @@ import { useTierMarkers } from './hooks/useTierMarkers'
 import { useBestWindows } from './hooks/useBestWindows'
 import type { WindowResult } from './hooks/useBestWindows'
 import { formatDate } from '../../lib/formatters'
+import MapFilters, { DEFAULT_MAP_FILTERS, applyMapFilters, type MapFilterState } from './MapFilters'
+import { useHeartbeatStore } from '../../store/heartbeatStore'
+import { useMemo } from 'react'
 
 const TIER_DOT_COLORS: Record<number, string> = { 1: 'bg-[#ef4444]', 2: 'bg-[#f97316]', 3: 'bg-gray-500' }
 
@@ -44,9 +47,22 @@ export default function MapView() {
   // Data hooks
   const venuePlayerMap = useVenuePlayerMap()
   const dateFilteredVenues = useDateFilteredVenues(filterStart, filterEnd)
-  const tierMarkers = useTierMarkers(venuePlayerMap, dateFilteredVenues, filterStart, filterEnd)
+  const allTierMarkers = useTierMarkers(venuePlayerMap, dateFilteredVenues, filterStart, filterEnd)
 
-  // Best window recommender
+  // Tier / level / search / overdue filter (Maptive Stage 1 polish)
+  const [filterState, setFilterState] = useState<MapFilterState>(DEFAULT_MAP_FILTERS)
+  const heartbeatPlayers = useHeartbeatStore((s) => s.players)
+  const daysByPlayerKey = useMemo(() => {
+    const m = new Map<string, number | null>()
+    for (const p of heartbeatPlayers) {
+      m.set(p.name.trim().toLowerCase(), p.daysSinceInPerson ?? null)
+    }
+    return m
+  }, [heartbeatPlayers])
+  const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey)
+
+  // Best window recommender (uses filtered markers — Kent's filters should
+  // drive the recommendations too)
   const homeBase = useTripStore((s) => s.homeBase)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const [windowDays, setWindowDays] = useState(3)
@@ -99,6 +115,21 @@ export default function MapView() {
     })
   }, [])
 
+  // When a Trip Card sets selectedTripIndex (via the "Show on Map" button),
+  // sync the map's visible date range to that trip's window so the trip's
+  // venues actually fall inside the date filter and tier markers stay visible
+  // around the highlighted polyline.
+  const selectedTripIndex = useTripStore((s) => s.selectedTripIndex)
+  const tripPlan = useTripStore((s) => s.tripPlan)
+  useEffect(() => {
+    if (selectedTripIndex == null || !tripPlan) return
+    const trip = tripPlan.trips[selectedTripIndex]
+    if (!trip || trip.suggestedDays.length === 0) return
+    const days = [...trip.suggestedDays].sort()
+    setFilterStart(days[0]!)
+    setFilterEnd(days[days.length - 1]!)
+  }, [selectedTripIndex, tripPlan, setFilterStart, setFilterEnd])
+
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       {/* Welcome explainer — dismissible */}
@@ -123,6 +154,35 @@ export default function MapView() {
         venueCount={tierMarkers.length}
       />
 
+      {/* Filter strip — tier / level / search / overdue (acts as legend too) */}
+      {hasSchedules && (
+        <MapFilters
+          state={filterState}
+          setState={setFilterState}
+          markerCount={tierMarkers.length}
+          totalCount={allTierMarkers.length}
+          daysByPlayerKey={daysByPlayerKey}
+        />
+      )}
+
+      {/* Trip preview banner — shown when a Trip Card highlighted itself on the map */}
+      {selectedTripIndex != null && tripPlan && tripPlan.trips[selectedTripIndex] && (
+        <div className="flex items-center justify-between rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs">
+          <span className="text-yellow-200">
+            Previewing <strong>Trip #{selectedTripIndex + 1}</strong>
+            {tripPlan.trips[selectedTripIndex]!.anchorGame.venue.name && (
+              <span className="text-yellow-200/70"> · {tripPlan.trips[selectedTripIndex]!.anchorGame.venue.name}</span>
+            )}
+          </span>
+          <button
+            onClick={() => useTripStore.getState().setSelectedTripIndex(null)}
+            className="text-yellow-200/80 hover:text-yellow-200 underline-offset-2 hover:underline"
+          >
+            clear preview
+          </button>
+        </div>
+      )}
+
       {/* Best window recommender */}
       {hasSchedules && tierMarkers.length > 0 && (
         <BestWindowsPanel
@@ -139,8 +199,14 @@ export default function MapView() {
       {/* Tips */}
       <MapTip />
 
-      {/* Map */}
-      <MapContainer tierMarkers={tierMarkers} />
+      {/* Map — when a specific player is selected, fitToMarkersKey changes,
+          telling MapContainer to zoom to wherever that player's venues are.
+          ("Find Jake Munroe for me.") */}
+      <MapContainer
+        tierMarkers={tierMarkers}
+        colorBy={filterState.colorBy}
+        fitToMarkersKey={filterState.selectedPlayer || undefined}
+      />
 
       {/* Schedule panel (side drawer) */}
       {schedulePanelPlayer && (
@@ -155,11 +221,13 @@ export default function MapView() {
 
 const MAP_TIPS = [
   'Red dots = must-see players (Tier 1). Orange = high priority. Gray = standard.',
-  'Click any dot to see who plays there and when. Click a name to view their full schedule.',
-  'The dashed circle shows your drive radius from the Trip Planner starting location.',
-  'Change the date range to see where your players have games in any window.',
-  'Use "Next 30 days" to see the full upcoming month at a glance.',
-  'The map shows where players will be playing — away games appear at the opponent\'s venue.',
+  'Click any dot to see who plays there, when, and how recently each player was visited.',
+  'The dashed circle shows your drive radius from your starting location.',
+  'Switch "Color by" to Heartbeat to see which venues have overdue players (red = >90 days).',
+  'Tap "Overdue only" in the filter strip to hide venues where everyone\'s been visited recently.',
+  'Set "From" to a city you\'ll be in — Miami, Chicago — and the drive radius recenters there.',
+  'Click "Plan trip with these N players" on any popup to jump straight into the Trip Planner.',
+  'Generate trips in the Trip Planner tab, then click "Show on Map" to preview the route.',
 ]
 
 function MapTip() {
@@ -269,6 +337,18 @@ function BestWindowsPanel({
                         {w.t3Count} T3
                       </span>
                     )}
+                    {w.overdueCount > 0 && (
+                      <span className="rounded bg-accent-red/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-red"
+                        title={`${w.overdueCount} player(s) in this window are overdue (>90 days since visit) or never visited. Window score boosted.`}>
+                        {w.overdueCount} overdue
+                      </span>
+                    )}
+                    {w.timeConflictCount > 0 && (
+                      <span className="rounded bg-accent-orange/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-orange"
+                        title={`${w.timeConflictCount} game(s) overlap in start time across different venues — Kent can only attend one of each conflicting set. Window score discounted.`}>
+                        ⚠ {w.timeConflictCount} conflict{w.timeConflictCount !== 1 ? 's' : ''}
+                      </span>
+                    )}
                     <span className="text-[10px] text-text-dim/40">
                       drivable from {homeBaseName}
                     </span>
@@ -311,25 +391,27 @@ function MapWelcome() {
     try { return localStorage.getItem('sv-map-welcome-dismissed') === '1' } catch { return false }
   })
   if (dismissed) return null
+  function dismiss() {
+    setDismissed(true)
+    try { localStorage.setItem('sv-map-welcome-dismissed', '1') } catch {}
+  }
   return (
-    <div className="rounded-lg bg-surface border border-border px-5 py-4 relative">
+    <div className="rounded-lg bg-accent-blue/5 border border-accent-blue/30 px-5 py-4 relative">
       <button
-        onClick={() => { setDismissed(true); try { localStorage.setItem('sv-map-welcome-dismissed', '1') } catch {} }}
+        onClick={dismiss}
         className="absolute top-3 right-4 text-xs text-text-dim hover:text-text"
       >
         Got it
       </button>
-      <h3 className="text-sm font-semibold text-text mb-2">Player Map</h3>
-      <p className="text-xs text-text-dim leading-relaxed">
-        This map shows where your players have games in the selected date range.
-        Each dot is a venue — <span className="text-[#ef4444] font-medium">red</span> for must-see players,{' '}
-        <span className="text-[#f97316] font-medium">orange</span> for high priority,{' '}
-        <span className="text-[#6b7280] font-medium">gray</span> for standard.
-        The dashed circle shows what's drivable from your home base.
-      </p>
-      <p className="text-xs text-text-dim leading-relaxed mt-1.5">
-        Click any dot to see who's playing there and when. Click a player's name to view their full schedule.
-        Use the date range and home base controls above to explore different windows and locations.
+      <h3 className="text-sm font-semibold text-text mb-2">Start here</h3>
+      <ol className="text-xs text-text-dim leading-relaxed space-y-1 list-decimal list-inside">
+        <li><strong className="text-text">Pick a date range</strong> in the bar below (or click <em>Next 7 days</em>).</li>
+        <li><strong className="text-text">Pick where you'll be</strong> — choose from the <em>From</em> dropdown, or type any city in the <em>or type a city</em> box.</li>
+        <li>Each dot on the map is a venue with at least one of your players' games in that window. Click a dot to see who, when, and how long since you've visited.</li>
+        <li>Want suggestions? Open <em>Best Windows</em> below, or jump to the <em>Trip Planner</em> tab.</li>
+      </ol>
+      <p className="text-[11px] text-text-dim/60 mt-2">
+        Tip: switch <strong className="text-text">Color by</strong> to <em>Heartbeat</em> to see overdue players in red — independent of tier.
       </p>
     </div>
   )

@@ -9,7 +9,7 @@ interface VisitOverride {
   lastVisitDate: string | null
 }
 
-export type SortField = 'playerName' | 'tier' | 'org'
+export type SortField = 'playerName' | 'tier' | 'org' | 'daysSince'
 export type SortDir = 'asc' | 'desc'
 
 interface RosterState {

@@ -4,6 +4,7 @@ import type { SortField } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import type { AssignmentChange } from '../../store/scheduleStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
+import { useSummerStore } from '../../store/summerStore'
 import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '../../data/aliases'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
@@ -43,6 +44,10 @@ export default function RosterDashboard() {
   const fetchHeartbeat = useHeartbeatStore((s) => s.fetchHeartbeat)
   const heartbeatLastFetched = useHeartbeatStore((s) => s.lastFetchedAt)
 
+  const loadSummerAssignments = useSummerStore((s) => s.loadAssignments)
+  const summerFetchedAt = useSummerStore((s) => s.fetchedAt)
+  const rosterMovesCheckedAt = useScheduleStore((s) => s.rosterMovesCheckedAt)
+
   const initialized = useRef(false)
   useEffect(() => {
     if (initialized.current) return
@@ -51,9 +56,32 @@ export default function RosterDashboard() {
     // Auto-fetch heartbeat if not loaded or stale (>1 hour)
     const stale = !heartbeatLastFetched || (Date.now() - new Date(heartbeatLastFetched).getTime() > 3600000)
     if (stale) fetchHeartbeat()
-  }, [fetchRoster, fetchHeartbeat, heartbeatLastFetched])
+    // Auto-fetch summer assignments if stale (>6 hours) or never loaded
+    const summerStale = !summerFetchedAt || (Date.now() - new Date(summerFetchedAt).getTime() > 6 * 3600000)
+    if (summerStale) loadSummerAssignments()
+    // Auto-check Pro roster moves every 24h — the existing handler already
+    // requires affiliates + a rostered player set, so we run it after a brief
+    // delay to let those load. If they're not ready, the call no-ops.
+    const movesStale = !rosterMovesCheckedAt || (Date.now() - new Date(rosterMovesCheckedAt).getTime() > 24 * 3600000)
+    if (movesStale) {
+      setTimeout(() => { checkRosterMoves() }, 3000)
+    }
+  }, [fetchRoster, fetchHeartbeat, heartbeatLastFetched, loadSummerAssignments, summerFetchedAt, rosterMovesCheckedAt, checkRosterMoves])
 
   const playerCount = players.length
+
+  // Build a quick daysSince lookup from Heartbeat for sort-by-overdue. null
+  // means "no visit on record" — we treat those as MOST overdue (Infinity)
+  // so they sort to the top when sorted desc.
+  const heartbeatPlayers = useHeartbeatStore((s) => s.players)
+  const daysSinceLookup = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const p of heartbeatPlayers) {
+      const d = p.daysSinceInPerson
+      m.set(p.name.trim().toLowerCase(), d == null ? Number.POSITIVE_INFINITY : d)
+    }
+    return m
+  }, [heartbeatPlayers])
 
   const filtered = players
     .filter((p) => levelFilter === 'All' || p.level === levelFilter)
@@ -66,6 +94,11 @@ export default function RosterDashboard() {
       const mul = sortDir === 'asc' ? 1 : -1
       if (sortField === 'playerName') return mul * a.playerName.localeCompare(b.playerName)
       if (sortField === 'org') return mul * a.org.localeCompare(b.org)
+      if (sortField === 'daysSince') {
+        const da = daysSinceLookup.get(a.playerName.trim().toLowerCase()) ?? -1
+        const db = daysSinceLookup.get(b.playerName.trim().toLowerCase()) ?? -1
+        return mul * (da - db)
+      }
       return mul * ((a[sortField] as number) - (b[sortField] as number))
     })
 
@@ -361,7 +394,9 @@ export default function RosterDashboard() {
                     <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('tier')}>
                       Tier{sortIndicator('tier')}
                     </th>
-                    <th className="px-4 py-2.5">Last Visit</th>
+                    <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('daysSince')} title="Days since last in-person visit (from Heartbeat). Click to sort by overdue.">
+                      Last Visit{sortIndicator('daysSince')}
+                    </th>
                     <th className="px-4 py-2.5">Love</th>
                   </tr>
                 </thead>
@@ -476,7 +511,9 @@ function ProTable({
             <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('tier')}>
               Tier{sortIndicator('tier')}
             </th>
-            <th className="px-4 py-2.5">Last Visit</th>
+            <th className="cursor-pointer px-4 py-2.5 hover:text-text" onClick={() => toggleSort('daysSince')} title="Days since last in-person visit (from Heartbeat). Click to sort by overdue.">
+              Last Visit{sortIndicator('daysSince')}
+            </th>
             <th className="px-4 py-2.5">Love</th>
           </tr>
         </thead>

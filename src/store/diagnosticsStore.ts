@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 export interface DiagnosticIssue {
   level: 'error' | 'warning' | 'info'
-  source: 'pro' | 'ncaa' | 'hs' | 'roster' | 'geocoding'
+  source: 'pro' | 'ncaa' | 'hs' | 'roster' | 'geocoding' | 'summer'
   message: string
   details?: string
 }

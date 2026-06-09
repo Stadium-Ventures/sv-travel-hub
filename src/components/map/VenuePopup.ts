@@ -1,14 +1,27 @@
 import type { TierMarker } from './hooks/useTierMarkers'
 import { TIER_COLORS } from './hooks/useTierMarkers'
 
+/** Heartbeat days-since-visit + planned-visit info, keyed by normalized player name. */
+export interface PopupEnrichment {
+  daysByPlayer: Map<string, number | null>
+  plannedByPlayer: Map<string, { date: string; agent: string | null }>
+}
+
+function heartbeatBadgeColor(days: number | null): string {
+  if (days == null) return '#6b7280'
+  if (days > 90) return '#ef4444'
+  if (days > 45) return '#f97316'
+  return '#22c55e'
+}
+
 /**
  * Build popup HTML string for a venue marker.
  * Leaflet requires raw HTML strings for bindPopup.
  */
-export function buildVenuePopupHtml(marker: TierMarker): string {
+export function buildVenuePopupHtml(marker: TierMarker, enrich?: PopupEnrichment): string {
   const sorted = [...marker.players].sort((a, b) => a.tier - b.tier)
 
-  let html = `<div style="font-family:system-ui,sans-serif;min-width:180px;max-width:300px">`
+  let html = `<div style="font-family:system-ui,sans-serif;min-width:180px;max-width:320px">`
 
   // Venue name
   html += `<div style="font-weight:700;font-size:13px;margin-bottom:6px;color:#f1f5f9">${marker.venueName}</div>`
@@ -16,12 +29,38 @@ export function buildVenuePopupHtml(marker: TierMarker): string {
   // Players sorted by tier
   for (const p of sorted) {
     const color = TIER_COLORS[p.tier] ?? TIER_COLORS[4]!
+    const key = p.name.trim().toLowerCase()
+    const days = enrich?.daysByPlayer.get(key) ?? undefined
+    const planned = enrich?.plannedByPlayer.get(key)
     html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:12px">`
     html += `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>`
     html += `<span data-action="schedule" data-player="${p.name}" style="flex:1;min-width:0;cursor:pointer;color:#e2e8f0;text-decoration:underline;text-decoration-color:rgba(226,232,240,0.3);text-underline-offset:2px">${p.name}</span>`
     html += `<span style="color:#94a3b8;font-size:10px;font-weight:600;white-space:nowrap">T${p.tier} &middot; ${p.level}</span>`
     html += `</div>`
+    // Heartbeat + planned visit metadata row — only when we have data
+    if (days !== undefined || planned) {
+      html += `<div style="margin:-2px 0 4px 14px;display:flex;flex-wrap:wrap;gap:6px;font-size:10px;color:#94a3b8">`
+      if (days !== undefined) {
+        const dotColor = heartbeatBadgeColor(days ?? null)
+        const label = days == null ? 'no visit on record' : `last visit ${days}d ago`
+        html += `<span style="display:flex;align-items:center;gap:3px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${dotColor}"></span>${label}</span>`
+      }
+      if (planned) {
+        const dateStr = planned.date.length > 10 ? planned.date.slice(0, 10) : planned.date
+        const agentPrefix = planned.agent ? `${planned.agent.split(' ')[0]} ` : ''
+        html += `<span style="color:#60a5fa">${agentPrefix}visiting ${dateStr}</span>`
+      }
+      html += `</div>`
+    }
   }
+
+  // Action row — plan a trip around these players
+  html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(148,163,184,0.15)">`
+  html += `<button data-action="plan-trip" data-players="${sorted.map(p => p.name).join('||')}" `
+  html += `style="width:100%;background:#3b82f6;color:white;border:none;border-radius:4px;padding:5px 8px;font-size:11px;font-weight:600;cursor:pointer">`
+  html += `Plan trip with ${sorted.length === 1 ? 'this player' : `these ${sorted.length} players`} &rarr;`
+  html += `</button>`
+  html += `</div>`
 
   // Game dates in window — expandable
   if (marker.gameDates.length > 0) {

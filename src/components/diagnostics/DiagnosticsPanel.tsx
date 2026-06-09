@@ -7,6 +7,7 @@ const SOURCE_LABELS: Record<DiagnosticIssue['source'], string> = {
   hs: 'HS',
   roster: 'Roster',
   geocoding: 'Geocoding',
+  summer: 'Summer',
 }
 
 const LEVEL_COLORS: Record<DiagnosticIssue['level'], { badge: string; text: string; border: string }> = {

@@ -5,6 +5,8 @@ export type MapEventMap = {
   'map:open-schedule': { player: string }
   'map:toast': { message: string }
   'map:explore-pin': { lat: number; lng: number }
+  /** Switch to a tab in AppShell from anywhere in the tree. */
+  'app:switch-tab': { tab: 'roster' | 'trips' | 'map' }
 }
 
 export function dispatchMapEvent<K extends keyof MapEventMap>(

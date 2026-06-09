@@ -3,6 +3,7 @@ import type { RosterPlayer } from '../../types/roster'
 import type { PlayerTeamAssignment } from '../../store/scheduleStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
+import { useSummerStore } from '../../store/summerStore'
 import { resolveMLBTeamId } from '../../data/aliases'
 
 const TIER_COLORS: Record<number, string> = {
@@ -40,6 +41,16 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
   const loveScore = heartbeatData?.loveScore ?? null
   const daysSinceVisit = heartbeatData?.daysSinceInPerson ?? null
 
+  // Cross-agent planned visit (Kent's "greedy" feature). Heartbeat surfaces
+  // nextPlannedDate/nextPlannedAgent per player when it parses planned visits
+  // from Slack — this badge lights up automatically once that pipeline fills.
+  const getVisitCount = useHeartbeatStore((s) => s.getVisitCount)
+  const visitCount = useMemo(() => getVisitCount(player.playerName), [getVisitCount, player.playerName])
+  const plannedDate = visitCount?.nextPlannedDate ?? null
+  const plannedAgent = visitCount?.nextPlannedAgent ?? null
+
+  const summerAssignment = useSummerStore((s) => s.byPlayer[player.playerName])
+
   // Filter affiliate options to this player's org
   const orgAffiliates = useMemo(() => {
     if (!affiliateOptions) return []
@@ -73,6 +84,26 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
               : 'bg-gray-700/50 text-text-dim'
             }`}>
               {player.status}
+            </span>
+          )}
+          {summerAssignment && (
+            <span
+              className={`ml-1.5 rounded px-1.5 py-0.5 text-[9px] font-medium ${
+                summerAssignment.active
+                  ? 'bg-accent-green/15 text-accent-green'
+                  : 'bg-accent-red/15 text-accent-red'
+              }`}
+              title={`Summer (${summerAssignment.league}): ${summerAssignment.summerTeam}${summerAssignment.status ? ` — ${summerAssignment.status}` : ''}`}
+            >
+              {summerAssignment.active ? `Summer · ${summerAssignment.league}` : `Summer ${summerAssignment.status}`}
+            </span>
+          )}
+          {plannedDate && (
+            <span
+              className="ml-1.5 rounded bg-accent-blue/15 px-1.5 py-0.5 text-[9px] font-medium text-accent-blue"
+              title={`${plannedAgent ?? 'Someone'} has a planned visit to ${player.playerName} on ${plannedDate}. Trip planner will down-weight this player so you don't double up.`}
+            >
+              {plannedAgent ? `${plannedAgent.split(' ')[0]} ` : ''}visiting {formatPlannedDate(plannedDate)}
             </span>
           )}
         </td>
@@ -111,6 +142,17 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
                     {affiliate.teamName}
                     {affiliate.source === 'estimated' && (
                       <span className="ml-1 text-[9px] text-accent-orange" title="Estimated from last year + promotion">~est</span>
+                    )}
+                    {/* MLB-level player currently on a MiLB affiliate roster —
+                        commonly rehab assignment or option. Surface so Kent
+                        doesn't double-take when Whitlock shows up at Worcester. */}
+                    {player.level === 'Pro' && affiliate.sportId !== 1 && affiliate.sportId >= 11 && affiliate.sportId <= 14 && (
+                      <span
+                        className="ml-1 rounded bg-accent-orange/15 px-1 py-0 text-[9px] text-accent-orange"
+                        title={`${player.playerName} is currently on the ${affiliate.teamName} (${SPORT_LABELS[affiliate.sportId] ?? `L${affiliate.sportId}`}) roster — likely rehab assignment or option. Verify in MLB transactions before planning.`}
+                      >
+                        @ {SPORT_LABELS[affiliate.sportId] ?? 'MiLB'} · rehab?
+                      </span>
                     )}
                   </>
                 ) : <span className="text-text-dim/40">— assign —</span>}
@@ -170,6 +212,32 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
               <Detail label="Father" value={player.father} />
               <Detail label="Mother" value={player.mother} />
             </div>
+
+            {/* External profile links */}
+            {(player.mlbPlayerId || player.pgPlayerId) && (
+              <div className="mt-2 flex flex-wrap gap-3 text-xs">
+                {player.mlbPlayerId && (
+                  <a
+                    href={`https://www.mlb.com/player/${player.mlbPlayerId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent-blue hover:underline"
+                  >
+                    MLB profile ↗
+                  </a>
+                )}
+                {player.pgPlayerId && (
+                  <a
+                    href={`https://www.perfectgame.org/Players/Playerprofile.aspx?ID=${player.pgPlayerId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent-blue hover:underline"
+                  >
+                    Perfect Game profile ↗
+                  </a>
+                )}
+              </div>
+            )}
 
             <ScheduleStatus playerName={player.playerName} level={player.level} affiliate={affiliate} />
           </td>
@@ -240,6 +308,14 @@ function ScheduleStatus({ playerName, level, affiliate }: {
       )}
     </div>
   )
+}
+
+function formatPlannedDate(iso: string): string {
+  // Accepts YYYY-MM-DD or full ISO — show as "Jun 15" / "8/12"
+  const d = new Date(iso.length > 10 ? iso : iso + 'T12:00:00Z')
+  if (isNaN(d.getTime())) return iso
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
