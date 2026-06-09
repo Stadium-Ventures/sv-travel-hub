@@ -380,7 +380,7 @@ export default function TripPlanner() {
   // doesn't have to scroll past 8 irrelevant trips to find his guys.
   // ----------------------------------------------------------------------
   const tripDisplayInfo = useMemo(() => {
-    if (!tripPlan) return { findTripNum: (_n: string) => 0, groupCount: 0 }
+    if (!tripPlan) return { findTripNum: (_n: string) => 0, findAllTripNums: (_n: string) => [] as number[], groupCount: 0 }
     type Item =
       | { type: 'road'; trip: import('../../types/schedule').TripCandidate; sortDate: string }
       | { type: 'flyin'; visit: import('../../types/schedule').FlyInVisit; sortDate: string }
@@ -421,6 +421,7 @@ export default function TripPlanner() {
       return `flyin|${[...item.visit.playerNames].sort().join(',')}|${venueKey}`
     }
     const playerToTripNum = new Map<string, number>()
+    const playerToAllTripNums = new Map<string, number[]>()
     const seenGroups = new Set<string>()
     let displayIdx = 0
     for (const item of items) {
@@ -431,13 +432,20 @@ export default function TripPlanner() {
       const playerNames = item.type === 'road'
         ? new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap((g) => g.playerNames)])
         : new Set(item.visit.playerNames)
-      // First occurrence wins — that's the lowest displayIndex containing this player
+      // Track first occurrence (for backwards compat) AND every trip this
+      // player appears in (so the status banner can show "Trips #1, #2, #4"
+      // when a priority player is in multiple matched trips — Kent's
+      // 2026-06-09 catch: "Cebert is in all trips so why does it say Trip 1?").
       for (const name of playerNames) {
         if (!playerToTripNum.has(name)) playerToTripNum.set(name, displayIdx)
+        const arr = playerToAllTripNums.get(name) ?? []
+        arr.push(displayIdx)
+        playerToAllTripNums.set(name, arr)
       }
     }
     return {
       findTripNum: (playerName: string) => playerToTripNum.get(playerName) ?? 0,
+      findAllTripNums: (playerName: string) => playerToAllTripNums.get(playerName) ?? [],
       groupCount: displayIdx,
     }
   }, [tripPlan, displayedFlyIns, priorityPlayers, sortBy])
@@ -1147,15 +1155,21 @@ export default function TripPlanner() {
           {/* Priority player status — the most important thing */}
           {priorityPlayers.length > 0 && (() => {
             // Use shared tripDisplayInfo for matching trip numbers.
-            const findPrioTripNum = tripDisplayInfo.findTripNum
-            const prioInTrip = priorityPlayers.filter((n) => findPrioTripNum(n) > 0)
-            const prioMissing = priorityPlayers.filter((n) => findPrioTripNum(n) === 0)
+            const findAllTripNums = tripDisplayInfo.findAllTripNums
+            const prioInTrip = priorityPlayers.filter((n) => findAllTripNums(n).length > 0)
+            const prioMissing = priorityPlayers.filter((n) => findAllTripNums(n).length === 0)
+            function formatTrips(name: string): string {
+              const nums = findAllTripNums(name)
+              if (nums.length === 1) return `${name} → Trip #${nums[0]}`
+              if (nums.length <= 3) return `${name} → Trips #${nums.join(', #')}`
+              return `${name} → Trips #${nums.slice(0, 3).join(', #')} (+${nums.length - 3} more)`
+            }
             return (
               <div className={`rounded-lg px-3 py-2 ${prioMissing.length > 0 ? 'bg-accent-orange/10 border border-accent-orange/30' : 'bg-accent-green/10 border border-accent-green/30'}`}>
                 <p className="text-sm font-medium">
                   {prioInTrip.length > 0 && (
                     <span className="text-accent-green">
-                      {prioInTrip.map((n) => `${n} → Trip #${findPrioTripNum(n)}`).join(' · ')}
+                      {prioInTrip.map(formatTrips).join(' · ')}
                     </span>
                   )}
                   {prioInTrip.length > 0 && prioMissing.length > 0 && (
