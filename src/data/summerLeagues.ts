@@ -1,17 +1,17 @@
 // Summer collegiate league metadata.
 //
-// CCBL and the MLB Draft League are partner leagues of MLB and expose their
-// schedules through statsapi.mlb.com — same backend as MLB/MiLB.
-// Identifiers confirmed via deep research 2026-06-08: CCBL leagueId=565,
-// MLBD leagueId=5536.
+// MLB-API leagues (CCBL, MLB Draft League, Appalachian League) expose their
+// schedules through statsapi.mlb.com — same backend as MLB/MiLB. Identifiers
+// confirmed via dugout-pulse team 2026-06-09: CCBL leagueId=565,
+// MLBD leagueId=5536, Appalachian leagueId=120.
 //
-// PrestoSports leagues (PGCBL, NECBL, FCBL) are scrapable HTML; ingestion
-// lives in src/lib/prestoSports.ts.
+// PrestoSports leagues (PGCBL, NECBL, FCBL) are scrapable HTML; not currently
+// wired — we surface a "no live schedule" notice for SV players in these.
 //
 // Northwoods (NWDS) and Coastal Plain (COPL) are manual entries — too few
 // SV players to justify scraper investment, and Northwoods ToS forbids it.
 
-export type SummerLeagueCode = 'CCBL' | 'MLBD' | 'PGCBL' | 'NECBL' | 'FCBL' | 'NWDS' | 'COPL'
+export type SummerLeagueCode = 'CCBL' | 'MLBD' | 'APP' | 'PGCBL' | 'NECBL' | 'FCBL' | 'NWDS' | 'COPL'
 export type SummerLeagueSource = 'mlb-api' | 'presto' | 'manual'
 
 export interface SummerLeagueMeta {
@@ -27,6 +27,7 @@ export interface SummerLeagueMeta {
 export const SUMMER_LEAGUES: Record<SummerLeagueCode, SummerLeagueMeta> = {
   CCBL: { code: 'CCBL', name: 'Cape Cod Baseball League', source: 'mlb-api', mlbApiLeagueId: 565 },
   MLBD: { code: 'MLBD', name: 'MLB Draft League', source: 'mlb-api', mlbApiLeagueId: 5536 },
+  APP:  { code: 'APP',  name: 'Appalachian League', source: 'mlb-api', mlbApiLeagueId: 120 },
   PGCBL: { code: 'PGCBL', name: 'Perfect Game Collegiate Baseball League', source: 'presto', prestoHost: 'pgcbl.com' },
   NECBL: { code: 'NECBL', name: 'New England Collegiate Baseball League', source: 'presto', prestoHost: 'necbl.com' },
   FCBL: { code: 'FCBL', name: 'Futures Collegiate Baseball League', source: 'presto', prestoHost: 'thefuturesleague.com' },

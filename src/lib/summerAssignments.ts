@@ -47,6 +47,7 @@ function parseLeague(raw: string, playerName: string, warnings: string[]): Summe
   if (code === 'CCB') return 'CCBL'
   if (code === 'NORTHWOODS') return 'NWDS'
   if (code === 'COASTAL PLAIN') return 'COPL'
+  if (code === 'APPY' || code === 'APPALACHIAN') return 'APP'
   warnings.push(`${playerName}: unknown league "${raw}" — skipped`)
   return null
 }
