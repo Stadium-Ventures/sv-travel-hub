@@ -52,10 +52,16 @@ function getDayOfWeek(dateStr: string): number {
 }
 
 /**
- * Slide a window of `windowDays` across the date range, scoring each by
- * tier-weighted unique player count at venues within drive radius.
- * Returns top N results.
+ * Strategy controls how Best Windows are ranked. The underlying window
+ * computation is unchanged; only the final sort + tie-breakers differ.
+ *  - impact:     tier-weighted score (default — overall value of the window)
+ *  - t1-count:   most T1 players in one trip (Kent's "T1 cluster" ask)
+ *  - overdue-priority: prioritize windows that catch overdue T1/T2 players
+ *  - player-count: maximize unique player coverage regardless of tier
+ *  - tuesday:    Tuesday-bearing windows first (Kent's MiLB position-player rule)
  */
+export type BestWindowStrategy = 'impact' | 't1-count' | 'overdue-priority' | 'player-count' | 'tuesday'
+
 export function useBestWindows(
   tierMarkers: TierMarker[],
   homeBase: Coordinates,
@@ -64,6 +70,7 @@ export function useBestWindows(
   filterEnd: string,
   windowDays = 3,
   topN = 5,
+  strategy: BestWindowStrategy = 'impact',
 ): WindowResult[] {
   // Pull all games + heartbeat data so we can detect time conflicts and
   // weight overdue players. Subscribing here means Best Windows updates
@@ -240,8 +247,37 @@ export function useBestWindows(
       current = addDays(current, 1)
     }
 
-    // Sort by score descending, deduplicate overlapping windows (keep best)
-    results.sort((a, b) => b.tierWeightedScore - a.tierWeightedScore)
+    // Strategy-driven sort. Every strategy uses tierWeightedScore as the
+    // tie-breaker so windows with identical primary metric still order
+    // sensibly by overall value.
+    function overdueHighPriCount(w: WindowResult): number {
+      let n = 0
+      for (const p of w.players) {
+        if (p.tier <= 2 && isOverdue(p.name)) n++
+      }
+      return n
+    }
+    results.sort((a, b) => {
+      switch (strategy) {
+        case 't1-count':
+          if (b.t1Count !== a.t1Count) return b.t1Count - a.t1Count
+          return b.tierWeightedScore - a.tierWeightedScore
+        case 'overdue-priority': {
+          const ao = overdueHighPriCount(a), bo = overdueHighPriCount(b)
+          if (bo !== ao) return bo - ao
+          return b.tierWeightedScore - a.tierWeightedScore
+        }
+        case 'player-count':
+          if (b.uniquePlayerCount !== a.uniquePlayerCount) return b.uniquePlayerCount - a.uniquePlayerCount
+          return b.tierWeightedScore - a.tierWeightedScore
+        case 'tuesday':
+          if (a.hasTuesday !== b.hasTuesday) return a.hasTuesday ? -1 : 1
+          return b.tierWeightedScore - a.tierWeightedScore
+        case 'impact':
+        default:
+          return b.tierWeightedScore - a.tierWeightedScore
+      }
+    })
 
     // Remove windows that overlap with a higher-scored already-picked window,
     // OR that bring no new player coverage vs. the windows already picked.
@@ -265,5 +301,5 @@ export function useBestWindows(
     }
 
     return picked
-  }, [tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, topN, proGames, ncaaGames, hsGames, heartbeatPlayers])
+  }, [tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, topN, strategy, proGames, ncaaGames, hsGames, heartbeatPlayers])
 }

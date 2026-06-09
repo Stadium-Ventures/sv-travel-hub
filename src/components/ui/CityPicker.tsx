@@ -72,9 +72,11 @@ export default function CityPicker({
       const ac = new AbortController()
       abortRef.current = ac
       try {
+        // featuretype=city excludes large admin-boundary cities like
+        // Albuquerque — drop it and filter populated places client-side.
         const params = new URLSearchParams({
-          q, format: 'json', limit: '5', countrycodes: 'us,ca',
-          addressdetails: '1', featuretype: 'city',
+          q, format: 'json', limit: '10', countrycodes: 'us,ca',
+          addressdetails: '1', dedupe: '1',
         })
         const res = await fetchWithTimeout(
           `https://nominatim.openstreetmap.org/search?${params}`,
@@ -83,15 +85,25 @@ export default function CityPicker({
         if (!res.ok) return
         type NomResult = {
           lat: string; lon: string; display_name: string
-          address?: { city?: string; town?: string; village?: string; state?: string }
+          class?: string; type?: string
+          address?: { city?: string; town?: string; village?: string; hamlet?: string; municipality?: string; state?: string }
         }
         const results = await res.json() as NomResult[]
-        const mapped: CitySuggestion[] = results.map((r) => {
-          const city = r.address?.city ?? r.address?.town ?? r.address?.village ?? r.display_name.split(',')[0]
-          const state = r.address?.state ?? ''
-          const labelText = state ? `${city}, ${state}` : (city ?? '')
-          return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), label: labelText, display: r.display_name }
-        }).filter((s) => s.label && isFinite(s.lat) && isFinite(s.lng))
+        const mapped: CitySuggestion[] = results
+          .filter((r) => {
+            if (r.class === 'place') return true
+            if (r.class === 'boundary' && r.type === 'administrative') return true
+            const a = r.address ?? {}
+            return Boolean(a.city || a.town || a.village || a.municipality)
+          })
+          .map((r) => {
+            const a = r.address ?? {}
+            const city = a.city ?? a.town ?? a.village ?? a.municipality ?? a.hamlet ?? r.display_name.split(',')[0]
+            const state = a.state ?? ''
+            const labelText = state ? `${city}, ${state}` : (city ?? '')
+            return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), label: labelText, display: r.display_name }
+          })
+          .filter((s) => s.label && isFinite(s.lat) && isFinite(s.lng))
         const seen = new Set<string>()
         const unique = mapped.filter((s) => {
           const k = s.label.toLowerCase()

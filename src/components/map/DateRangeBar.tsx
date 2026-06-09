@@ -89,9 +89,14 @@ export default function DateRangeBar({
       const ac = new AbortController()
       searchAbortRef.current = ac
       try {
+        // NOTE: do NOT pass featuretype=city. Nominatim's featuretype filter
+        // excludes large cities that OSM tags as administrative boundaries
+        // (e.g. Albuquerque), so partial queries returned zero matches.
+        // Instead we keep the query open and filter to populated places
+        // client-side via address class/type.
         const params = new URLSearchParams({
-          q, format: 'json', limit: '5', countrycodes: 'us,ca',
-          addressdetails: '1', featuretype: 'city',
+          q, format: 'json', limit: '10', countrycodes: 'us,ca',
+          addressdetails: '1', dedupe: '1',
         })
         const res = await fetchWithTimeout(
           `https://nominatim.openstreetmap.org/search?${params}`,
@@ -100,15 +105,29 @@ export default function DateRangeBar({
         if (!res.ok) return
         type NomResult = {
           lat: string; lon: string; display_name: string
-          address?: { city?: string; town?: string; village?: string; state?: string; country_code?: string }
+          class?: string; type?: string
+          address?: { city?: string; town?: string; village?: string; hamlet?: string; municipality?: string; county?: string; state?: string; country_code?: string }
         }
         const results = await res.json() as NomResult[]
-        const mapped: CitySuggestion[] = results.map((r) => {
-          const city = r.address?.city ?? r.address?.town ?? r.address?.village ?? r.display_name.split(',')[0]
-          const state = r.address?.state ?? ''
-          const label = state ? `${city}, ${state}` : (city ?? '')
-          return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), label, display: r.display_name }
-        }).filter((s) => s.label && isFinite(s.lat) && isFinite(s.lng))
+        const mapped: CitySuggestion[] = results
+          // Keep only populated places — drop streets, POIs, buildings, etc.
+          // OSM class is usually 'place' for cities/towns; 'boundary' for
+          // admin polygons we also accept (catches Albuquerque).
+          .filter((r) => {
+            if (r.class === 'place') return true
+            if (r.class === 'boundary' && r.type === 'administrative') return true
+            // Fallback: if address resolved to a city/town/municipality it counts.
+            const a = r.address ?? {}
+            return Boolean(a.city || a.town || a.village || a.municipality)
+          })
+          .map((r) => {
+            const a = r.address ?? {}
+            const city = a.city ?? a.town ?? a.village ?? a.municipality ?? a.hamlet ?? r.display_name.split(',')[0]
+            const state = a.state ?? ''
+            const label = state ? `${city}, ${state}` : (city ?? '')
+            return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), label, display: r.display_name }
+          })
+          .filter((s) => s.label && isFinite(s.lat) && isFinite(s.lng))
         // Dedupe by label
         const seen = new Set<string>()
         const unique = mapped.filter((s) => {
@@ -164,20 +183,30 @@ export default function DateRangeBar({
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-surface border border-border px-3 py-2">
-      {/* Date range */}
-      <input
-        type="date"
-        value={filterStart}
-        onChange={(e) => setFilterStart(e.target.value)}
-        className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
-      />
-      <span className="text-text-dim text-xs">to</span>
-      <input
-        type="date"
-        value={filterEnd}
-        onChange={(e) => setFilterEnd(e.target.value)}
-        className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
-      />
+      {/* Date range — neither end may start in the past. The end picker is
+          also clamped to start so the range stays non-empty. */}
+      {(() => {
+        const today = new Date().toISOString().slice(0, 10)
+        return (
+          <>
+            <input
+              type="date"
+              value={filterStart}
+              min={today}
+              onChange={(e) => setFilterStart(e.target.value)}
+              className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
+            />
+            <span className="text-text-dim text-xs">to</span>
+            <input
+              type="date"
+              value={filterEnd}
+              min={filterStart > today ? filterStart : today}
+              onChange={(e) => setFilterEnd(e.target.value)}
+              className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
+            />
+          </>
+        )
+      })()}
 
       <div className="flex gap-1">
         <button

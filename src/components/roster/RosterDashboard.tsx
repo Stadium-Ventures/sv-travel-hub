@@ -40,6 +40,10 @@ export default function RosterDashboard() {
 
   const [levelFilter, setLevelFilter] = useState<PlayerLevel | 'All'>('All')
   const [search, setSearch] = useState('')
+  // Bucket filter from the Needs Attention strip. When a bucket is active we
+  // also force sort by daysSince so the most-overdue land at the top.
+  type AttentionBucket = 'overdue' | 'stale' | 'fresh' | 'nodata'
+  const [attentionFilter, setAttentionFilter] = useState<AttentionBucket | null>(null)
 
   const fetchHeartbeat = useHeartbeatStore((s) => s.fetchHeartbeat)
   const heartbeatLastFetched = useHeartbeatStore((s) => s.lastFetchedAt)
@@ -83,23 +87,47 @@ export default function RosterDashboard() {
     return m
   }, [heartbeatPlayers])
 
+  // Classify each roster player into an attention bucket. We treat "no
+  // heartbeat record" as its own bucket (nodata) rather than rolling it into
+  // overdue — Kent's interview made clear that missing data and "haven't seen
+  // in 90+ days" are different problems.
+  function bucketFor(p: RosterPlayer): AttentionBucket {
+    const days = daysSinceLookup.get(p.playerName.trim().toLowerCase())
+    if (days == null || days === Number.POSITIVE_INFINITY) return 'nodata'
+    if (days > 90) return 'overdue'
+    if (days >= 45) return 'stale'
+    return 'fresh'
+  }
+
+  const bucketCounts = useMemo(() => {
+    const counts = { overdue: 0, stale: 0, fresh: 0, nodata: 0 }
+    for (const p of players) counts[bucketFor(p)]++
+    return counts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [players, daysSinceLookup])
+
   const filtered = players
     .filter((p) => levelFilter === 'All' || p.level === levelFilter)
+    .filter((p) => attentionFilter === null || bucketFor(p) === attentionFilter)
     .filter((p) =>
       search === '' ||
       p.playerName.toLowerCase().includes(search.toLowerCase()) ||
       p.org.toLowerCase().includes(search.toLowerCase())
     )
     .sort((a, b) => {
-      const mul = sortDir === 'asc' ? 1 : -1
-      if (sortField === 'playerName') return mul * a.playerName.localeCompare(b.playerName)
-      if (sortField === 'org') return mul * a.org.localeCompare(b.org)
-      if (sortField === 'daysSince') {
+      // When a bucket filter is active, force sort by daysSince descending so
+      // the most-overdue floats to the top regardless of the user's last pick.
+      const effectiveField = attentionFilter ? 'daysSince' : sortField
+      const effectiveDir = attentionFilter ? 'desc' : sortDir
+      const mul = effectiveDir === 'asc' ? 1 : -1
+      if (effectiveField === 'playerName') return mul * a.playerName.localeCompare(b.playerName)
+      if (effectiveField === 'org') return mul * a.org.localeCompare(b.org)
+      if (effectiveField === 'daysSince') {
         const da = daysSinceLookup.get(a.playerName.trim().toLowerCase()) ?? -1
         const db = daysSinceLookup.get(b.playerName.trim().toLowerCase()) ?? -1
         return mul * (da - db)
       }
-      return mul * ((a[sortField] as number) - (b[sortField] as number))
+      return mul * ((a[effectiveField] as number) - (b[effectiveField] as number))
     })
 
   const grouped: Record<PlayerLevel, RosterPlayer[]> = { Pro: [], NCAA: [], HS: [] }
@@ -233,6 +261,52 @@ export default function RosterDashboard() {
 
       </div>
 
+      {/* Needs Attention — bucketed glance at visit freshness. Each card is a
+          one-click filter; clicking again clears. Counts derive from Heartbeat
+          daysSinceInPerson + roster cross-ref. */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {([
+          { id: 'overdue' as const, label: 'Overdue', sub: '> 90 days', color: 'red' as const,    count: bucketCounts.overdue },
+          { id: 'stale'   as const, label: 'At risk', sub: '45–90 days', color: 'orange' as const, count: bucketCounts.stale },
+          { id: 'fresh'   as const, label: 'On track', sub: '< 45 days', color: 'green' as const,  count: bucketCounts.fresh },
+          { id: 'nodata'  as const, label: 'No visit on record', sub: 'never logged', color: 'gray' as const, count: bucketCounts.nodata },
+        ]).map((bucket) => {
+          const active = attentionFilter === bucket.id
+          const palettes = {
+            red:    { dot: 'bg-accent-red',    ring: 'ring-accent-red/60',    text: 'text-accent-red' },
+            orange: { dot: 'bg-accent-orange', ring: 'ring-accent-orange/60', text: 'text-accent-orange' },
+            green:  { dot: 'bg-accent-green',  ring: 'ring-accent-green/60',  text: 'text-accent-green' },
+            gray:   { dot: 'bg-gray-500',      ring: 'ring-gray-500/60',      text: 'text-text-dim' },
+          }
+          const palette = palettes[bucket.color]
+          return (
+            <button
+              key={bucket.id}
+              onClick={() => setAttentionFilter(active ? null : bucket.id)}
+              className={`flex flex-col items-start rounded-xl border border-border bg-surface px-4 py-3 text-left transition-all hover:border-accent-blue/50 ${active ? `ring-2 ${palette.ring}` : ''}`}
+              title={active ? 'Click to clear filter' : `Show only ${bucket.label.toLowerCase()}`}
+            >
+              <div className="mb-1 flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full ${palette.dot}`} />
+                <span className="text-xs font-medium text-text-dim">{bucket.label}</span>
+              </div>
+              <div className={`text-2xl font-bold ${palette.text}`}>{bucket.count}</div>
+              <div className="text-[10px] text-text-dim/60">{bucket.sub}</div>
+            </button>
+          )
+        })}
+      </div>
+      {attentionFilter && (
+        <div className="flex items-center gap-2 text-xs text-text-dim">
+          <span>Filtered by attention bucket — sorted by days since last visit.</span>
+          <button
+            onClick={() => setAttentionFilter(null)}
+            className="rounded-md border border-border px-2 py-0.5 text-[11px] text-text-dim hover:text-text hover:border-accent-blue"
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Roster moves alerts */}
       {rosterMoves.length > 0 && (

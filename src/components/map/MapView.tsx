@@ -12,7 +12,7 @@ import { useDateFilteredVenues } from './hooks/useDateFilteredVenues'
 import { useMapDateRange } from './hooks/useMapDateRange'
 import { useTierMarkers } from './hooks/useTierMarkers'
 import { useBestWindows } from './hooks/useBestWindows'
-import type { WindowResult } from './hooks/useBestWindows'
+import type { WindowResult, BestWindowStrategy } from './hooks/useBestWindows'
 import { formatDate } from '../../lib/formatters'
 import MapFilters, { DEFAULT_MAP_FILTERS, applyMapFilters, type MapFilterState } from './MapFilters'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
@@ -66,7 +66,8 @@ export default function MapView() {
   const homeBase = useTripStore((s) => s.homeBase)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const [windowDays, setWindowDays] = useState(3)
-  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays)
+  const [bestWindowStrategy, setBestWindowStrategy] = useState<BestWindowStrategy>('impact')
+  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy)
 
   // Are any schedules loaded?
   const hasSchedules = proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0
@@ -189,6 +190,8 @@ export default function MapView() {
           windows={bestWindows}
           windowDays={windowDays}
           setWindowDays={setWindowDays}
+          strategy={bestWindowStrategy}
+          setStrategy={setBestWindowStrategy}
           onApply={(w) => {
             setFilterStart(w.startDate)
             setFilterEnd(w.endDate)
@@ -244,48 +247,79 @@ function MapTip() {
   )
 }
 
+const STRATEGY_OPTIONS: { value: BestWindowStrategy; label: string; hint: string }[] = [
+  { value: 'impact',            label: 'Highest overall impact',     hint: 'Tier-weighted score — best mix of T1/T2 coverage' },
+  { value: 't1-count',          label: 'Most T1 players in one trip', hint: 'Maximize Tier 1 player count in the window' },
+  { value: 'overdue-priority',  label: 'Overdue high-priority players', hint: 'Catch T1/T2 players you haven\'t seen in 90+ days' },
+  { value: 'player-count',      label: 'Most players (any tier)',     hint: 'Maximize total unique players regardless of tier' },
+  { value: 'tuesday',           label: 'Includes a Tuesday',          hint: 'Best day for MiLB position-player visits' },
+]
+
 function BestWindowsPanel({
   windows,
   windowDays,
   setWindowDays,
+  strategy,
+  setStrategy,
   onApply,
 }: {
   windows: WindowResult[]
   windowDays: number
   setWindowDays: (n: number) => void
+  strategy: BestWindowStrategy
+  setStrategy: (s: BestWindowStrategy) => void
   onApply: (w: WindowResult) => void
 }) {
-  const [open, setOpen] = useState(false)
+  // Default open so Kent always sees a recommendation without clicking. The
+  // user's panel state is preserved within the session via this local state.
+  const [open, setOpen] = useState(true)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
+  const topPick = windows[0]
+  const currentStrategy = STRATEGY_OPTIONS.find((o) => o.value === strategy) ?? STRATEGY_OPTIONS[0]!
 
   return (
     <div className="rounded-lg bg-surface border border-border px-4 py-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <button
           onClick={() => setOpen(!open)}
           className="flex items-center gap-2 text-sm font-semibold text-text hover:text-accent-blue transition-colors"
         >
           <span className={`text-text-dim transition-transform text-xs ${open ? 'rotate-90' : ''}`}>&#9654;</span>
           Best Windows
-          {windows.length > 0 && !open && (
+          {topPick && (
             <span className="text-xs font-normal text-text-dim ml-1">
-              — Top pick: {formatDate(windows[0]!.startDate)}–{formatDate(windows[0]!.endDate)}, {windows[0]!.uniquePlayerCount} players
+              — Top pick: {formatDate(topPick.startDate)}–{formatDate(topPick.endDate)}, {topPick.uniquePlayerCount} players
             </span>
           )}
         </button>
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] text-text-dim">Trip length:</span>
-          {([1, 2, 3] as const).map((d) => (
-            <button
-              key={d}
-              onClick={() => setWindowDays(d)}
-              className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                windowDays === d ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
-              }`}
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wide text-text-dim/70">Prioritize by</span>
+            <select
+              value={strategy}
+              onChange={(e) => setStrategy(e.target.value as BestWindowStrategy)}
+              title={currentStrategy.hint}
+              className="rounded border border-border bg-gray-950/50 px-2 py-1 text-xs text-text focus:border-accent-blue focus:outline-none"
             >
-              {d}-day
-            </button>
-          ))}
+              {STRATEGY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-text-dim">Trip length:</span>
+            {([1, 2, 3] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => setWindowDays(d)}
+                className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  windowDays === d ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
+                }`}
+              >
+                {d}-day
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
