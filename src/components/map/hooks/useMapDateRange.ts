@@ -61,16 +61,21 @@ export function useMapDateRange() {
   const setFilterStart = useCallback(
     (v: string) => {
       const start = clampStart(v)
-      const end = filterEnd < start ? start : filterEnd
+      // If the user picked a start AFTER the current end, push end out to
+      // match. Otherwise leave end alone — they may want a wider window.
+      const end = filterEnd && filterEnd >= start ? filterEnd : start
       setDateRange(start, end)
     },
     [setDateRange, filterEnd],
   )
   const setFilterEnd = useCallback(
     (v: string) => {
-      const start = clampStart(filterStart)
-      const end = v < start ? start : v
-      setDateRange(start, end)
+      const end = clampStart(v) // end can't be in the past either
+      // If the user picked an end BEFORE the current start, swap so start
+      // becomes the new (smaller) end. This lets them type freely instead
+      // of having the value silently snap back to start.
+      const start = filterStart && filterStart <= end ? filterStart : end
+      setDateRange(clampStart(start), end)
     },
     [setDateRange, filterStart],
   )
