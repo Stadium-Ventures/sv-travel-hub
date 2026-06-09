@@ -15,7 +15,6 @@ import { useRosterStore } from './rosterStore'
 import { useVenueStore } from './venueStore'
 import { useDiagnosticsStore } from './diagnosticsStore'
 import { useRehabStore } from './rehabStore'
-import { BUNDLED_HS_SCHEDULES } from '../data/hsSchedules.generated'
 import { HS_VENUE_COORDS } from '../data/hsVenueCoords'
 
 export interface PlayerTeamAssignment {
@@ -1079,35 +1078,37 @@ export const useScheduleStore = create<ScheduleState>()(
         console.log(`[HS-ENTRY] fetchHsSchedules called with ${playerOrgs.length} players, hsLoading=${get().hsLoading}`)
         if (get().hsLoading) { console.log('[HS-ENTRY] SKIPPED — already loading'); return }
 
-        // Try fetching live schedule CSV first; fall back to bundled data
-        let csvSchedules: Map<string, MaxPrepsSchedule> | null = null
+        // CSV is the SOLE source of truth for HS schedules. The previous
+        // bundled fallback was a 2.5-month-old snapshot that could silently
+        // serve stale data. If the CSV fetch fails, we surface the error
+        // rather than fabricating coverage.
+        let csvSchedules: Map<string, MaxPrepsSchedule>
         try {
           const result = await fetchScheduleCsv()
           csvSchedules = result.schedules
           console.log(`[HS] CSV fetch OK: ${csvSchedules.size} schools`)
         } catch (err) {
-          console.warn('[HS] CSV fetch failed, falling back to bundled data:', err)
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error('[HS] CSV fetch failed:', msg)
+          set({
+            hsError: `HS schedule CSV could not be loaded — check VITE_SCHEDULE_CSV_URL. (${msg})`,
+            hsGames: merge ? get().hsGames : [],
+          })
+          return
         }
 
-        // Build set of all available schedule keys (CSV + bundled)
-        const availableKeys = [
-          ...(csvSchedules ? csvSchedules.keys() : []),
-          ...Object.keys(BUNDLED_HS_SCHEDULES),
-        ]
+        const availableKeys = Array.from(csvSchedules.keys())
 
-        // Group players by org|state key with fuzzy matching
+        // Group players by org|state key with fuzzy matching against CSV keys only.
         const schoolToPlayers = new Map<string, string[]>()
         for (const { playerName, org, state } of playerOrgs) {
           let key = `${org}|${state}`
-          // Try exact match against available keys
-          if (!csvSchedules?.has(key) && !BUNDLED_HS_SCHEDULES[key]) {
-            // Case-insensitive exact match
+          if (!csvSchedules.has(key)) {
             const keyLower = key.toLowerCase()
             const exactMatch = availableKeys.find(k => k.toLowerCase() === keyLower)
             if (exactMatch) {
               key = exactMatch
             } else {
-              // Org-only prefix match (handles missing/wrong state)
               const orgLower = org.toLowerCase().trim()
               const prefixMatch = availableKeys.find(k => {
                 const [bOrg] = k.split('|')
@@ -1117,7 +1118,7 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
-          console.log(`[HS-KEY] ${playerName}: "${org}|${state}" → "${key}" (csv: ${!!csvSchedules?.has(key)}, bundle: ${!!BUNDLED_HS_SCHEDULES[key]}, coords: ${!!HS_VENUE_COORDS[key]})`)
+          console.log(`[HS-KEY] ${playerName}: "${org}|${state}" → "${key}" (csv: ${csvSchedules.has(key)}, coords: ${!!HS_VENUE_COORDS[key]})`)
           const existing = schoolToPlayers.get(key)
           if (existing) existing.push(playerName)
           else schoolToPlayers.set(key, [playerName])
@@ -1137,25 +1138,23 @@ export const useScheduleStore = create<ScheduleState>()(
         })
 
         try {
-          // Resolve schedules: CSV (live) → bundled (static) → MaxPreps (legacy fallback)
+          // Resolve schedules from the CSV only. Schools not present in the
+          // CSV are listed in `failedSchools` so the UI can prompt the user
+          // to add them to the sheet rather than silently rendering stale data.
           const schedules = new Map<string, MaxPrepsSchedule>()
           const failedSchools: string[] = []
-          const missingFromCsv: string[] = []
 
           for (const schoolKey of schoolToPlayers.keys()) {
-            const csvSched = csvSchedules?.get(schoolKey)
+            const csvSched = csvSchedules.get(schoolKey)
             if (csvSched) {
               schedules.set(schoolKey, csvSched)
-            } else if (BUNDLED_HS_SCHEDULES[schoolKey]) {
-              schedules.set(schoolKey, BUNDLED_HS_SCHEDULES[schoolKey]!)
-              missingFromCsv.push(schoolKey)
             } else {
               failedSchools.push(schoolKey)
             }
           }
 
-          if (missingFromCsv.length > 0) {
-            console.warn('[HS] Schools not in CSV, using bundled fallback:', missingFromCsv)
+          if (failedSchools.length > 0) {
+            console.warn('[HS] Schools missing from CSV (add to Google Sheet):', failedSchools)
           }
 
           // Convert MaxPreps games to GameEvents

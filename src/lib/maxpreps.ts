@@ -1,5 +1,4 @@
 import { MAXPREPS_SLUGS } from '../data/maxprepsSlugs'
-import { BUNDLED_HS_SCHEDULES } from '../data/hsSchedules.generated'
 import { fetchWithCorsProxy } from './d1baseball'
 
 const CACHE_KEY = 'sv-travel-maxpreps-cache'
@@ -189,24 +188,13 @@ export async function discoverMaxPrepsSlug(org: string, state: string): Promise<
   }
 }
 
-// Fetch schedule for a single school by org|state key
+// Fetch schedule for a single school by org|state key. Legacy MaxPreps
+// scraper — not in the live load path (CSV is authoritative). Kept for
+// manual debugging / one-off slug discovery scripts.
 export async function fetchMaxPrepsSchedule(
   orgStateKey: string,
   opts?: { forceRefresh?: boolean },
 ): Promise<MaxPrepsSchedule | null> {
-  // Check bundled static data first (instant, no network)
-  if (!opts?.forceRefresh) {
-    if (BUNDLED_HS_SCHEDULES[orgStateKey]) {
-      return BUNDLED_HS_SCHEDULES[orgStateKey]!
-    }
-    // Fallback: if state is missing, find by org prefix (e.g., "Trinity|" matches "Trinity|KY")
-    if (orgStateKey.endsWith('|') || !orgStateKey.includes('|')) {
-      const orgOnly = orgStateKey.replace(/\|$/, '')
-      const match = Object.keys(BUNDLED_HS_SCHEDULES).find(k => k.startsWith(`${orgOnly}|`))
-      if (match) return BUNDLED_HS_SCHEDULES[match]!
-    }
-  }
-
   const [org, state] = orgStateKey.split('|')
   if (!org || !state) return null
 
@@ -216,11 +204,13 @@ export async function fetchMaxPrepsSchedule(
     if (!slug) return null
   }
 
-  // Check cache
-  const cache = getCache()
-  const cached = cache[orgStateKey]
-  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
-    return cached
+  // Check cache unless caller asked for a fresh fetch
+  if (!opts?.forceRefresh) {
+    const cache = getCache()
+    const cached = cache[orgStateKey]
+    if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
+      return cached
+    }
   }
 
   const url = `https://www.maxpreps.com/${slug}/baseball/schedule/`
@@ -237,6 +227,7 @@ export async function fetchMaxPrepsSchedule(
     }
 
     // Cache result
+    const cache = getCache()
     cache[orgStateKey] = schedule
     setCache(cache)
 
