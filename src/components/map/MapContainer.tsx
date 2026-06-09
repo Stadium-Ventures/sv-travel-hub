@@ -382,6 +382,12 @@ export default function MapContainer({ tierMarkers, colorBy, fitToMarkersKey }: 
   return (
     <div className="relative w-full rounded-lg border border-border" style={{ height: 'calc(100vh - 160px)', minHeight: '500px' }}>
       <div ref={mapRef} className="absolute inset-0 rounded-lg" />
+
+      {/* Floating drive-radius chip — placed adjacent to the dashed circle
+          so adjusting the radius and seeing its visual impact happens in the
+          same spot. The DateRangeBar still has the slider too for parity. */}
+      <DriveRadiusChip />
+
       {(initStatus || initError) && (
         <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-surface/80 z-[1000]">
           <div className="text-center">
@@ -391,6 +397,70 @@ export default function MapContainer({ tierMarkers, colorBy, fitToMarkersKey }: 
               <p className="text-sm text-text-dim">{initStatus}</p>
             )}
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Compact chip + popover for the drive radius slider. Sits at top-right of
+ * the map so visual cause-and-effect (slider → dashed circle) happens in
+ * the same place. Click to expand the slider, click outside to close.
+ */
+function DriveRadiusChip() {
+  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
+  const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (!wrapRef.current) return
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    if (open) document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [open])
+
+  const hours = Math.floor(maxDriveMinutes / 60)
+  const mins = maxDriveMinutes % 60
+  const display = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
+
+  return (
+    <div ref={wrapRef} className="absolute right-3 top-3 z-[400]">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 rounded-md border border-border/80 bg-surface/95 backdrop-blur px-2.5 py-1.5 text-[11px] font-medium text-text shadow-md hover:border-accent-blue/50 transition-colors"
+        title="Adjust the dashed drive-radius circle around your starting city"
+      >
+        <span className="inline-block h-1.5 w-3 rounded-full border border-dashed border-accent-blue" />
+        Drive: {display}
+        <span className={`text-text-dim/60 text-[9px] transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border border-border bg-surface p-3 shadow-xl">
+          <label className="block text-[10px] uppercase tracking-wide text-text-dim/60 mb-1.5">
+            Drive radius — {display}
+          </label>
+          <input
+            type="range"
+            min={120}
+            max={480}
+            step={30}
+            value={maxDriveMinutes}
+            onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
+            className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
+          />
+          <div className="mt-1 flex justify-between text-[9px] text-text-dim/50">
+            <span>2h</span>
+            <span>4h</span>
+            <span>6h</span>
+            <span>8h</span>
+          </div>
+          <p className="mt-2 text-[10px] text-text-dim/60 leading-relaxed">
+            Sets the dashed circle around your starting city. Estimates only — actual drive times depend on traffic + route.
+          </p>
         </div>
       )}
     </div>

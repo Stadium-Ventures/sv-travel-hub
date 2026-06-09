@@ -266,6 +266,34 @@ function MapHelp() {
   )
 }
 
+/** Build a short "what this strategy is yielding right now" sentence. Pulls
+ *  from the live windows so the message updates as filters change. */
+function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult[]): string {
+  if (windows.length === 0) return ''
+  const top = windows[0]!
+  switch (strategy) {
+    case 'impact':
+      return `Top pick: ${top.uniquePlayerCount} players (${top.t1Count} T1 · ${top.t2Count} T2).`
+    case 't1-count': {
+      const totalT1 = windows.reduce((s, w) => s + w.t1Count, 0)
+      return `Top pick has ${top.t1Count} T1 player${top.t1Count === 1 ? '' : 's'}. ${totalT1} T1 visit${totalT1 === 1 ? '' : 's'} across all ${windows.length} window${windows.length === 1 ? '' : 's'}.`
+    }
+    case 'overdue-priority': {
+      const totalOverdue = windows.reduce((s, w) => s + w.overdueCount, 0)
+      return `Top pick catches ${top.overdueCount} overdue player${top.overdueCount === 1 ? '' : 's'}. ${totalOverdue} overdue visit${totalOverdue === 1 ? '' : 's'} across all windows.`
+    }
+    case 'player-count':
+      return `Top pick reaches ${top.uniquePlayerCount} players. ${windows.length} window${windows.length === 1 ? '' : 's'} surfaced.`
+    case 'tuesday': {
+      const tuesCount = windows.filter((w) => w.hasTuesday).length
+      if (tuesCount === 0) return 'No Tuesday-bearing windows in this date range.'
+      return `${tuesCount} of ${windows.length} window${windows.length === 1 ? '' : 's'} include a Tuesday.`
+    }
+    default:
+      return ''
+  }
+}
+
 const STRATEGY_OPTIONS: { value: BestWindowStrategy; label: string; hint: string }[] = [
   { value: 'impact',            label: 'Highest overall impact',     hint: 'Tier-weighted score — best mix of T1/T2 coverage' },
   { value: 't1-count',          label: 'Most T1 players in one trip', hint: 'Maximize Tier 1 player count in the window' },
@@ -354,6 +382,16 @@ function BestWindowsPanel({
           </div>
         </div>
       </div>
+
+      {/* Strategy implication line — tells Kent what the current "Prioritize
+          by" choice is actually doing. Recomputed from the live window set so
+          it stays accurate as filters change. */}
+      {windows.length > 0 && (
+        <p className="mt-2 text-[10px] text-text-dim/70 leading-relaxed">
+          <span className="text-text-dim/50">{currentStrategy.hint}.</span>{' '}
+          {strategyImplication(strategy, windows)}
+        </p>
+      )}
 
       {open && (
         <div className="mt-3 space-y-2">
