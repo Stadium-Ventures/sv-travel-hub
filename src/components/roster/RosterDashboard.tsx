@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRosterStore } from '../../store/rosterStore'
 import type { SortField } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import type { AssignmentChange } from '../../store/scheduleStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
-import { useSummerStore } from '../../store/summerStore'
-import { useRehabStore } from '../../store/rehabStore'
 import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '../../data/aliases'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
@@ -46,54 +44,11 @@ export default function RosterDashboard() {
   type AttentionBucket = 'overdue' | 'stale' | 'fresh' | 'nodata'
   const [attentionFilter, setAttentionFilter] = useState<AttentionBucket | null>(null)
 
-  const fetchHeartbeat = useHeartbeatStore((s) => s.fetchHeartbeat)
-  const heartbeatLastFetched = useHeartbeatStore((s) => s.lastFetchedAt)
+  // Auto-fetches live in App-level AutoFetchData; this component is a pure consumer.
 
-  const loadSummerAssignments = useSummerStore((s) => s.loadAssignments)
-  const summerFetchedAt = useSummerStore((s) => s.fetchedAt)
-  const rosterMovesCheckedAt = useScheduleStore((s) => s.rosterMovesCheckedAt)
-
-  const refreshRehab = useRehabStore((s) => s.refresh)
-  const rehabRefreshedAt = useRehabStore((s) => s.refreshedAt)
-
-  const initialized = useRef(false)
-  useEffect(() => {
-    if (initialized.current) return
-    initialized.current = true
-    fetchRoster()
-    // Auto-fetch heartbeat if not loaded or stale (>1 hour)
-    const stale = !heartbeatLastFetched || (Date.now() - new Date(heartbeatLastFetched).getTime() > 3600000)
-    if (stale) fetchHeartbeat()
-    // Auto-fetch summer assignments if stale (>6 hours) or never loaded
-    const summerStale = !summerFetchedAt || (Date.now() - new Date(summerFetchedAt).getTime() > 6 * 3600000)
-    if (summerStale) loadSummerAssignments()
-    // Auto-check Pro roster moves every 24h — the existing handler already
-    // requires affiliates + a rostered player set, so we run it after a brief
-    // delay to let those load. If they're not ready, the call no-ops.
-    const movesStale = !rosterMovesCheckedAt || (Date.now() - new Date(rosterMovesCheckedAt).getTime() > 24 * 3600000)
-    if (movesStale) {
-      setTimeout(() => { checkRosterMoves() }, 3000)
-    }
-  }, [fetchRoster, fetchHeartbeat, heartbeatLastFetched, loadSummerAssignments, summerFetchedAt, rosterMovesCheckedAt, checkRosterMoves])
-
-  // Refresh rehab windows whenever the set of "Pro player on MiLB affiliate"
-  // candidates changes. Cached for 6h to avoid hammering the MLB API.
-  useEffect(() => {
-    const stale = !rehabRefreshedAt || (Date.now() - rehabRefreshedAt > 6 * 3600000)
-    if (!stale) return
-    const candidates: Array<{ playerName: string; teamId: number; sportId: number }> = []
-    for (const p of players) {
-      if (p.level !== 'Pro') continue
-      const a = playerTeamAssignments[p.playerName]
-      if (!a) continue
-      if (a.sportId >= 11 && a.sportId <= 14) {
-        candidates.push({ playerName: p.playerName, teamId: a.teamId, sportId: a.sportId })
-      }
-    }
-    if (candidates.length > 0) {
-      refreshRehab(candidates)
-    }
-  }, [players, playerTeamAssignments, refreshRehab, rehabRefreshedAt])
+  // Auto-fetches are hoisted to App-level (AutoFetchData) so Heartbeat,
+  // Rehab, Roster, and Summer all hydrate regardless of which tab loads
+  // first. This component just consumes the loaded state.
 
   const playerCount = players.length
 

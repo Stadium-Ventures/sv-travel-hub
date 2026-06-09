@@ -386,21 +386,25 @@ export const useTripStore = create<TripState>()(
 }),
     {
       name: 'sv-travel-trips',
-      version: 6,
+      // v7: reset every user's home base back to Orlando, FL — Kent (primary
+      // user) lives there, so it's the right default. Previously each user's
+      // session held their last picked city forever via localStorage, which
+      // meant Kent's session was stuck on whatever I last tested with.
+      version: 7,
       migrate: (persisted: any) => ({
-        // Keep settings, drop computed trip data
         startDate: persisted?.startDate ?? defaultStart(),
         endDate: persisted?.endDate ?? defaultEnd(),
-        // v5: bump default drive time from 180 (3h) → 240 (4h).
-        // Migrate users who had the old default; keep custom values.
         maxDriveMinutes: persisted?.maxDriveMinutes === 180 ? MAX_DRIVE_MINUTES : (persisted?.maxDriveMinutes ?? MAX_DRIVE_MINUTES),
         maxFlightHours: persisted?.maxFlightHours ?? 4,
         useHeartbeatBoost: persisted?.useHeartbeatBoost ?? false,
         priorityPlayers: persisted?.priorityPlayers ?? [],
         tripStatuses: persisted?.tripStatuses ?? {},
         maxNights: persisted?.maxNights ?? 2,
-        homeBase: persisted?.homeBase ?? DEFAULT_HOME_BASE,
-        homeBaseName: persisted?.homeBaseName ?? 'Orlando, FL',
+        // v7 reset: force-overwrite home base to the Orlando default. Keeps
+        // the user free to pick a different city per session, but stops the
+        // old stuck value from re-loading on every visit.
+        homeBase: DEFAULT_HOME_BASE,
+        homeBaseName: 'Orlando, FL',
       }),
       partialize: (state) => ({
         // tripPlan is NOT persisted — it's computed data that should be

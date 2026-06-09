@@ -26,27 +26,31 @@ export default function StatusPill() {
   const rehabLoading = useRehabStore((s) => Object.keys(s.loading).length > 0)
   const rehabFetched = useRehabStore((s) => s.refreshedAt)
 
+  // Per-source staleness thresholds. Matches AutoFetchData's refresh cadence
+  // so the pill agrees with what the app actually re-fetches.
+  const SIX_H = 6 * 3600_000
+  const TWELVE_H = 12 * 3600_000
+  const TWENTY_FOUR_H = 24 * 3600_000
+
   const sources = [
-    { name: 'Roster', loading: rosterLoading, fetched: rosterFetched },
-    { name: 'Heartbeat', loading: heartbeatLoading, fetched: heartbeatFetched },
-    { name: 'Pro games', loading: proLoading, fetched: proFetched },
-    { name: 'NCAA games', loading: ncaaLoading, fetched: ncaaFetched },
-    { name: 'Summer ball', loading: summerLoading, fetched: summerFetched },
-    { name: 'Rehab windows', loading: rehabLoading, fetched: rehabFetched },
+    { name: 'Roster', loading: rosterLoading, fetched: rosterFetched, staleMs: TWENTY_FOUR_H },
+    { name: 'Heartbeat', loading: heartbeatLoading, fetched: heartbeatFetched, staleMs: SIX_H },
+    { name: 'Pro games', loading: proLoading, fetched: proFetched, staleMs: SIX_H },
+    { name: 'NCAA games', loading: ncaaLoading, fetched: ncaaFetched, staleMs: SIX_H },
+    { name: 'Summer ball', loading: summerLoading, fetched: summerFetched, staleMs: SIX_H },
+    { name: 'Rehab windows', loading: rehabLoading, fetched: rehabFetched, staleMs: TWELVE_H },
   ]
 
   const anyLoading = sources.some((s) => s.loading)
   const loadingCount = sources.filter((s) => s.loading).length
 
-  // Treat anything older than 6h or never-loaded as stale
-  const STALE_MS = 6 * 60 * 60 * 1000
   const now = Date.now()
-  function isStale(f: number | string | null | undefined): boolean {
-    if (!f) return true
-    const t = typeof f === 'string' ? new Date(f).getTime() : f
-    return now - t > STALE_MS
+  function isStale(fetched: number | string | null | undefined, threshold: number): boolean {
+    if (!fetched) return true
+    const t = typeof fetched === 'string' ? new Date(fetched).getTime() : fetched
+    return now - t > threshold
   }
-  const staleCount = sources.filter((s) => !s.loading && isStale(s.fetched)).length
+  const staleCount = sources.filter((s) => !s.loading && isStale(s.fetched, s.staleMs)).length
 
   const summary = anyLoading
     ? `Refreshing ${loadingCount} source${loadingCount === 1 ? '' : 's'}…`
@@ -75,7 +79,7 @@ export default function StatusPill() {
           </div>
           <div className="divide-y divide-border/30">
             {sources.map((s) => {
-              const stale = !s.loading && isStale(s.fetched)
+              const stale = !s.loading && isStale(s.fetched, s.staleMs)
               return (
                 <div key={s.name} className="flex items-center justify-between px-3 py-1.5 text-xs">
                   <span className="text-text">{s.name}</span>
