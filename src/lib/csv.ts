@@ -90,6 +90,7 @@ export async function fetchRoster(): Promise<RosterParseResult> {
       // Track defaulted values
       const levelRaw = findColumn(r, ['Level', 'Player Level'])
       const level = parseLevel(levelRaw)
+      const isJuco = ['juco', 'junior college'].includes(levelRaw.toLowerCase().trim())
       if (levelRaw && level === 'Pro' && !['pro', 'professional', 'mlb', 'milb'].includes(levelRaw.toLowerCase().trim())) {
         warnings.push(`${playerName}: unrecognized level "${levelRaw}" — defaulted to Pro`)
       }
@@ -112,6 +113,7 @@ export async function fetchRoster(): Promise<RosterParseResult> {
         normalizedName: normalizeName(playerName),
         org: findColumn(r, ['Org', 'Organization', 'Team', 'School']),
         level,
+        isJuco,
         mlbPlayerId: parseNumber(findColumn(r, ['MLB_ID', 'MLB Id', 'MLB ID', 'MLBId'])),
         pgPlayerId: parseNumber(findColumn(r, ['PG_ID', 'PG Id', 'PG ID', 'PG Player ID', 'Perfect Game ID', 'PerfectGameId'])),
         position: findColumn(r, ['Position', 'Pos']),

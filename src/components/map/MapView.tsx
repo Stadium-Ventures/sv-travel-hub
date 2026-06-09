@@ -15,6 +15,7 @@ import { useBestWindows } from './hooks/useBestWindows'
 import type { WindowResult, BestWindowStrategy } from './hooks/useBestWindows'
 import { formatDate } from '../../lib/formatters'
 import MapFilters, { DEFAULT_MAP_FILTERS, applyMapFilters, type MapFilterState } from './MapFilters'
+import SummerCoverageNotice from './SummerCoverageNotice'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { useMemo } from 'react'
 
@@ -167,6 +168,10 @@ export default function MapView() {
           daysByPlayerKey={daysByPlayerKey}
         />
       )}
+
+      {/* Summer coverage gap — only renders if any SV player is in a
+          non-live summer league (e.g. PGCBL, NECBL, Northwoods). */}
+      <SummerCoverageNotice />
 
       {/* Trip preview banner — shown when a Trip Card highlighted itself on the map */}
       {selectedTripIndex != null && tripPlan && tripPlan.trips[selectedTripIndex] && (

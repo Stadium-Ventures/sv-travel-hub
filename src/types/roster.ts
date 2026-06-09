@@ -10,6 +10,11 @@ export interface RosterPlayer {
   normalizedName: string
   org: string
   level: PlayerLevel
+  /** True if the roster sheet listed this player as JUCO / Junior College.
+   *  We collapse JUCO into NCAA at the level field (no JUCO-specific UI
+   *  outside the badge), but preserve the original source so the UI can
+   *  warn "no live schedule source for JUCO games." */
+  isJuco: boolean
   mlbPlayerId: number | null // MLB player ID (Pro players only)
   /** Perfect Game integer profile ID — global, stable, links to perfectgame.org/Players/Playerprofile.aspx?ID=<n>. Optional column on the roster sheet (PG_ID / PG Player ID / Perfect Game ID). */
   pgPlayerId: number | null

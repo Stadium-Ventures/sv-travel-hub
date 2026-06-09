@@ -238,6 +238,18 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
               </div>
             )}
 
+            {/* JUCO players have no live schedule source today. Surface a
+                small warning so the empty schedule pane doesn't look like
+                a bug. Renders only when isJuco is true. */}
+            {player.isJuco && (
+              <p
+                className="mt-2 text-[11px] text-accent-orange/80"
+                title="JUCO (Junior College) games have no live schedule source today. We're treating the player as NCAA for organization purposes, but their games won't auto-populate. Add games to the SV Client Game Schedule CSV to surface them in the planner."
+              >
+                ⚠ JUCO — no live schedule source. Add games to the CSV sheet to surface them.
+              </p>
+            )}
+
             <ScheduleStatus playerName={player.playerName} level={player.level} affiliate={affiliate} />
           </td>
         </tr>

@@ -2715,29 +2715,42 @@ function DidYouKnow() {
   )
 }
 
-/* ── Welcome Hint ── first-time dismissible card ── */
+/* ── Welcome Hint ── collapsible "?" disclosure, mirrors Map's MapHelp ── */
 function WelcomeHint() {
-  const [dismissed, setDismissed] = useState(() => localStorage.getItem('sv-trip-welcome-dismissed') === '1')
-  if (dismissed) return null
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem('sv-trip-welcome-dismissed') !== '1' } catch { return true }
+  })
+  function toggle() {
+    const next = !open
+    setOpen(next)
+    try {
+      if (!next) localStorage.setItem('sv-trip-welcome-dismissed', '1')
+      else localStorage.removeItem('sv-trip-welcome-dismissed')
+    } catch {}
+  }
   return (
-    <div className="rounded-xl border border-accent-blue/20 bg-accent-blue/5 px-5 py-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-text">Welcome to the Trip Planner</p>
-          <ol className="mt-2 space-y-1 text-xs text-text-dim list-decimal list-inside">
+    <div className="rounded-lg border border-border bg-surface">
+      <button
+        onClick={toggle}
+        className="flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-900/30 transition-colors"
+      >
+        <span className="flex items-center gap-2 text-xs text-text-dim">
+          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-border text-[10px] font-bold text-accent-blue">?</span>
+          <span className="font-medium text-text">How to use the Trip Planner</span>
+          {!open && <span className="text-text-dim/60 text-[11px]">— click for the quick guide</span>}
+        </span>
+        <span className={`text-text-dim text-xs transition-transform ${open ? 'rotate-90' : ''}`}>&#9654;</span>
+      </button>
+      {open && (
+        <div className="border-t border-border/30 px-5 py-3 text-xs text-text-dim leading-relaxed">
+          <ol className="space-y-1 list-decimal list-inside">
             <li>Pick your <span className="text-text">date range</span> and adjust drive/flight sliders if needed.</li>
             <li>Hit <span className="font-medium text-accent-blue">Generate Trips</span> to build trip options.</li>
             <li>Review your trips — expand any card for the full day-by-day itinerary.</li>
           </ol>
           <p className="mt-2 text-[10px] text-text-dim/50">Use Priority Players to build trips around specific guys first.</p>
         </div>
-        <button
-          onClick={() => { localStorage.setItem('sv-trip-welcome-dismissed', '1'); setDismissed(true) }}
-          className="shrink-0 text-xs text-text-dim/50 hover:text-text"
-        >
-          Got it
-        </button>
-      </div>
+      )}
     </div>
   )
 }
