@@ -284,80 +284,93 @@ export default function RosterDashboard() {
 
       </div>
 
-      {/* Needs Attention — bucketed glance at visit freshness. Each card is a
-          one-click filter; clicking again clears. Counts derive from Heartbeat
-          daysSinceInPerson + roster cross-ref. */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {([
-          { id: 'overdue' as const, label: 'Overdue', sub: '> 90 days', color: 'red' as const,    count: bucketCounts.overdue },
-          { id: 'stale'   as const, label: 'At risk', sub: '45–90 days', color: 'orange' as const, count: bucketCounts.stale },
-          { id: 'fresh'   as const, label: 'On track', sub: '< 45 days', color: 'green' as const,  count: bucketCounts.fresh },
-          { id: 'nodata'  as const, label: 'No visit on record', sub: 'never logged', color: 'gray' as const, count: bucketCounts.nodata },
-        ]).map((bucket) => {
-          const active = attentionFilter === bucket.id
-          const palettes = {
-            red:    { dot: 'bg-accent-red',    ring: 'ring-accent-red/60',    text: 'text-accent-red' },
-            orange: { dot: 'bg-accent-orange', ring: 'ring-accent-orange/60', text: 'text-accent-orange' },
-            green:  { dot: 'bg-accent-green',  ring: 'ring-accent-green/60',  text: 'text-accent-green' },
-            gray:   { dot: 'bg-gray-500',      ring: 'ring-gray-500/60',      text: 'text-text-dim' },
-          }
-          const palette = palettes[bucket.color]
-          return (
+      {/* Action Items — merged "needs attention" buckets (visit freshness)
+          and roster moves (trades/promotions) into one section so the user
+          sees ALL the things to act on in one place. */}
+      <div className="rounded-xl border border-border bg-surface p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-text">Action Items</h3>
+          {attentionFilter && (
             <button
-              key={bucket.id}
-              onClick={() => setAttentionFilter(active ? null : bucket.id)}
-              className={`flex flex-col items-start rounded-xl border border-border bg-surface px-4 py-3 text-left transition-all hover:border-accent-blue/50 ${active ? `ring-2 ${palette.ring}` : ''}`}
-              title={active ? 'Click to clear filter' : `Show only ${bucket.label.toLowerCase()}`}
+              onClick={() => setAttentionFilter(null)}
+              className="rounded-md border border-border px-2 py-0.5 text-[10px] text-text-dim hover:text-text hover:border-accent-blue"
             >
-              <div className="mb-1 flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${palette.dot}`} />
-                <span className="text-xs font-medium text-text-dim">{bucket.label}</span>
-              </div>
-              <div className={`text-2xl font-bold ${palette.text}`}>{bucket.count}</div>
-              <div className="text-[10px] text-text-dim/60">{bucket.sub}</div>
+              Clear filter
             </button>
-          )
-        })}
-      </div>
-      {attentionFilter && (
-        <div className="flex items-center gap-2 text-xs text-text-dim">
-          <span>Filtered by attention bucket — sorted by days since last visit.</span>
-          <button
-            onClick={() => setAttentionFilter(null)}
-            className="rounded-md border border-border px-2 py-0.5 text-[11px] text-text-dim hover:text-text hover:border-accent-blue"
-          >
-            Clear
-          </button>
+          )}
         </div>
-      )}
 
-      {/* Roster moves alerts */}
-      {rosterMoves.length > 0 && (
-        <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-accent-orange">
-            {rosterMoves.length} Roster Move{rosterMoves.length !== 1 ? 's' : ''} Detected
-          </h3>
-          <div className="space-y-1.5">
-            {rosterMoves.map((move, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-950/30 px-3 py-2 text-sm">
-                <span className="font-medium text-text">{move.player.fullName}</span>
-                <span className="text-xs text-text-dim">
-                  {move.fromTeam?.name ?? '?'} → {move.toTeam?.name ?? '?'}
-                </span>
-                <span className="rounded bg-accent-orange/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-orange">
-                  {move.typeDesc}
-                </span>
-                <span className="text-[11px] text-text-dim/60">
-                  {move.effectiveDate || move.date}
-                </span>
-              </div>
-            ))}
+        {/* Visit freshness buckets — click to filter the roster table below. */}
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-text-dim/60 mb-1.5">Visit freshness</p>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            {([
+              { id: 'overdue' as const, label: 'Overdue', sub: '> 90 days', color: 'red' as const,    count: bucketCounts.overdue },
+              { id: 'stale'   as const, label: 'At risk', sub: '45–90 days', color: 'orange' as const, count: bucketCounts.stale },
+              { id: 'fresh'   as const, label: 'On track', sub: '< 45 days', color: 'green' as const,  count: bucketCounts.fresh },
+              { id: 'nodata'  as const, label: 'No visit on record', sub: 'never logged', color: 'gray' as const, count: bucketCounts.nodata },
+            ]).map((bucket) => {
+              const active = attentionFilter === bucket.id
+              const palettes = {
+                red:    { dot: 'bg-accent-red',    ring: 'ring-accent-red/60',    text: 'text-accent-red' },
+                orange: { dot: 'bg-accent-orange', ring: 'ring-accent-orange/60', text: 'text-accent-orange' },
+                green:  { dot: 'bg-accent-green',  ring: 'ring-accent-green/60',  text: 'text-accent-green' },
+                gray:   { dot: 'bg-gray-500',      ring: 'ring-gray-500/60',      text: 'text-text-dim' },
+              }
+              const palette = palettes[bucket.color]
+              return (
+                <button
+                  key={bucket.id}
+                  onClick={() => setAttentionFilter(active ? null : bucket.id)}
+                  className={`flex flex-col items-start rounded-lg border border-border bg-gray-950/30 px-3 py-2 text-left transition-all hover:border-accent-blue/50 ${active ? `ring-2 ${palette.ring}` : ''}`}
+                  title={active ? 'Click to clear filter' : `Show only ${bucket.label.toLowerCase()}`}
+                >
+                  <div className="mb-0.5 flex items-center gap-1.5">
+                    <span className={`h-1.5 w-1.5 rounded-full ${palette.dot}`} />
+                    <span className="text-[11px] font-medium text-text-dim">{bucket.label}</span>
+                  </div>
+                  <div className={`text-xl font-bold ${palette.text}`}>{bucket.count}</div>
+                  <div className="text-[10px] text-text-dim/60">{bucket.sub}</div>
+                </button>
+              )
+            })}
           </div>
-          <p className="mt-2 text-[11px] text-text-dim/60">
-            Update the Google Sheet to reflect permanent changes, then click Refresh. Trades and promotions can affect trip plans — re-generate trips after updating.
-          </p>
         </div>
-      )}
+
+        {/* Roster moves — trades/promotions detected since last refresh. */}
+        {rosterMoves.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-text-dim/60 mb-1.5">
+              Trades & promotions <span className="text-accent-orange">· {rosterMoves.length} new</span>
+            </p>
+            <div className="space-y-1">
+              {rosterMoves.map((move, i) => (
+                <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-950/30 px-3 py-1.5 text-xs">
+                  <span className="font-medium text-text">{move.player.fullName}</span>
+                  <span className="text-[11px] text-text-dim">
+                    {move.fromTeam?.name ?? '?'} → {move.toTeam?.name ?? '?'}
+                  </span>
+                  <span className="rounded bg-accent-orange/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-orange">
+                    {move.typeDesc}
+                  </span>
+                  <span className="text-[10px] text-text-dim/60">
+                    {move.effectiveDate || move.date}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[10px] text-text-dim/60">
+              Update the Google Sheet to reflect permanent changes, then Reload. Re-generate trips after.
+            </p>
+          </div>
+        )}
+
+        {attentionFilter && (
+          <p className="text-[10px] text-text-dim/70 italic">
+            Roster table below filtered to <strong>{attentionFilter}</strong> — sorted by days since last visit.
+          </p>
+        )}
+      </div>
 
       {rosterMovesError && (
         <div className="rounded-lg border border-accent-red/30 bg-accent-red/5 px-3 py-2 text-sm text-accent-red">

@@ -40,12 +40,25 @@ export const DEFAULT_MAP_FILTERS: MapFilterState = {
   overdueOnly: false,
 }
 
-/** Heartbeat color thresholds (days since in-person visit). */
+/** Heartbeat color thresholds (days since in-person visit).
+ *  These intentionally use a DIFFERENT hue family from Tier coloring
+ *  (which is red/orange/gray for T1/T2/T3) so the map can be read without
+ *  confusion when both schemes are visible nearby. Magenta/amber/teal/gray
+ *  reads as "freshness" and tier red/orange reads as "priority". */
 export const HEARTBEAT_COLORS = {
-  overdue: '#ef4444',   // >90 days  (red)
-  stale:   '#f97316',   // 45-90      (orange)
-  fresh:   '#22c55e',   // <45        (green)
-  unknown: '#6b7280',   // no data    (gray)
+  overdue: '#ec4899',   // >90 days  (pink/magenta — distinct from tier red)
+  stale:   '#eab308',   // 45-90      (amber — distinct from tier orange)
+  fresh:   '#06b6d4',   // <45        (cyan/teal — distinct from any tier color)
+  unknown: '#6b7280',   // no data    (gray — same gray works for both)
+} as const
+
+/** Emoji glyph that matches the bucket — used in chips/legends/tooltips so
+ *  users can pattern-match visually even when colors are crowded. */
+export const HEARTBEAT_ICONS = {
+  overdue: '🔥',
+  stale:   '⏳',
+  fresh:   '🌱',
+  unknown: '❓',
 } as const
 
 export function heartbeatColorFor(days: number | null | undefined): string {
@@ -218,27 +231,33 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
         </div>
       </div>
 
-      {/* Heartbeat legend strip — only when color mode is heartbeat */}
+      {/* Heartbeat legend strip — only when color mode is heartbeat. Uses
+          a distinct emoji + color combo per bucket so it doesn't read as
+          tier coloring (Tier 1 = red dot is a separate concept). */}
       {state.colorBy === 'heartbeat' && (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/30 pt-2 text-[10px] text-text-dim">
           <span className="uppercase tracking-wide text-text-dim/60">Map dots</span>
           <span className="flex items-center gap-1">
+            <span aria-hidden>{HEARTBEAT_ICONS.overdue}</span>
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.overdue }} />
             Overdue (&gt;90d)
           </span>
           <span className="flex items-center gap-1">
+            <span aria-hidden>{HEARTBEAT_ICONS.stale}</span>
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.stale }} />
             Stale (45–90d)
           </span>
           <span className="flex items-center gap-1">
+            <span aria-hidden>{HEARTBEAT_ICONS.fresh}</span>
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.fresh }} />
             Fresh (&lt;45d)
           </span>
           <span className="flex items-center gap-1">
+            <span aria-hidden>{HEARTBEAT_ICONS.unknown}</span>
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.unknown }} />
             No visit on record
           </span>
-          <span className="text-text-dim/50">— worst-overdue player at each venue drives the color</span>
+          <span className="text-text-dim/50">— colors are distinct from Tier red/orange so they don't conflict</span>
         </div>
       )}
     </div>

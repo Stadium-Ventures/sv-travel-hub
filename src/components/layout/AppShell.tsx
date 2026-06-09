@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { addMapEventListener } from '../../lib/mapEvents'
+import StatusPill from './StatusPill'
 
 export type TabId = 'roster' | 'trips' | 'map' | 'data'
 
@@ -21,9 +22,9 @@ const TABS: { id: TabId; label: string; heading: string; description: string }[]
   },
   {
     id: 'data',
-    label: 'Data',
-    heading: 'Game Data',
-    description: 'Every loaded game as a sortable, filterable spreadsheet — Player · Team · Level · Date · Venue · Opponent. Same shape as Maptive\'s data tab, so you can scan and filter without going to the map.',
+    label: 'Schedule',
+    heading: 'Schedule',
+    description: 'Every loaded game as a sortable, filterable spreadsheet — Player · Team · Level · Date · Venue · Opponent. Scan and filter without leaving the table.',
   },
   {
     id: 'roster',
@@ -53,6 +54,7 @@ export default function AppShell({ children }: AppShellProps) {
           <h1 className="text-xl font-bold tracking-tight text-text">SV Travel Hub</h1>
           <p className="text-xs text-text-dim">Road trip planner for client visits</p>
         </div>
+        <StatusPill />
       </header>
 
       <nav className="mb-6 flex gap-1 rounded-xl border border-border bg-surface p-1">

@@ -133,8 +133,10 @@ export default function MapView() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
-      {/* Welcome explainer — dismissible */}
-      <MapWelcome />
+      {/* Compact help disclosure replaces the old "Start here" welcome
+          banner + rotating TIP line. Reclaims ~120px of vertical space so
+          the map is closer to the fold. Click "?" to expand the guide. */}
+      <MapHelp />
 
       {/* Schedule banner */}
       {!hasSchedules && (
@@ -199,9 +201,6 @@ export default function MapView() {
         />
       )}
 
-      {/* Tips */}
-      <MapTip />
-
       {/* Map — when a specific player is selected, fitToMarkersKey changes,
           telling MapContainer to zoom to wherever that player's venues are.
           ("Find Jake Munroe for me.") */}
@@ -222,28 +221,48 @@ export default function MapView() {
   )
 }
 
-const MAP_TIPS = [
-  'Red dots = must-see players (Tier 1). Orange = high priority. Gray = standard.',
-  'Click any dot to see who plays there, when, and how recently each player was visited.',
-  'The dashed circle shows your drive radius from your starting location.',
-  'Switch "Color by" to Heartbeat to see which venues have overdue players (red = >90 days).',
-  'Tap "Overdue only" in the filter strip to hide venues where everyone\'s been visited recently.',
-  'Set "From" to a city you\'ll be in — Miami, Chicago — and the drive radius recenters there.',
-  'Click "Plan trip with these N players" on any popup to jump straight into the Trip Planner.',
-  'Generate trips in the Trip Planner tab, then click "Show on Map" to preview the route.',
-]
-
-function MapTip() {
-  const [tipIndex, setTipIndex] = useState(0)
-  useEffect(() => {
-    const interval = setInterval(() => setTipIndex((i) => (i + 1) % MAP_TIPS.length), 8000)
-    return () => clearInterval(interval)
-  }, [])
+/** Collapsible help disclosure — replaces the old always-visible welcome
+ *  banner + rotating tip line. Click to expand; remembers dismiss state in
+ *  localStorage so repeat users don't see it every load. */
+function MapHelp() {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem('sv-map-help-dismissed') !== '1' } catch { return true }
+  })
+  function toggle() {
+    const next = !open
+    setOpen(next)
+    try {
+      if (!next) localStorage.setItem('sv-map-help-dismissed', '1')
+      else localStorage.removeItem('sv-map-help-dismissed')
+    } catch {}
+  }
   return (
-    <p className="text-[11px] text-accent-blue/70">
-      <span className="font-medium text-accent-blue/90">TIP</span>{' '}
-      {MAP_TIPS[tipIndex]}
-    </p>
+    <div className="rounded-lg border border-border bg-surface">
+      <button
+        onClick={toggle}
+        className="flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-900/30 transition-colors"
+      >
+        <span className="flex items-center gap-2 text-xs text-text-dim">
+          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-border text-[10px] font-bold text-accent-blue">?</span>
+          <span className="font-medium text-text">{open ? 'How to use this map' : 'How to use this map'}</span>
+          {!open && <span className="text-text-dim/60 text-[11px]">— click for the quick guide</span>}
+        </span>
+        <span className={`text-text-dim text-xs transition-transform ${open ? 'rotate-90' : ''}`}>&#9654;</span>
+      </button>
+      {open && (
+        <div className="border-t border-border/30 px-5 py-3 text-xs text-text-dim leading-relaxed">
+          <ol className="space-y-1 list-decimal list-inside">
+            <li><strong className="text-text">Pick a date range</strong> in the bar below (or click <em>Next 7 days</em>).</li>
+            <li><strong className="text-text">Pick where you'll be</strong> via the <em>From</em> dropdown — preset cities or type any city.</li>
+            <li>Each dot = a venue with at least one of your players. Click for who, when, and recency.</li>
+            <li>For suggestions, open <em>Best Windows</em> below or jump to the <em>Trip Planner</em>.</li>
+          </ol>
+          <p className="mt-2 text-[11px] text-text-dim/60">
+            Switch <strong className="text-text">Color by</strong> to <em>Heartbeat</em> to see overdue players (🔥 magenta) — uses a different palette than Tier so they don't conflict visually.
+          </p>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -280,18 +299,31 @@ function BestWindowsPanel({
   return (
     <div className="rounded-lg bg-surface border border-border px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <button
-          onClick={() => setOpen(!open)}
-          className="flex items-center gap-2 text-sm font-semibold text-text hover:text-accent-blue transition-colors"
-        >
-          <span className={`text-text-dim transition-transform text-xs ${open ? 'rotate-90' : ''}`}>&#9654;</span>
-          Best Windows
-          {topPick && (
-            <span className="text-xs font-normal text-text-dim ml-1">
-              — Top pick: {formatDate(topPick.startDate)}–{formatDate(topPick.endDate)}, {topPick.uniquePlayerCount} players
-            </span>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <button
+            onClick={() => setOpen(!open)}
+            className="flex items-center gap-2 text-sm font-semibold text-text hover:text-accent-blue transition-colors"
+          >
+            <span className={`text-text-dim transition-transform text-xs ${open ? 'rotate-90' : ''}`}>&#9654;</span>
+            Best Windows
+            {topPick && (
+              <span className="text-xs font-normal text-text-dim ml-1">
+                — Top pick: {formatDate(topPick.startDate)}–{formatDate(topPick.endDate)}, {topPick.uniquePlayerCount} players
+              </span>
+            )}
+          </button>
+          {/* Inline "Use top pick" — no need to expand the panel to act on
+              the recommendation. Saves a click for the common case. */}
+          {topPick && !open && (
+            <button
+              onClick={() => onApply(topPick)}
+              className="ml-1 rounded-md bg-accent-blue/15 px-2 py-0.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
+              title={`Use ${formatDate(topPick.startDate)}–${formatDate(topPick.endDate)} as the date range`}
+            >
+              Use →
+            </button>
           )}
-        </button>
+        </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-1.5">
             <span className="text-[10px] uppercase tracking-wide text-text-dim/70">Prioritize by</span>
@@ -420,33 +452,3 @@ function BestWindowsPanel({
   )
 }
 
-function MapWelcome() {
-  const [dismissed, setDismissed] = useState(() => {
-    try { return localStorage.getItem('sv-map-welcome-dismissed') === '1' } catch { return false }
-  })
-  if (dismissed) return null
-  function dismiss() {
-    setDismissed(true)
-    try { localStorage.setItem('sv-map-welcome-dismissed', '1') } catch {}
-  }
-  return (
-    <div className="rounded-lg bg-accent-blue/5 border border-accent-blue/30 px-5 py-4 relative">
-      <button
-        onClick={dismiss}
-        className="absolute top-3 right-4 text-xs text-text-dim hover:text-text"
-      >
-        Got it
-      </button>
-      <h3 className="text-sm font-semibold text-text mb-2">Start here</h3>
-      <ol className="text-xs text-text-dim leading-relaxed space-y-1 list-decimal list-inside">
-        <li><strong className="text-text">Pick a date range</strong> in the bar below (or click <em>Next 7 days</em>).</li>
-        <li><strong className="text-text">Pick where you'll be</strong> — choose from the <em>From</em> dropdown, or type any city in the <em>or type a city</em> box.</li>
-        <li>Each dot on the map is a venue with at least one of your players' games in that window. Click a dot to see who, when, and how long since you've visited.</li>
-        <li>Want suggestions? Open <em>Best Windows</em> below, or jump to the <em>Trip Planner</em> tab.</li>
-      </ol>
-      <p className="text-[11px] text-text-dim/60 mt-2">
-        Tip: switch <strong className="text-text">Color by</strong> to <em>Heartbeat</em> to see overdue players in red — independent of tier.
-      </p>
-    </div>
-  )
-}
