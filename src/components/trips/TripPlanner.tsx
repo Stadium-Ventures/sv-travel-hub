@@ -302,6 +302,10 @@ export default function TripPlanner() {
     }
   }, [players.length, rosterLoading, fetchRoster])
 
+  // "Refine" disclosure for the 4 controls that are shared with the Map tab
+  // (date range, starting city, drive radius). Collapsed by default since
+  // they're typically set on the Map and inherited here. Click summary to expand.
+  const [sharedControlsOpen, setSharedControlsOpen] = useState(false)
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
   const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly' | 'multi' | 'anchor'>('all')
   const [tripLengthFilter, setTripLengthFilter] = useState<'all' | '1' | '2' | '3'>('all')
@@ -696,20 +700,46 @@ export default function TripPlanner() {
           </div>
         )}
 
-        {/* Quick date presets */}
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          {/* Quick date range buttons — all start from today */}
+        {/* Refine bar — the date range, starting city, and drive radius are
+            all shared with the Map tab via the trip store. Most users set
+            them on the Map and arrive here ready to generate. We surface a
+            one-line summary by default and offer "Edit" to expand. */}
+        <div className="mb-3 rounded-lg border border-border bg-gray-950/30 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span className="text-text-dim/60 uppercase tracking-wide text-[10px]">Synced w/ Map:</span>
+            <span className="text-text">
+              <span className="text-text-dim/60">Dates</span> {formatDate(startDate)}–{formatDate(endDate)}
+            </span>
+            <span className="text-text-dim/30">·</span>
+            <span className="text-text">
+              <span className="text-text-dim/60">From</span> {homeBaseName}
+            </span>
+            <span className="text-text-dim/30">·</span>
+            <span className="text-text">
+              <span className="text-text-dim/60">Drive</span> {Math.floor(maxDriveMinutes / 60)}h
+            </span>
+            <button
+              onClick={() => setSharedControlsOpen((v) => !v)}
+              className="ml-auto rounded-md border border-border px-2 py-0.5 text-[10px] text-text-dim hover:text-text hover:border-accent-blue/50"
+              title="Show the shared filter controls in this tab"
+            >
+              {sharedControlsOpen ? 'Hide' : 'Edit'}
+            </button>
+          </div>
+        </div>
+
+        {/* Quick date presets — always available as a one-click shortcut. */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           {([
             { label: 'Next 30 days', days: 30 },
             { label: 'Next 3 months', days: 90 },
-            { label: 'Full season', days: 0 }, // special: Apr 1 – Sep 30
+            { label: 'Full season', days: 0 },
           ]).map(({ label, days }) => (
             <button
               key={label}
               onClick={() => {
                 const today = new Date().toISOString().split('T')[0]!
                 if (days === 0) {
-                  // Full season: today through Sep 30
                   const y = new Date().getFullYear()
                   setDateRange(today, `${y}-09-30`)
                 } else {
@@ -723,86 +753,85 @@ export default function TripPlanner() {
               {label}
             </button>
           ))}
-          <span className="ml-auto text-[10px] text-text-dim/50" title="Date range, drive radius, and starting city are shared between Map and Trip Planner — change in either, both update.">
-            synced w/ Map
-          </span>
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="mb-1 block text-xs text-text-dim">Start Date</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  const val = e.target.value
-                  if (!val) return
-                  // Auto-bump end date if start moves past it
-                  if (val > endDate) {
-                    const end = new Date(val + 'T12:00:00')
-                    end.setDate(end.getDate() + 7)
-                    setDateRange(val, end.toISOString().split('T')[0]!)
-                  } else {
-                    setDateRange(val, endDate)
-                  }
-                }}
-                className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
-              />
-              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
-                {getDayName(startDate)}
-              </span>
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-text-dim">End Date</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setDateRange(startDate, e.target.value)}
-                className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
-              />
-              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
-                {getDayName(endDate)}
-              </span>
-            </div>
-          </div>
-
-          {/* Starting From — moved here (was on far right), now uses the same
-              combobox + autocomplete as the Map. Kent's 2026-06-08 ask:
-              custom cities + relocated UI position. */}
-          <div>
-            <label className="mb-1 block text-xs text-text-dim">Starting From</label>
-            <CityPicker
-              value={homeBaseName}
-              onChange={(coords, name) => setHomeBase(coords, name)}
-              presets={STARTING_LOCATIONS.map((l) => ({ name: l.name, coords: { lat: l.coords.lat, lng: l.coords.lng } }))}
-              buttonClass="min-w-[160px] py-1.5 text-sm"
-              title="Where you'll be traveling from. Type any city or pick from common ones."
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs text-text-dim">
-              Max Drive: {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''}
-            </label>
-            <input
-              type="range"
-              min={120}
-              max={300}
-              step={15}
-              value={maxDriveMinutes}
-              onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
-              className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
-            />
-            <p className="mt-0.5 text-[9px] text-text-dim/50" title="Drive times are rough estimates — actual times depend on traffic and route">
-              {homeBaseName === 'Orlando, FL'
-                ? (maxDriveMinutes <= 150 ? 'Covers central FL' : maxDriveMinutes <= 210 ? 'Reaches Tampa, Jacksonville, Port St. Lucie' : maxDriveMinutes <= 270 ? 'Reaches Tallahassee, South FL' : 'Reaches most of FL + southern GA')
-                : `~${Math.round(maxDriveMinutes / 60)}h radius from ${homeBaseName}`}
-              {' · estimates only'}
-            </p>
-          </div>
+          {/* Shared-with-Map controls — hidden by default behind the "Edit"
+              toggle in the Synced banner above. Keeps the planner focused on
+              trip-specific knobs (flight cap, trip length) which can't be
+              set elsewhere. */}
+          {sharedControlsOpen && (
+            <>
+              <div>
+                <label className="mb-1 block text-xs text-text-dim">Start Date</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      if (!val) return
+                      if (val > endDate) {
+                        const end = new Date(val + 'T12:00:00')
+                        end.setDate(end.getDate() + 7)
+                        setDateRange(val, end.toISOString().split('T')[0]!)
+                      } else {
+                        setDateRange(val, endDate)
+                      }
+                    }}
+                    className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
+                  />
+                  <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
+                    {getDayName(startDate)}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-text-dim">End Date</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setDateRange(startDate, e.target.value)}
+                    className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
+                  />
+                  <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
+                    {getDayName(endDate)}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-text-dim">Starting From</label>
+                <CityPicker
+                  value={homeBaseName}
+                  onChange={(coords, name) => setHomeBase(coords, name)}
+                  presets={STARTING_LOCATIONS.map((l) => ({ name: l.name, coords: { lat: l.coords.lat, lng: l.coords.lng } }))}
+                  buttonClass="min-w-[160px] py-1.5 text-sm"
+                  title="Where you'll be traveling from. Type any city or pick from common ones."
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-text-dim">
+                  Max Drive: {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''}
+                </label>
+                <input
+                  type="range"
+                  min={120}
+                  max={300}
+                  step={15}
+                  value={maxDriveMinutes}
+                  onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
+                  className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
+                />
+                <p className="mt-0.5 text-[9px] text-text-dim/50" title="Drive times are rough estimates — actual times depend on traffic and route">
+                  {homeBaseName === 'Orlando, FL'
+                    ? (maxDriveMinutes <= 150 ? 'Covers central FL' : maxDriveMinutes <= 210 ? 'Reaches Tampa, Jacksonville, Port St. Lucie' : maxDriveMinutes <= 270 ? 'Reaches Tallahassee, South FL' : 'Reaches most of FL + southern GA')
+                    : `~${Math.round(maxDriveMinutes / 60)}h radius from ${homeBaseName}`}
+                  {' · estimates only'}
+                </p>
+              </div>
+            </>
+          )}
           <div>
             <label className="mb-1 block text-xs text-text-dim">
               Max Flight: {maxFlightHours}h
