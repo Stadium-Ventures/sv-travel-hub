@@ -328,42 +328,58 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Rehab chip for MLB-level players currently on MiLB affiliates. Pulls the
- * rehab window from rehabStore — if transactions data is available, shows
- * the actual assignment date + estimated return; otherwise shows an
- * "estimated" badge with a 14-day cap from today.
+ * Status chip for a Pro player currently at a MiLB affiliate. Three states:
+ *  1. Confirmed rehab (MLB Transactions API verified) → blue chip with
+ *     estimated return; downstream games beyond the window are clipped.
+ *  2. On parent 40-man but no rehab transaction in last 35 days → orange
+ *     "verify" chip; could be a recent recall yet to post, an option, or
+ *     a rehab pre-API. We do NOT clip — options can last months.
+ *  3. Not on 40-man → render nothing. Genuine MiLB career player; no
+ *     ambiguity, no warning needed.
  */
 function RehabChip({ playerName, affiliateTeam, sportLabel }: { playerName: string; affiliateTeam: string; sportLabel: string }) {
   const win = useRehabStore((s) => s.windows[playerName.trim().toLowerCase()])
   const loading = useRehabStore((s) => s.loading[playerName.trim().toLowerCase()])
 
-  // Without rehab data yet: keep the old "@ AAA · rehab?" treatment.
+  // Loading state with no window yet — show a neutral indicator.
   if (!win) {
+    if (loading) {
+      return (
+        <span
+          className="ml-1 rounded bg-gray-500/15 px-1 py-0 text-[9px] text-text-dim"
+          title={`Checking MLB transactions and 40-man roster to see if ${playerName} is on a rehab assignment or option…`}
+        >
+          @ {sportLabel} · checking…
+        </span>
+      )
+    }
+    // No window cached AND not loading → assumed genuine MiLB. Nothing to show.
+    return null
+  }
+
+  if (win.confirmedRehab && win.estimatedEndDate) {
     return (
       <span
-        className="ml-1 rounded bg-accent-orange/15 px-1 py-0 text-[9px] text-accent-orange"
-        title={`${playerName} is currently on the ${affiliateTeam} (${sportLabel}) roster — likely rehab assignment or option. ${loading ? 'Checking MLB transactions…' : 'Verify in MLB transactions before planning.'}`}
+        className="ml-1 rounded bg-accent-blue/15 px-1 py-0 text-[9px] text-accent-blue"
+        title={`✓ Verified by MLB Transactions API\n${describeRehabWindow(win)}\nGames at ${affiliateTeam} after ~${formatShort(win.estimatedEndDate)} are hidden from trips.`}
       >
-        @ {sportLabel} · rehab?{loading && ' …'}
+        ✓ rehab · back ~{formatShort(win.estimatedEndDate)}
       </span>
     )
   }
 
-  // With rehab data: show source attribution and estimated return.
-  const isVerified = win.source === 'transactions'
-  const bgClass = isVerified ? 'bg-accent-blue/15 text-accent-blue' : 'bg-accent-orange/15 text-accent-orange'
-  const summary = describeRehabWindow(win)
-  const sourceTag = isVerified ? '✓ from MLB transactions' : '~est from MiLB roster only'
+  if (win.is40Man) {
+    return (
+      <span
+        className="ml-1 rounded bg-accent-orange/15 px-1 py-0 text-[9px] text-accent-orange"
+        title={`${playerName} is on the parent org's 40-man roster but currently at ${affiliateTeam} (${sportLabel}). Could be a rehab assignment, an option/demotion, or a recall yet to post. No rehab record in the last 35 days of MLB Transactions.\n\nNot clipping their schedule — options can last months. Verify before traveling.`}
+      >
+        ⚠ verify · 40-man at {sportLabel}
+      </span>
+    )
+  }
 
-  return (
-    <span
-      className={`ml-1 rounded px-1 py-0 text-[9px] ${bgClass}`}
-      title={`${summary}\n${sourceTag}\nGames at ${affiliateTeam} after ~${formatShort(win.estimatedEndDate)} are hidden from trips.`}
-    >
-      @ {sportLabel} · rehab · back ~{formatShort(win.estimatedEndDate)}
-      {!isVerified && ' (est)'}
-    </span>
-  )
+  return null
 }
 
 function formatShort(iso: string): string {

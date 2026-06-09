@@ -125,8 +125,8 @@ export interface MLBRosterEntry {
   positionCode?: string
 }
 
-export async function fetchTeamRoster(teamId: number, sportId: number, season?: number): Promise<MLBRosterEntry[]> {
-  const url = `${MLB_BASE}/teams/${teamId}/roster?rosterType=fullRoster${season ? `&season=${season}` : ''}`
+export async function fetchTeamRoster(teamId: number, sportId: number, season?: number, rosterType: string = 'fullRoster'): Promise<MLBRosterEntry[]> {
+  const url = `${MLB_BASE}/teams/${teamId}/roster?rosterType=${rosterType}${season ? `&season=${season}` : ''}`
   const res = await fetchWithRetry(url, { timeoutMs: 10000 })
   if (!res.ok) {
     console.warn(`Roster fetch failed for team ${teamId}: HTTP ${res.status}`)

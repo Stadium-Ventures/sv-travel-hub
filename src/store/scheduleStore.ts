@@ -109,12 +109,6 @@ interface ScheduleState {
   fetchHsSchedules: (playerOrgs: Array<{ playerName: string; org: string; state: string }>, opts?: { merge?: boolean; forceRefresh?: boolean }) => Promise<void>
 }
 
-function addDaysISOInline(iso: string, days: number): string {
-  const d = new Date(iso + 'T12:00:00Z')
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
-}
-
 function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[]): GameEvent | null {
   const coords = extractVenueCoords(game)
   if (!coords) return null
@@ -613,23 +607,17 @@ export const useScheduleStore = create<ScheduleState>()(
         // runtime, not at module init.
         const rehabWindows = useRehabStore.getState().windows
 
-        // For Pro players on MiLB affiliates, drop their name from games
-        // dated AFTER their rehab estimatedEndDate — they likely won't be
-        // there. Source attribution is preserved on the window object for UI.
+        // Clip ONLY when the MLB Transactions API has confirmed a rehab
+        // assignment. Optioned/demoted players (no rehab record) and genuine
+        // MiLB players (no warning entry) keep their full schedules — they
+        // could legitimately be at the MiLB affiliate for months.
         function clipPlayersForGame(_teamId: number, gameDate: string, players: string[]): string[] {
           return players.filter((name) => {
             const assignment = assignments[name]
             if (!assignment) return true
-            // Only Pro players on MiLB affiliates are subject to clipping
             if (assignment.sportId < 11 || assignment.sportId > 14) return true
             const win = rehabWindows[name.trim().toLowerCase()]
-            if (!win) {
-              // No rehab data yet — fall back to a conservative 14-day window
-              // from today so we don't show 3-week-out MiLB games as definite.
-              const today = new Date().toISOString().slice(0, 10)
-              const cap = addDaysISOInline(today, 14)
-              return gameDate <= cap
-            }
+            if (!win || !win.confirmedRehab || !win.estimatedEndDate) return true
             return gameDate <= win.estimatedEndDate
           })
         }
