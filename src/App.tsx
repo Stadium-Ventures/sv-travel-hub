@@ -1,4 +1,4 @@
-import { Component, useEffect, type ReactNode } from 'react'
+import { Component, useEffect, useRef, type ReactNode } from 'react'
 import AppShell from './components/layout/AppShell'
 import RosterDashboard from './components/roster/RosterDashboard'
 import TripPlanner from './components/trips/TripPlanner'
@@ -131,6 +131,81 @@ function AutoFetchData() {
     }
     if (candidates.length > 0) refreshRehab(candidates)
   }, [players, playerTeamAssignments, refreshRehab, rehabRefreshedAt, TWELVE_H])
+
+  // Schedule fetches: Pro (MLB API), NCAA (bundled + scrape), HS (CSV),
+  // and Summer (MLB API for live leagues). Previously these only fired
+  // when TripPlanner mounted, which broke the Map tab when Kent landed
+  // there first. Now they fire as soon as the roster is loaded, so the
+  // Map has venue dots without needing a tab tour.
+  const proGames = useScheduleStore((s) => s.proGames)
+  const ncaaGames = useScheduleStore((s) => s.ncaaGames)
+  const hsGames = useScheduleStore((s) => s.hsGames)
+  const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
+  const ncaaLoading = useScheduleStore((s) => s.ncaaLoading)
+  const hsLoading = useScheduleStore((s) => s.hsLoading)
+  const cachedProTeamIds = useScheduleStore((s) => s.cachedProTeamIds)
+  const schedulesInitialized = useRef(false)
+  useEffect(() => {
+    if (schedulesInitialized.current) return
+    if (players.length === 0) return // wait for roster
+    const anyLoading = schedulesLoading || ncaaLoading || hsLoading
+    if (anyLoading) return
+
+    const hasHs = players.some((p) => p.level === 'HS')
+    const allLoaded = proGames.length > 0 && ncaaGames.length > 0 && (!hasHs || hsGames.length > 0)
+
+    if (allLoaded) {
+      schedulesInitialized.current = true
+      // Re-run HS + NCAA on startup so the latest bundled venue coords are used.
+      const sched = useScheduleStore.getState()
+      const hsOrgs = players.filter((p) => p.level === 'HS' && p.state).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
+      if (hsOrgs.length > 0) sched.fetchHsSchedules(hsOrgs)
+      const ncaaOrgs = players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))
+      if (ncaaOrgs.length > 0) sched.fetchNcaaSchedules(ncaaOrgs)
+      // Pick up any Pro teams that became assigned since the cache was built.
+      const assigned = new Set(Object.values(sched.playerTeamAssignments).map((a) => a.teamId))
+      const cachedSet = new Set(cachedProTeamIds)
+      const missingProTeams = [...assigned].filter((id) => !cachedSet.has(id))
+      if (missingProTeams.length > 0) {
+        const y = new Date().getFullYear()
+        sched.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+      }
+      return
+    }
+
+    // Cold path: nothing cached. Walk through the same steps TripPlanner
+    // used to run on its first mount.
+    schedulesInitialized.current = true
+    void (async () => {
+      const sched = useScheduleStore.getState()
+      // Pro: auto-assign players → MLB teams, then fetch schedules
+      if (Object.keys(sched.playerTeamAssignments).length === 0) {
+        await sched.autoAssignPlayers()
+      }
+      if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length > 0) {
+        const y = new Date().getFullYear()
+        sched.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+      }
+      // NCAA — bundled instant
+      const ncaaOrgs = players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))
+      if (ncaaOrgs.length > 0) sched.fetchNcaaSchedules(ncaaOrgs)
+      // HS — CSV (per yesterday's change, no bundled fallback)
+      if (hasHs) {
+        const hsOrgs = players.filter((p) => p.level === 'HS').map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
+        if (hsOrgs.length > 0) sched.fetchHsSchedules(hsOrgs)
+      }
+      // Summer — live partner leagues (CCBL, MLBD, Appalachian)
+      const summer = useSummerStore.getState()
+      if (summer.assignments.length === 0) {
+        await summer.loadAssignments()
+      }
+      if (useSummerStore.getState().assignments.length > 0) {
+        const y = new Date().getFullYear()
+        summer.loadSchedules(`${y}-05-20`, `${y}-08-31`)
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [players, proGames.length, ncaaGames.length, hsGames.length, schedulesLoading, ncaaLoading, hsLoading])
 
   return null
 }
