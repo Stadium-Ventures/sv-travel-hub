@@ -3,7 +3,7 @@ import { useRosterStore } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useVenueStore } from '../../store/venueStore'
 import { useTripStore } from '../../store/tripStore'
-import { addMapEventListener } from '../../lib/mapEvents'
+import { addMapEventListener, dispatchMapEvent } from '../../lib/mapEvents'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import DateRangeBar from './DateRangeBar'
 import MapContainer from './MapContainer'
@@ -117,6 +117,15 @@ export default function MapView() {
     })
   }, [])
 
+  // Listen for global player search from the header. Filter to that player
+  // (which will trigger the map zoom via fitToMarkersKey).
+  useEffect(() => {
+    return addMapEventListener('map:select-player', (detail) => {
+      if (!detail.playerName) return
+      setFilterState((s) => ({ ...s, selectedPlayer: detail.playerName }))
+    })
+  }, [])
+
   // When a Trip Card sets selectedTripIndex (via the "Show on Map" button),
   // sync the map's visible date range to that trip's window so the trip's
   // venues actually fall inside the date filter and tier markers stay visible
@@ -191,7 +200,9 @@ export default function MapView() {
         </div>
       )}
 
-      {/* Best window recommender */}
+      {/* Best window recommender — Use button sets the dates AND jumps
+          straight to the Trip Planner with Generate Trips queued. Kent's
+          mental flow is pick window → plan trip; chain them. */}
       {hasSchedules && tierMarkers.length > 0 && (
         <BestWindowsPanel
           windows={bestWindows}
@@ -202,6 +213,13 @@ export default function MapView() {
           onApply={(w) => {
             setFilterStart(w.startDate)
             setFilterEnd(w.endDate)
+            // Jump to Trip Planner; the planner picks up the new dates from
+            // the shared trip store and we kick off generation after a brief
+            // delay so the date state propagates before generateTrips reads it.
+            dispatchMapEvent('app:switch-tab', { tab: 'trips' })
+            setTimeout(() => {
+              useTripStore.getState().generateTrips().catch((e) => console.warn('[map] auto-generate after Use Window failed:', e))
+            }, 100)
           }}
         />
       )}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useTripStore } from '../../store/tripStore'
+import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { useSummerStore } from '../../store/summerStore'
@@ -307,7 +307,7 @@ export default function TripPlanner() {
   // they're typically set on the Map and inherited here. Click summary to expand.
   const [sharedControlsOpen, setSharedControlsOpen] = useState(false)
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
-  const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly' | 'multi' | 'anchor'>('all')
+  const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly' | 'multi' | 'anchor' | 'starred'>('all')
   const [tripLengthFilter, setTripLengthFilter] = useState<'all' | '1' | '2' | '3'>('all')
   const [showAllTrips, setShowAllTrips] = useState(false)
   // tierFilter removed — was adding clutter to the results toolbar
@@ -1341,6 +1341,13 @@ export default function TripPlanner() {
                   if (!item.visit.playerNames.some(n => anchorPlayerNames.includes(n))) return false
                 }
               }
+              // Starred filter — only show Kent's favorites (road trips only;
+              // fly-ins don't have stable keys today).
+              if (tripFilter === 'starred') {
+                if (item.type !== 'road') return false
+                const key = getTripKey(item.trip)
+                if (!useTripStore.getState().starredTrips[key]) return false
+              }
 
               // Trip length filter (fly-ins add +1 for return travel day, matching the card display)
               if (tripLengthFilter !== 'all') {
@@ -1448,6 +1455,7 @@ export default function TripPlanner() {
                   { key: 'fly', label: '✈️ Flights', tip: 'Only show trips that require a flight.' },
                   { key: 'multi', label: '👥 2+ Players', tip: 'Only show trips where you can see 2 or more players.' },
                   ...(anchorPlayerNames.length > 0 ? [{ key: 'anchor' as const, label: '📍 Near destination', tip: 'Only show trips near your selected destination.' }] : []),
+                  { key: 'starred', label: '★ Starred', tip: 'Show only trips you\'ve saved as favorites.' },
                 ] as Array<{ key: typeof tripFilter; label: string; tip: string }>).map(({ key, label, tip }) => (
                   <button
                     key={key}

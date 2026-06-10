@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { addMapEventListener } from '../../lib/mapEvents'
 import StatusPill from './StatusPill'
+import HeaderPlayerSearch from './HeaderPlayerSearch'
 
 export type TabId = 'roster' | 'trips' | 'map' | 'data'
 
@@ -49,12 +50,15 @@ export default function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="mx-auto min-h-screen max-w-7xl px-4 py-6 sm:px-6">
-      <header className="mb-6 flex items-center justify-between">
+      <header className="mb-6 flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-text">SV Travel Hub</h1>
           <p className="text-xs text-text-dim">Road trip planner for client visits</p>
         </div>
-        <StatusPill />
+        <div className="flex items-center gap-2">
+          <HeaderPlayerSearch />
+          <StatusPill />
+        </div>
       </header>
 
       <nav className="mb-6 flex gap-1 rounded-xl border border-border bg-surface p-1">

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { useTripStore } from '../../store/tripStore'
+import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource, ScoreBreakdown } from '../../types/schedule'
 // import { generateTripIcs, downloadIcs } from '../../lib/icsExport'
@@ -488,6 +488,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
           >
             Show on Map
           </button>
+          <StarButton trip={trip} />
         </div>
       </div>
 
@@ -928,6 +929,31 @@ function ExpandableWarning({ summary, detail, defaultOpen = false }: { summary: 
         <p className="mt-1 ml-4 text-[11px] text-text-dim leading-relaxed">{detail}</p>
       )}
     </div>
+  )
+}
+
+/**
+ * Star toggle. Persists in tripStore so Kent's favorites survive trip
+ * regeneration AND across sessions. Star state is keyed by getTripKey, which
+ * is stable as long as the anchor venue + dates don't change.
+ */
+function StarButton({ trip }: { trip: TripCandidate }) {
+  const key = getTripKey(trip)
+  const starred = useTripStore((s) => !!s.starredTrips[key])
+  const toggle = useTripStore((s) => s.toggleTripStar)
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); toggle(key) }}
+      className={`ml-1 rounded-md px-2 py-0.5 text-[12px] font-semibold transition-colors ${
+        starred
+          ? 'bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30'
+          : 'bg-gray-800/40 text-text-dim hover:text-yellow-300'
+      }`}
+      title={starred ? 'Saved — click to remove from favorites' : 'Save this trip to your favorites'}
+      aria-pressed={starred}
+    >
+      {starred ? '★' : '☆'}
+    </button>
   )
 }
 

@@ -6,7 +6,11 @@ export type MapEventMap = {
   'map:toast': { message: string }
   'map:explore-pin': { lat: number; lng: number }
   /** Switch to a tab in AppShell from anywhere in the tree. */
-  'app:switch-tab': { tab: 'roster' | 'trips' | 'map' }
+  'app:switch-tab': { tab: 'roster' | 'trips' | 'map' | 'data' }
+  /** Filter the Map to a specific player and zoom to them. Fired by
+   *  the global header player search. MapView listens and sets the
+   *  filterState.selectedPlayer + zooms via fitToMarkersKey. */
+  'map:select-player': { playerName: string }
 }
 
 export function dispatchMapEvent<K extends keyof MapEventMap>(

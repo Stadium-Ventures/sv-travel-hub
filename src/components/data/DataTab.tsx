@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { useSummerStore } from '../../store/summerStore'
+import { useTripStore } from '../../store/tripStore'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 import type { GameEvent } from '../../types/schedule'
 import type { PlayerLevel } from '../../types/roster'
@@ -264,12 +265,13 @@ export default function DataTab() {
                 Opponent{sortIndicator('opponent')}
               </th>
               <th className="px-3 py-2 whitespace-nowrap">Source</th>
+              <th className="px-3 py-2 whitespace-nowrap text-right">Plan</th>
             </tr>
           </thead>
           <tbody>
             {pageRows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-sm text-text-dim">
+                <td colSpan={9} className="px-3 py-6 text-center text-sm text-text-dim">
                   No rows match. Try clearing filters or loading more schedules from the Trip Planner tab.
                 </td>
               </tr>
@@ -312,6 +314,30 @@ export default function DataTab() {
                       className="ml-1.5 text-[10px] text-accent-blue/60 hover:text-accent-blue underline"
                     >↗</a>
                   )}
+                </td>
+                <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                  <button
+                    onClick={() => {
+                      // Build a trip around this game: set player as priority,
+                      // narrow date window to ±5 days, jump to Trip Planner,
+                      // auto-Generate. Closes the "I saw a game I want to
+                      // attend → build me a trip" loop in one click.
+                      const store = useTripStore.getState()
+                      store.setPriorityPlayers([r.playerName])
+                      const d = new Date(r.date + 'T12:00:00Z')
+                      const start = new Date(d); start.setUTCDate(start.getUTCDate() - 2)
+                      const end = new Date(d); end.setUTCDate(end.getUTCDate() + 5)
+                      const today = new Date().toISOString().slice(0, 10)
+                      const startIso = start.toISOString().slice(0, 10)
+                      store.setDateRange(startIso < today ? today : startIso, end.toISOString().slice(0, 10))
+                      dispatchMapEvent('app:switch-tab', { tab: 'trips' })
+                      setTimeout(() => { store.generateTrips().catch((e) => console.warn('[data] auto-generate failed:', e)) }, 100)
+                    }}
+                    className="rounded-md bg-accent-blue/15 px-2 py-0.5 text-[10px] font-semibold text-accent-blue hover:bg-accent-blue/25"
+                    title={`Build a trip around ${r.playerName}'s game on ${r.date}`}
+                  >
+                    Plan trip →
+                  </button>
                 </td>
               </tr>
             ))}

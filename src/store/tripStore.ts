@@ -52,6 +52,9 @@ interface TripState {
   progressStep: string
   progressDetail: string
   tripStatuses: Record<string, TripStatus>
+  /** Kent-favorited trips, keyed by getTripKey(trip). Persisted so
+   *  starring survives regenerations and sessions. */
+  starredTrips: Record<string, boolean>
   selectedTripIndex: number | null // For map preview highlighting
 
   setDateRange: (start: string, end: string) => void
@@ -63,6 +66,7 @@ interface TripState {
   generateTrips: () => Promise<void>
   clearTrips: () => void
   setTripStatus: (tripKey: string, status: TripStatus | null) => void
+  toggleTripStar: (tripKey: string) => void
   setUseHeartbeatBoost: (v: boolean) => void
   setSelectedTripIndex: (index: number | null) => void
 }
@@ -87,6 +91,7 @@ export const useTripStore = create<TripState>()(
   progressStep: '',
   progressDetail: '',
   tripStatuses: {},
+  starredTrips: {},
   selectedTripIndex: null,
 
   setDateRange: (startDate, endDate) => set({ startDate, endDate }),
@@ -106,6 +111,12 @@ export const useTripStore = create<TripState>()(
       next[tripKey] = status
     }
     return { tripStatuses: next }
+  }),
+  toggleTripStar: (tripKey) => set((state) => {
+    const next = { ...state.starredTrips }
+    if (next[tripKey]) delete next[tripKey]
+    else next[tripKey] = true
+    return { starredTrips: next }
   }),
 
   generateTrips: async () => {
@@ -399,6 +410,7 @@ export const useTripStore = create<TripState>()(
         useHeartbeatBoost: persisted?.useHeartbeatBoost ?? false,
         priorityPlayers: persisted?.priorityPlayers ?? [],
         tripStatuses: persisted?.tripStatuses ?? {},
+        starredTrips: persisted?.starredTrips ?? {},
         maxNights: persisted?.maxNights ?? 2,
         // v7 reset: force-overwrite home base to the Orlando default. Keeps
         // the user free to pick a different city per session, but stops the
@@ -417,6 +429,7 @@ export const useTripStore = create<TripState>()(
         maxNights: state.maxNights,
         priorityPlayers: state.priorityPlayers,
         tripStatuses: state.tripStatuses,
+        starredTrips: state.starredTrips,
         homeBase: state.homeBase,
         homeBaseName: state.homeBaseName,
       }),
@@ -428,6 +441,7 @@ export const useTripStore = create<TripState>()(
           maxFlightHours: p?.maxFlightHours ?? 8,
           priorityPlayers: p?.priorityPlayers ?? [],
           tripStatuses: p?.tripStatuses ?? {},
+          starredTrips: p?.starredTrips ?? {},
           maxNights: p?.maxNights ?? 2,
           homeBase: p?.homeBase ?? DEFAULT_HOME_BASE,
           homeBaseName: p?.homeBaseName ?? 'Orlando, FL',
