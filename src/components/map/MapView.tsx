@@ -289,6 +289,17 @@ function MapHelp() {
   )
 }
 
+function strategyFooter(strategy: BestWindowStrategy): string {
+  switch (strategy) {
+    case 't1-count':         return 'Ranked by T1 player count (windows that add new T1s).'
+    case 'overdue-priority': return 'Ranked by overdue T1/T2 players (windows that catch new overdue players).'
+    case 'player-count':     return 'Ranked by unique player count.'
+    case 'tuesday':          return 'Tuesday-bearing windows only, ranked by overall impact.'
+    case 'impact':
+    default:                 return 'Ranked by tier-weighted player count.'
+  }
+}
+
 /** Build a short "what this strategy is yielding right now" sentence. Pulls
  *  from the live windows so the message updates as filters change. */
 function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult[]): string {
@@ -504,7 +515,7 @@ function BestWindowsPanel({
           )}
           {windows.length > 0 && (
             <p className="text-[10px] text-text-dim/40 mt-1">
-              Ranked by tier-weighted player count within your {Math.floor(useTripStore.getState().maxDriveMinutes / 60)}h drive radius. Non-overlapping windows only.
+              {strategyFooter(strategy)} Non-overlapping windows · drive radius {Math.floor(useTripStore.getState().maxDriveMinutes / 60)}h.
             </p>
           )}
         </div>

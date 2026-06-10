@@ -279,21 +279,44 @@ export function useBestWindows(
       }
     })
 
-    // Remove windows that overlap with a higher-scored already-picked window,
-    // OR that bring no new player coverage vs. the windows already picked.
-    // (Kent 2026-06-08: noticed every Best Window listed the same 4 players —
-    // mathematically correct given drive radius, visually noisy. We now
-    // suppress windows whose player set is fully contained in the union of
-    // earlier picks unless they meaningfully differ in date pattern.)
+    // Strategy-aware dedupe. We drop a candidate window only if it doesn't
+    // add anything new *in the dimension the user is optimizing for*. Without
+    // this, picking "Most T1" or "Overdue priority" returned the same windows
+    // as "Highest overall impact" — the dedupe would drop a high-T1 window
+    // because its players overlapped the top pick's, even though it brought
+    // new T1 coverage. The "novel" check is now strategy-driven.
+    function novelCount(r: WindowResult, coveredKeys: Set<string>): number {
+      switch (strategy) {
+        case 't1-count':
+          return r.players.filter((p) => p.tier === 1 && !coveredKeys.has(p.name)).length
+        case 'overdue-priority':
+          return r.players.filter((p) => p.tier <= 2 && isOverdue(p.name) && !coveredKeys.has(p.name)).length
+        case 'tuesday':
+          // For Tuesday: any new player counts, but ALSO require hasTuesday
+          // to even be considered (handled by the pre-filter below).
+          return r.players.filter((p) => !coveredKeys.has(p.name)).length
+        case 'impact':
+        case 'player-count':
+        default:
+          return r.players.filter((p) => !coveredKeys.has(p.name)).length
+      }
+    }
+
+    // For 'tuesday' strategy, drop non-Tuesday windows entirely before dedupe
+    // so the secondary results don't fall through to non-Tuesday options.
+    const candidates = strategy === 'tuesday'
+      ? results.filter((r) => r.hasTuesday)
+      : results
+
     const picked: WindowResult[] = []
     const coveredPlayers = new Set<string>()
-    for (const r of results) {
+    for (const r of candidates) {
       const overlaps = picked.some((p) => r.startDate <= p.endDate && r.endDate >= p.startDate)
       if (overlaps) continue
-      const newPlayers = r.players.filter((p) => !coveredPlayers.has(p.name))
-      // Always accept the first window (best), and any window that adds at
-      // least one new player. Skip "same set, different date" duplicates.
-      if (picked.length === 0 || newPlayers.length > 0) {
+      const novel = novelCount(r, coveredPlayers)
+      // Always accept the first window. After that, accept any window that
+      // adds at least one new item along the strategy's axis.
+      if (picked.length === 0 || novel > 0) {
         picked.push(r)
         for (const p of r.players) coveredPlayers.add(p.name)
         if (picked.length >= topN) break

@@ -52,9 +52,11 @@ export default function RosterDashboard() {
 
   const playerCount = players.length
 
-  // Build a quick daysSince lookup from Heartbeat for sort-by-overdue. null
-  // means "no visit on record" — we treat those as MOST overdue (Infinity)
-  // so they sort to the top when sorted desc.
+  // Build lookups from Heartbeat. daysSinceLookup is used for sort-by-overdue
+  // (null → Infinity so unknowns sort high). overdueLookup uses Heartbeat's
+  // OWN inPersonOverdue boolean — tier-aware, accounts for visit cadence
+  // targets — so a T4 player at 91d isn't surfaced as urgent when Heartbeat
+  // itself wouldn't flag them.
   const heartbeatPlayers = useHeartbeatStore((s) => s.players)
   const daysSinceLookup = useMemo(() => {
     const m = new Map<string, number>()
@@ -64,15 +66,34 @@ export default function RosterDashboard() {
     }
     return m
   }, [heartbeatPlayers])
+  const overdueLookup = useMemo(() => {
+    const m = new Map<string, boolean>()
+    for (const p of heartbeatPlayers) {
+      // HeartbeatPlayer doesn't ship a precomputed inPersonOverdue flag, but
+      // we can derive it from days-since vs per-tier threshold (set by Heartbeat
+      // itself based on the player's tier and cadence target).
+      const days = p.daysSinceInPerson
+      const threshold = p.inPersonThresholdDays
+      const overdue = days != null && threshold != null && days > threshold
+      m.set(p.name.trim().toLowerCase(), overdue)
+    }
+    return m
+  }, [heartbeatPlayers])
 
-  // Classify each roster player into an attention bucket. We treat "no
-  // heartbeat record" as its own bucket (nodata) rather than rolling it into
-  // overdue — Kent's interview made clear that missing data and "haven't seen
-  // in 90+ days" are different problems.
+  // Classify each roster player into an attention bucket using Heartbeat as
+  // the source of truth:
+  //   - Tier 4: no visit target → never bucketed as overdue/at-risk. Either
+  //     fresh (if any visit logged) or no-data.
+  //   - Otherwise: trust Heartbeat's inPersonOverdue boolean for "overdue".
+  //   - At risk = not flagged overdue but 45–90 days. Still a soft warning.
+  //   - Fresh = visited within 45 days.
+  //   - No data = no Heartbeat record for the player at all.
   function bucketFor(p: RosterPlayer): AttentionBucket {
-    const days = daysSinceLookup.get(p.playerName.trim().toLowerCase())
+    const key = p.playerName.trim().toLowerCase()
+    const days = daysSinceLookup.get(key)
     if (days == null || days === Number.POSITIVE_INFINITY) return 'nodata'
-    if (days > 90) return 'overdue'
+    if (p.tier === 4) return 'fresh' // T4 has no visit target; never urgent
+    if (overdueLookup.get(key) === true) return 'overdue'
     if (days >= 45) return 'stale'
     return 'fresh'
   }
@@ -260,9 +281,9 @@ export default function RosterDashboard() {
           <p className="text-[10px] uppercase tracking-wide text-text-dim/60 mb-1.5">Visit freshness</p>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             {([
-              { id: 'overdue' as const, label: 'Overdue', sub: '> 90 days', color: 'red' as const,    count: bucketCounts.overdue },
-              { id: 'stale'   as const, label: 'At risk', sub: '45–90 days', color: 'orange' as const, count: bucketCounts.stale },
-              { id: 'fresh'   as const, label: 'On track', sub: '< 45 days', color: 'green' as const,  count: bucketCounts.fresh },
+              { id: 'overdue' as const, label: 'Overdue', sub: 'per Heartbeat · T1–T3', color: 'red' as const,    count: bucketCounts.overdue },
+              { id: 'stale'   as const, label: 'At risk', sub: '45–90 days · T1–T3', color: 'orange' as const, count: bucketCounts.stale },
+              { id: 'fresh'   as const, label: 'On track', sub: '< 45 days or T4', color: 'green' as const,  count: bucketCounts.fresh },
               { id: 'nodata'  as const, label: 'No visit on record', sub: 'never logged', color: 'gray' as const, count: bucketCounts.nodata },
             ]).map((bucket) => {
               const active = attentionFilter === bucket.id
