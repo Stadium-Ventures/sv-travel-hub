@@ -289,6 +289,17 @@ function MapHelp() {
   )
 }
 
+/** Renders when the top "Best" window only reaches 1-2 players — that
+ *  makes the BEST label misleading. Tells Kent what to change. */
+function ThinCoverageHint({ topPickPlayers }: { topPickPlayers: number }) {
+  return (
+    <p className="mt-1 text-[10px] text-accent-orange/80 leading-relaxed">
+      ⚠ Only {topPickPlayers} player{topPickPlayers === 1 ? '' : 's'} reachable here.
+      Try changing the date range, moving the <em>From</em> location, or widening the drive radius (top-right of the map).
+    </p>
+  )
+}
+
 function strategyFooter(strategy: BestWindowStrategy): string {
   switch (strategy) {
     case 't1-count':         return 'Ranked by T1 player count (windows that add new T1s).'
@@ -427,10 +438,24 @@ function BestWindowsPanel({
         </p>
       )}
 
+      {/* Thin-coverage hint — when the top window reaches only 1-2 players,
+          "BEST" overstates the result. Tell Kent why and what to try. */}
+      {topPick && topPick.uniquePlayerCount <= 2 && (
+        <ThinCoverageHint topPickPlayers={topPick.uniquePlayerCount} />
+      )}
+
       {open && (
         <div className="mt-3 space-y-2">
           {windows.length === 0 ? (
-            <p className="text-xs text-text-dim">No games within drive radius for this date range.</p>
+            <div className="rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-3 py-2.5 text-xs">
+              <p className="text-accent-orange/90 font-medium">No reachable games in this window</p>
+              <p className="mt-1 text-text-dim/80 leading-relaxed">
+                No SV player has a game inside the {Math.floor(useTripStore.getState().maxDriveMinutes / 60)}h drive radius from {homeBaseName} during {formatDate(useTripStore.getState().startDate)}–{formatDate(useTripStore.getState().endDate)}.
+              </p>
+              <p className="mt-1 text-text-dim/60">
+                Try: widen the drive radius (top-right of the map), change the <em>From</em> city, or pick a different date range.
+              </p>
+            </div>
           ) : (
             windows.map((w, i) => (
               <div
