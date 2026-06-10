@@ -123,19 +123,26 @@ export function clusterDayStopsByOverlap(dayStops: VenueStop[]): VenueStop[][] {
       // Without times we can't be sure — DON'T flag as conflict (preserve
       // current behavior; the existing TBD warning already calls these out).
       if (ta == null || tb == null) continue
-      const earlier = ta <= tb ? a : b
-      const later = ta <= tb ? b : a
       const earlierStart = Math.min(ta, tb)
       const laterStart = Math.max(ta, tb)
-      // Drive time from earlier→later venue. We use driveFromAnchor as a rough
-      // proxy via triangle inequality if no direct distance is available;
-      // since stops on the same day are usually within the trip's drive radius,
-      // assume ≤45 min between any two as a conservative upper bound. (The
-      // exact pairwise drive isn't carried on VenueStop today.)
-      const assumedDriveMin = Math.max(15, Math.min(60, Math.abs(later.driveFromAnchor - earlier.driveFromAnchor) + 15))
       const gapMin = (laterStart - earlierStart) / 60000
-      // Conflict if the gap doesn't give enough time to finish the earlier
-      // game AND drive to the later one.
+      // HARD rule: any two games on the same day starting within
+      // GAME_DURATION_MIN (3h) of each other are mutually exclusive — you
+      // can't be in two stadiums at once. Skip the drive-time math entirely
+      // for this case so subtle bugs (NaN/Infinity in driveFromAnchor,
+      // unexpected zero values) can't accidentally let two simultaneous
+      // games coexist as separate "attendable" stops.
+      if (gapMin < GAME_DURATION_MIN) {
+        union(i, j)
+        continue
+      }
+      // Otherwise, factor in drive time between the two venues. Defensive
+      // about bad values: NaN/Infinity collapse to a 60-min cap.
+      const earlier = ta <= tb ? a : b
+      const later = ta <= tb ? b : a
+      const dEarly = Number.isFinite(earlier.driveFromAnchor) ? earlier.driveFromAnchor : 0
+      const dLate = Number.isFinite(later.driveFromAnchor) ? later.driveFromAnchor : 0
+      const assumedDriveMin = Math.max(15, Math.min(60, Math.abs(dLate - dEarly) + 15))
       if (gapMin < GAME_DURATION_MIN + assumedDriveMin) {
         union(i, j)
       }
