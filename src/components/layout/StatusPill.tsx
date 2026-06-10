@@ -4,6 +4,7 @@ import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useSummerStore } from '../../store/summerStore'
 import { useRehabStore } from '../../store/rehabStore'
+import { useTripStore } from '../../store/tripStore'
 
 /**
  * Compact data-freshness indicator in the header. Tells Kent at a glance
@@ -52,13 +53,15 @@ export default function StatusPill() {
   }
   const staleCount = sources.filter((s) => !s.loading && isStale(s.fetched, s.staleMs)).length
 
+  // "Stale" was alarming for what's usually a benign cache miss. Wording is
+  // now neutral: "X to refresh" reads as routine rather than urgent.
   const summary = anyLoading
-    ? `Refreshing ${loadingCount} source${loadingCount === 1 ? '' : 's'}…`
+    ? `Refreshing ${loadingCount}…`
     : staleCount > 0
-      ? `${staleCount} stale`
+      ? `${staleCount} to refresh`
       : 'All current'
 
-  const dotColor = anyLoading ? 'bg-accent-blue animate-pulse' : staleCount > 0 ? 'bg-accent-orange' : 'bg-accent-green'
+  const dotColor = anyLoading ? 'bg-accent-blue animate-pulse' : staleCount > 0 ? 'bg-accent-orange/70' : 'bg-accent-green'
 
   return (
     <div className="relative">
@@ -73,7 +76,7 @@ export default function StatusPill() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
+        <div className="absolute right-0 top-full z-30 mt-1 w-72 max-h-[480px] overflow-y-auto rounded-lg border border-border bg-surface shadow-xl">
           <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-text-dim/60 border-b border-border/40">
             Data Freshness
           </div>
@@ -90,9 +93,73 @@ export default function StatusPill() {
               )
             })}
           </div>
+          <RecentActivitySection />
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Lists what's happened in the last 24h — roster moves detected, trips
+ * starred, etc. Gives Kent confidence the app is alive without him having
+ * to dig into each tab. Lives inside the StatusPill so it's discoverable
+ * via the existing pill click, not yet another header chip.
+ */
+function RecentActivitySection() {
+  const rosterMoves = useScheduleStore((s) => s.rosterMoves)
+  const starredTrips = useTripStore((s) => s.starredTrips)
+  const tripStatuses = useTripStore((s) => s.tripStatuses)
+
+  type Item = { kind: 'move' | 'star' | 'status'; label: string; sub?: string }
+  const items: Item[] = []
+  for (const m of rosterMoves) {
+    items.push({
+      kind: 'move',
+      label: m.player.fullName,
+      sub: `${m.typeDesc} · ${m.fromTeam?.name ?? '?'} → ${m.toTeam?.name ?? '?'}`,
+    })
+  }
+  const starCount = Object.keys(starredTrips).length
+  if (starCount > 0) {
+    items.push({ kind: 'star', label: `${starCount} starred trip${starCount === 1 ? '' : 's'} saved`, sub: 'Visible via the ★ Starred filter in Trip Planner' })
+  }
+  const planned = Object.values(tripStatuses).filter((s) => s === 'planned').length
+  const completed = Object.values(tripStatuses).filter((s) => s === 'completed').length
+  if (planned + completed > 0) {
+    items.push({ kind: 'status', label: `${planned} planned · ${completed} completed`, sub: 'Trip statuses on PlayerSchedulePanel' })
+  }
+
+  if (items.length === 0) {
+    return (
+      <>
+        <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-text-dim/60 border-t border-border/40">Recent Activity</div>
+        <p className="px-3 py-2 text-[11px] italic text-text-dim/50">Nothing in the last 24h.</p>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-text-dim/60 border-t border-border/40">
+        Recent Activity
+      </div>
+      <div className="divide-y divide-border/30">
+        {items.map((it, i) => (
+          <div key={`${it.kind}-${i}`} className="px-3 py-1.5 text-xs">
+            <div className="flex items-start gap-1.5">
+              <span className="text-[10px] mt-0.5">
+                {it.kind === 'move' ? '🔄' : it.kind === 'star' ? '★' : '📋'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-text">{it.label}</div>
+                {it.sub && <div className="text-[10px] text-text-dim/60">{it.sub}</div>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
   )
 }
 

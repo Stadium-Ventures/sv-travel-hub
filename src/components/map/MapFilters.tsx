@@ -142,6 +142,10 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
           {state.overdueOnly ? '✓ Overdue only' : 'Overdue only'}
         </button>
 
+        {/* Visual ▏ Filter — thin separator to help the eye group the
+            "how it looks" controls vs the "what to show" controls. */}
+        <span className="h-5 w-px bg-border/40" aria-hidden />
+
         {/* Tier pills (act as legend + filter) */}
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] uppercase tracking-wide text-text-dim/60">Tier</span>
@@ -189,6 +193,10 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
             )
           })}
         </div>
+
+        {/* Filter ▏ Find — separator between "narrow what's visible" and
+            "look up a specific player or venue." */}
+        <span className="h-5 w-px bg-border/40" aria-hidden />
 
         {/* Player picker (affirmative selection — Kent's 2026-06-08 ask) */}
         <div className="flex items-center gap-1.5">
