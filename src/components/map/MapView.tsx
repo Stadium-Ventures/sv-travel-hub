@@ -13,6 +13,8 @@ import { useMapDateRange } from './hooks/useMapDateRange'
 import { useTierMarkers } from './hooks/useTierMarkers'
 import { useBestWindows } from './hooks/useBestWindows'
 import type { WindowResult, BestWindowStrategy } from './hooks/useBestWindows'
+import { useDestinationPicks } from './hooks/useDestinationPicks'
+import WhereToGoPanel from './WhereToGoPanel'
 import { formatDate } from '../../lib/formatters'
 import MapFilters, { DEFAULT_MAP_FILTERS, applyMapFilters, type MapFilterState } from './MapFilters'
 import SummerCoverageNotice from './SummerCoverageNotice'
@@ -69,6 +71,10 @@ export default function MapView() {
   const [windowDays, setWindowDays] = useState(3)
   const [bestWindowStrategy, setBestWindowStrategy] = useState<BestWindowStrategy>('impact')
   const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy)
+
+  // Destination picks — scans ALL tier markers (not drive-filtered) because
+  // the whole point of "Where to go?" is to look beyond the current radius.
+  const destinationPicks = useDestinationPicks(allTierMarkers, homeBase, 180, 360, 5)
 
   // Are any schedules loaded?
   const hasSchedules = proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0
@@ -222,6 +228,14 @@ export default function MapView() {
             }, 100)
           }}
         />
+      )}
+
+      {/* Where to go? — destination-anchored recommender. Surfaces the top
+          cities to visit nationally, not just what's reachable from the
+          current From city. Especially valuable when the Best Windows panel
+          shows thin coverage from where you are. */}
+      {hasSchedules && allTierMarkers.length > 0 && (
+        <WhereToGoPanel picks={destinationPicks} />
       )}
 
       {/* Map — when a specific player is selected, fitToMarkersKey changes,
