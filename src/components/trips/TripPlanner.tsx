@@ -5,6 +5,7 @@ import { useRosterStore } from '../../store/rosterStore'
 import { useSummerStore } from '../../store/summerStore'
 import CityPicker from '../ui/CityPicker'
 import TripCard from './TripCard'
+import CompareStarredTrips from './CompareStarredTrips'
 import PlayerCoverageCard from './PlayerCoverageCard'
 // ICS export removed from main UI — kept in individual trip cards
 // import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
@@ -1497,6 +1498,13 @@ export default function TripPlanner() {
                   <span className="text-text-dim/50"> · {filtered.length - relevantToFilters.length} other trip{filtered.length - relevantToFilters.length !== 1 ? 's' : ''} hidden</span>
                 </p>
               )}
+
+              {/* Side-by-side comparison of starred favorites — renders only
+                  when 2+ trips are starred. Lets Kent pick the best one
+                  without scrolling back and forth between cards. */}
+              <div className="mb-4">
+                <CompareStarredTrips />
+              </div>
 
               <div className="space-y-4">
                 {capped.map((group, i) => {

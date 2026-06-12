@@ -7,6 +7,7 @@ import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '../../data/aliases'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
+import CoveragePanel from './CoveragePanel'
 
 export default function RosterDashboard() {
   const players = useRosterStore((s) => s.players)
@@ -295,6 +296,11 @@ export default function RosterDashboard() {
         </div>
 
       </div>
+
+      {/* "Who haven't you seen?" — proactive coverage prompt. Surfaces
+          Heartbeat-flagged overdue T1/T2 players with their next game inline
+          and a one-click "Plan trip" CTA. Hidden when no one is overdue. */}
+      <CoveragePanel />
 
       {/* Action Items — merged "needs attention" buckets (visit freshness)
           and roster moves (trades/promotions) into one section so the user
