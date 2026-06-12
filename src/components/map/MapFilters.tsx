@@ -29,6 +29,10 @@ export interface MapFilterState {
   /** When true, only show venues with at least one overdue (>90d) or
    *  never-visited player. Kent interview ask: "guys we need to see." */
   overdueOnly: boolean
+  /** When true, hide venues outside the drive radius from the trip origin.
+   *  Closes the mental-model gap where dragging the star to a new city
+   *  didn't visually filter what's actually reachable. */
+  drivableOnly: boolean
 }
 
 export const DEFAULT_MAP_FILTERS: MapFilterState = {
@@ -38,6 +42,7 @@ export const DEFAULT_MAP_FILTERS: MapFilterState = {
   selectedPlayer: '',
   colorBy: 'tier',
   overdueOnly: false,
+  drivableOnly: false,
 }
 
 /** Heartbeat color thresholds (days since in-person visit).
@@ -140,6 +145,19 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
           title="Show only venues with at least one player overdue (>90d) or never visited"
         >
           {state.overdueOnly ? '✓ Overdue only' : 'Overdue only'}
+        </button>
+
+        {/* Drivable-only quick filter — hides venues outside the drive radius. */}
+        <button
+          onClick={() => setState({ ...state, drivableOnly: !state.drivableOnly })}
+          className={`rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+            state.drivableOnly
+              ? 'border-accent-blue/40 bg-accent-blue/15 text-accent-blue'
+              : 'border-border/30 bg-transparent text-text-dim/60 hover:text-text'
+          }`}
+          title="Hide venues outside the dashed drive-radius circle from your trip origin"
+        >
+          {state.drivableOnly ? '✓ Drivable only' : 'Drivable only'}
         </button>
 
         {/* Visual ▏ Filter — thin separator to help the eye group the
@@ -277,10 +295,26 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
  * surviving player list (after tier/level/search/overdue) is non-empty; players
  * inside each marker are also pruned so the popup matches.
  */
+/** Optional drive context for the Drivable-only toggle. */
+export interface DriveContext {
+  homeBase: { lat: number; lng: number }
+  maxDriveMinutes: number
+}
+
+function estimateDriveMin(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371
+  const dLat = (b.lat - a.lat) * Math.PI / 180
+  const dLng = (b.lng - a.lng) * Math.PI / 180
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  const km = R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s))
+  return (km * 1.2 / 95) * 60
+}
+
 export function applyMapFilters(
   markers: TierMarker[],
   state: MapFilterState,
   daysByPlayerKey?: Map<string, number | null>,
+  drive?: DriveContext,
 ): TierMarker[] {
   const search = state.search.trim().toLowerCase()
   const selectedPlayer = state.selectedPlayer.trim().toLowerCase()
@@ -288,6 +322,11 @@ export function applyMapFilters(
     .map((m) => {
       // Venue-name search: when set, only keep markers whose venue matches.
       if (search !== '' && !m.venueName.toLowerCase().includes(search)) return null
+      // Drivable-only: drop venues outside the drive radius from home base.
+      if (state.drivableOnly && drive) {
+        const driveMin = estimateDriveMin(drive.homeBase, m.coords)
+        if (driveMin > drive.maxDriveMinutes) return null
+      }
       const survivors = m.players.filter((p) => {
         if (!state.tiers.has(p.tier)) return false
         if (!state.levels.has(p.level as MapLevelFilter)) return false

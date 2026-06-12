@@ -231,7 +231,12 @@ export default function DateRangeBar({
           separate type-a-city input" pair. Kent's 2026-06-08 ask. */}
       <div className="relative" ref={suggestContainerRef}>
         <label className="flex items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wide text-text-dim/60">From</span>
+          <span
+            className="text-[10px] uppercase tracking-wide text-text-dim/60 cursor-help"
+            title="The city your trips will start from. Drive radius is measured from here; flight times are estimated from here too. Dragging the star on the map updates this."
+          >
+            Trip origin
+          </span>
           <button
             type="button"
             onClick={() => setSuggestOpen(!suggestOpen)}

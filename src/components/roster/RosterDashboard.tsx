@@ -16,7 +16,43 @@ export default function RosterDashboard() {
   const parseWarnings = useRosterStore((s) => s.parseWarnings)
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
 
-  const rosterMoves = useScheduleStore((s) => s.rosterMoves)
+  const rawRosterMoves = useScheduleStore((s) => s.rosterMoves)
+  // Dedupe per player: keep only the most-recent meaningful move. Cascading
+  // recalls + number changes for the same player flooded the Action Items
+  // panel; the player-level signal is "what changed last." typeDesc rank
+  // promotes substantive moves (Recalled, Optioned, Signed) over admin ones
+  // (Number Change, Status Change).
+  const rosterMoves = useMemo(() => {
+    const typeRank: Record<string, number> = {
+      'Signed as Free Agent': 4,
+      'Recalled': 4,
+      'Optioned': 4,
+      'Assigned': 3,
+      'Traded': 4,
+      'Status Change': 1,
+      'Number Change': 0,
+    }
+    const byPlayer = new Map<number, typeof rawRosterMoves[number]>()
+    for (const m of rawRosterMoves) {
+      const id = m.player.id
+      const existing = byPlayer.get(id)
+      const rank = typeRank[m.typeDesc] ?? 2
+      const existingRank = existing ? (typeRank[existing.typeDesc] ?? 2) : -1
+      const effective = m.effectiveDate || m.date
+      const existingEffective = existing ? (existing.effectiveDate || existing.date) : ''
+      if (!existing) {
+        byPlayer.set(id, m)
+      } else if (rank > existingRank) {
+        byPlayer.set(id, m)
+      } else if (rank === existingRank && effective > existingEffective) {
+        byPlayer.set(id, m)
+      }
+    }
+    return Array.from(byPlayer.values()).sort((a, b) => {
+      const ad = a.effectiveDate || a.date, bd = b.effectiveDate || b.date
+      return bd.localeCompare(ad) // newest first
+    })
+  }, [rawRosterMoves])
   const rosterMovesError = useScheduleStore((s) => s.rosterMovesError)
   const checkRosterMoves = useScheduleStore((s) => s.checkRosterMoves)
   const playerTeamAssignments = useScheduleStore((s) => s.playerTeamAssignments)
@@ -317,7 +353,10 @@ export default function RosterDashboard() {
         {rosterMoves.length > 0 && (
           <div>
             <p className="text-[10px] uppercase tracking-wide text-text-dim/60 mb-1.5">
-              Trades & promotions <span className="text-accent-orange">· {rosterMoves.length} new</span>
+              Trades & promotions <span className="text-accent-orange">· {rosterMoves.length} player{rosterMoves.length === 1 ? '' : 's'}</span>
+              <span className="text-text-dim/40 ml-1" title={`Showing one row per player — most-recent meaningful move. Raw count: ${rawRosterMoves.length}`}>
+                (deduped)
+              </span>
             </p>
             <div className="space-y-1">
               {rosterMoves.map((move, i) => (

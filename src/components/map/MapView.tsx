@@ -62,7 +62,12 @@ export default function MapView() {
     }
     return m
   }, [heartbeatPlayers])
-  const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey)
+  const homeBaseForFilter = useTripStore((s) => s.homeBase)
+  const maxDriveForFilter = useTripStore((s) => s.maxDriveMinutes)
+  const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey, {
+    homeBase: homeBaseForFilter,
+    maxDriveMinutes: maxDriveForFilter,
+  })
 
   // Best window recommender (uses filtered markers — Kent's filters should
   // drive the recommendations too)

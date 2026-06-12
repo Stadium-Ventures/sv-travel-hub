@@ -41,6 +41,42 @@ function nearestCityLabel(lat: number, lng: number): string {
   return `Custom (near ${best.name})`
 }
 
+/** Reverse geocode lat/lng → "City, ST" via Nominatim. Returns null on any
+ *  error so the caller can keep the optimistic preset-proximity label. */
+async function reverseGeocodeLabel(lat: number, lng: number): Promise<string | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=10`
+    const res = await fetch(url, { headers: { 'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures)' } })
+    if (!res.ok) return null
+    const data = await res.json() as { address?: { city?: string; town?: string; village?: string; municipality?: string; county?: string; state?: string } }
+    const a = data.address ?? {}
+    const city = a.city ?? a.town ?? a.village ?? a.municipality ?? a.county
+    const state = a.state
+    if (!city) return null
+    // US state names → 2-letter abbreviation for compactness.
+    const ab = US_STATE_ABBR[(state ?? '').toLowerCase()] ?? state ?? ''
+    return ab ? `${city}, ${ab}` : city
+  } catch {
+    return null
+  }
+}
+
+const US_STATE_ABBR: Record<string, string> = {
+  'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
+  'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
+  'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID',
+  'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS',
+  'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+  'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS',
+  'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV',
+  'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+  'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK',
+  'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
+  'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
+  'wisconsin': 'WI', 'wyoming': 'WY', 'district of columbia': 'DC',
+}
+
 interface MapContainerProps {
   tierMarkers: TierMarker[]
   colorBy: MapColorMode
@@ -189,13 +225,26 @@ export default function MapContainer({ tierMarkers, colorBy, fitToMarkersKey }: 
       .addTo(map)
       .bindPopup(`<div style="font-family:system-ui;font-size:12px;color:#f1f5f9"><strong>${homeBaseName}</strong><br/>Home Base · Drag to move</div>`)
 
-    // Update store when marker is dragged to a new position
+    // Update store when marker is dragged to a new position. Set an
+    // optimistic label immediately (preset proximity), then upgrade it via
+    // Nominatim reverse geocode so "Custom (near Atlanta, GA)" becomes the
+    // actual nearest city like "Columbus, GA" once the lookup returns.
     homeMarkerRef.current.on('dragend', () => {
       const pos = homeMarkerRef.current?.getLatLng()
       if (!pos) return
-      const label = nearestCityLabel(pos.lat, pos.lng)
       dragOriginRef.current = true // prevent map re-center
-      useTripStore.getState().setHomeBase({ lat: pos.lat, lng: pos.lng }, label)
+      const optimistic = nearestCityLabel(pos.lat, pos.lng)
+      useTripStore.getState().setHomeBase({ lat: pos.lat, lng: pos.lng }, optimistic)
+      void reverseGeocodeLabel(pos.lat, pos.lng).then((label) => {
+        if (!label) return
+        const cur = useTripStore.getState()
+        // Only upgrade if user hasn't moved again or set a preset since.
+        const dlat = Math.abs(cur.homeBase.lat - pos.lat)
+        const dlng = Math.abs(cur.homeBase.lng - pos.lng)
+        if (dlat < 0.001 && dlng < 0.001) {
+          cur.setHomeBase({ lat: pos.lat, lng: pos.lng }, label)
+        }
+      })
     })
 
     // Drive radius circle
