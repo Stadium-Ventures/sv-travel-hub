@@ -94,8 +94,71 @@ export default function StatusPill() {
             })}
           </div>
           <RecentActivitySection />
+          <SlackRecapAdminSection />
         </div>
       )}
+    </div>
+  )
+}
+
+/** Admin-only "Send weekly Slack recap now" trigger. Hits the same serverless
+ *  endpoint the Monday 6 AM ET cron hits. Requires CRON_SECRET; the user
+ *  pastes it into a small prompt the first time (cached in localStorage) so
+ *  Kent doesn't see this surface unless someone hands him the secret. */
+function SlackRecapAdminSection() {
+  const [status, setStatus] = useState<'idle' | 'sending' | 'ok' | 'err'>('idle')
+  const [errMsg, setErrMsg] = useState<string | null>(null)
+  async function send(mode: 'live' | 'dry') {
+    const stored = (() => { try { return localStorage.getItem('sv-cron-secret') ?? '' } catch { return '' } })()
+    let secret = stored
+    if (!secret) {
+      const entered = window.prompt('Paste CRON_SECRET (one-time; cached locally):')
+      if (!entered) return
+      secret = entered.trim()
+      try { localStorage.setItem('sv-cron-secret', secret) } catch {}
+    }
+    setStatus('sending'); setErrMsg(null)
+    try {
+      const url = `/api/slack-recap?secret=${encodeURIComponent(secret)}${mode === 'dry' ? '&dryRun=1' : ''}`
+      const res = await fetch(url)
+      const body = await res.json()
+      if (!res.ok) {
+        setStatus('err'); setErrMsg(body?.error ?? `HTTP ${res.status}`)
+        if (res.status === 401) try { localStorage.removeItem('sv-cron-secret') } catch {}
+        return
+      }
+      setStatus('ok')
+      if (mode === 'dry') console.log('[slack-recap dry run]', body)
+    } catch (e) {
+      setStatus('err'); setErrMsg(e instanceof Error ? e.message : 'unknown')
+    }
+  }
+  return (
+    <div className="border-t border-border/40">
+      <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-text-dim/60">Slack recap</div>
+      <div className="flex items-center gap-2 px-3 pb-2">
+        <button
+          onClick={() => send('live')}
+          disabled={status === 'sending'}
+          className="rounded-md bg-accent-blue/15 px-2 py-1 text-[10px] font-semibold text-accent-blue hover:bg-accent-blue/25 disabled:opacity-50"
+          title="Post the weekly recap to #travel-schedule now"
+        >
+          {status === 'sending' ? 'Sending…' : 'Post now'}
+        </button>
+        <button
+          onClick={() => send('dry')}
+          disabled={status === 'sending'}
+          className="rounded-md border border-border px-2 py-1 text-[10px] text-text-dim hover:text-text disabled:opacity-50"
+          title="Compute the recap but DON'T post — check the browser console for the message JSON"
+        >
+          Dry run
+        </button>
+        {status === 'ok' && <span className="text-[10px] text-accent-green">✓ done</span>}
+        {status === 'err' && <span className="text-[10px] text-accent-red" title={errMsg ?? ''}>error — see console</span>}
+      </div>
+      <p className="px-3 pb-2 text-[10px] text-text-dim/50 leading-relaxed">
+        Cron runs Monday 6 AM ET automatically. These buttons are for testing or off-schedule recaps.
+      </p>
     </div>
   )
 }

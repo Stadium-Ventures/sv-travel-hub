@@ -22,5 +22,11 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/" }
+  ],
+  "crons": [
+    {
+      "path": "/api/slack-recap",
+      "schedule": "0 10 * * 1"
+    }
   ]
 }
