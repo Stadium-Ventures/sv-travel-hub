@@ -14,7 +14,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 // the browser). Phase 2 will add NCAA via a build-time snapshot.
 //
 // Env vars (all set in Vercel):
-//   SLACK_WEBHOOK_URL_TRAVEL_SCHEDULE  — incoming webhook for #travel-schedule
+//   SLACK_BOT_TOKEN                     — xoxb- token from the "SV Travel Hub"
+//                                          Slack app (chat:write scope)
+//   SLACK_CHANNEL_TRAVEL_SCHEDULE       — channel ID or name (e.g. "C01234"
+//                                          or "#travel-schedule")
 //   CRON_SECRET                         — shared secret to guard the endpoint
 //   VITE_ROSTER_CSV_URL                 — SV roster sheet (CSV)
 //   VITE_SCHEDULE_CSV_URL               — HS + JUCO schedule sheet (CSV)
@@ -77,10 +80,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true'
-  const webhookUrl = process.env.SLACK_WEBHOOK_URL_TRAVEL_SCHEDULE
+  const botToken = process.env.SLACK_BOT_TOKEN
+  const channel = process.env.SLACK_CHANNEL_TRAVEL_SCHEDULE
 
-  if (!dryRun && !webhookUrl) {
-    return res.status(500).json({ error: 'SLACK_WEBHOOK_URL_TRAVEL_SCHEDULE not configured' })
+  if (!dryRun && (!botToken || !channel)) {
+    return res.status(500).json({ error: 'SLACK_BOT_TOKEN and SLACK_CHANNEL_TRAVEL_SCHEDULE must both be configured' })
   }
 
   try {
@@ -100,16 +104,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ dryRun: true, message, weeks, topWindows, overdueCount: overdue.length })
     }
 
-    const slackRes = await fetch(webhookUrl!, {
+    // Post via chat.postMessage (modern Slack app API). Requires the bot
+    // to be a member of the channel — invite it with `/invite @SV Travel Hub`
+    // before the first run.
+    const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: message.text, blocks: message.blocks }),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        Authorization: `Bearer ${botToken}`,
+      },
+      body: JSON.stringify({
+        channel,
+        text: message.text,
+        blocks: message.blocks,
+        unfurl_links: false,
+        unfurl_media: false,
+      }),
     })
-    if (!slackRes.ok) {
-      const body = await slackRes.text()
-      return res.status(502).json({ error: 'Slack webhook failed', status: slackRes.status, body })
+    const slackBody = await slackRes.json() as { ok: boolean; error?: string; ts?: string; channel?: string }
+    if (!slackRes.ok || !slackBody.ok) {
+      return res.status(502).json({ error: 'Slack chat.postMessage failed', status: slackRes.status, body: slackBody })
     }
-    return res.status(200).json({ posted: true })
+    return res.status(200).json({ posted: true, channel: slackBody.channel, ts: slackBody.ts })
   } catch (e) {
     console.error('[slack-recap] handler error:', e)
     return res.status(500).json({ error: e instanceof Error ? e.message : 'unknown error' })
