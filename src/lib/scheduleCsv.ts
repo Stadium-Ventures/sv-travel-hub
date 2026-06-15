@@ -6,6 +6,7 @@
 import Papa from 'papaparse'
 import type { MaxPrepsSchedule, MaxPrepsGame } from './maxpreps'
 import { MAXPREPS_SLUGS } from '../data/maxprepsSlugs'
+import { debugLog } from './debugLog'
 import { HS_VENUE_COORDS } from '../data/hsVenueCoords'
 import { fetchWithTimeout } from './fetchWithTimeout'
 
@@ -270,7 +271,7 @@ export function parseScheduleCsv(csvText: string): ScheduleCsvResult {
     console.warn('[HS-CSV] Unmapped teams in schedule CSV:', unmappedTeams)
   }
 
-  console.log(`[HS-CSV] Parsed ${schedules.size} schools, ${[...schedules.values()].reduce((n, s) => n + s.games.length, 0)} games`)
+  debugLog(`[HS-CSV] Parsed ${schedules.size} schools, ${[...schedules.values()].reduce((n, s) => n + s.games.length, 0)} games`)
 
   return { schedules, unmappedTeams }
 }

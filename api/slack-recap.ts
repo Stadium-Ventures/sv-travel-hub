@@ -50,17 +50,27 @@ interface Game {
   opponent?: string
   tier: number
   level: 'Pro' | 'HS' | 'JUCO' | 'Summer' | 'NCAA'
+  lat?: number
+  lng?: number
+  city?: string
+  state?: string       // 2-letter abbrev where known
 }
 
 interface WindowResult {
   startDate: string
   endDate: string
-  players: Array<{ name: string; tier: number }>
+  regionLabel: string  // e.g. "Sacramento, CA area" — the drivable cluster this trip covers
+  players: Array<{ name: string; tier: number; venueName: string; city?: string; state?: string; date: string }>
   uniquePlayerCount: number
   t1Count: number
   t2Count: number
   t3Count: number
-  topVenues: string[]  // venue names ranked by player-count contribution
+  topVenues: string[]  // "Venue (City, ST)" ranked by player-count contribution
+}
+
+interface WeekTrips {
+  trips: WindowResult[]  // up to 2 distinct-region trips, best first
+  elsewhere: number      // unique players that week not covered by either shown trip
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -94,7 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const games = await loadAllGames(players, today)
 
     const weeks = nextFourWeeks(today)
-    const topWindows = weeks.map((wk) => computeBestWindowInRange(games, wk.start, wk.end))
+    const topWindows = weeks.map((wk) => computeTopTripsInRange(games, wk.start, wk.end))
 
     const overdue = computeOverduePlayers(players, heartbeat, games, today)
 
@@ -247,6 +257,7 @@ async function loadScheduleCsv(players: RosterPlayer[]): Promise<Game[]> {
       opponent: (row[iOpp] ?? '').trim() || undefined,
       tier: p.tier,
       level: p.level === 'HS' ? 'HS' : 'JUCO',
+      state: p.state, // CSV has no coords; player home state lets these cluster by region
     })
   }
   return out
@@ -301,12 +312,16 @@ async function loadProGames(players: RosterPlayer[], start: string, end: string)
       const teamIds = (affData.teams ?? []).map((t) => t.id)
       if (teamIds.length === 0) return
       // Then fetch the schedule for all those teams in the window.
-      const schedResp = await fetch(`https://statsapi.mlb.com/api/v1/schedule?teamId=${teamIds.join(',')}&startDate=${start}&endDate=${end}&sportId=${sportIds}&hydrate=venue`)
+      // hydrate=venue(location) gives us coordinates + city/state so the recap
+      // can cluster games into a real drivable trip and label each venue.
+      const schedResp = await fetch(`https://statsapi.mlb.com/api/v1/schedule?teamId=${teamIds.join(',')}&startDate=${start}&endDate=${end}&sportId=${sportIds}&hydrate=venue(location)`)
       if (!schedResp.ok) return
-      const schedData = await schedResp.json() as { dates?: Array<{ date: string; games?: Array<{ teams?: { home?: { team?: { name?: string } }; away?: { team?: { name?: string } } }; venue?: { name?: string } }> }> }
+      const schedData = await schedResp.json() as { dates?: Array<{ date: string; games?: Array<{ teams?: { home?: { team?: { name?: string } }; away?: { team?: { name?: string } } }; venue?: { name?: string; location?: { city?: string; stateAbbrev?: string; state?: string; defaultCoordinates?: { latitude?: number; longitude?: number } } } }> }> }
       for (const day of schedData.dates ?? []) {
         for (const g of day.games ?? []) {
           const venueName = g.venue?.name ?? 'Unknown'
+          const loc = g.venue?.location
+          const coords = loc?.defaultCoordinates
           const home = g.teams?.home?.team?.name ?? ''
           const away = g.teams?.away?.team?.name ?? ''
           for (const p of orgPlayers) {
@@ -318,6 +333,10 @@ async function loadProGames(players: RosterPlayer[], start: string, end: string)
               opponent: away !== home ? `${away} @ ${home}` : '',
               tier: p.tier,
               level: 'Pro',
+              lat: coords?.latitude,
+              lng: coords?.longitude,
+              city: loc?.city,
+              state: loc?.stateAbbrev ?? loc?.state,
             })
           }
         }
@@ -352,44 +371,157 @@ function nextFourWeeks(today: Date): Array<{ label: string; start: string; end: 
   return weeks
 }
 
-function computeBestWindowInRange(games: Game[], start: string, end: string): WindowResult | null {
-  // Slide a 3-day window through [start, end], pick the window with the
-  // highest tier-weighted unique player count.
+const tierWeight = (tier: number) => (tier === 1 ? 5 : tier === 2 ? 3 : tier === 3 ? 1 : 0)
+
+/** Great-circle distance in miles. */
+function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const R = 3958.8
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat), lat2 = toRad(b.lat)
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+// A 3-day trip is realistically one drivable region. Games whose venues sit
+// within this radius of a cluster's centroid count as the same trip.
+const CLUSTER_RADIUS_MILES = 200
+
+/** Group a window's games into drivable regions. Games with coordinates are
+ *  greedily clustered by distance; games without coordinates (e.g. HS from the
+ *  CSV) fall back to one cluster per home state so they still surface. */
+function clusterGames(games: Game[]): Game[][] {
+  const coordGames = games.filter((g) => typeof g.lat === 'number' && typeof g.lng === 'number')
+  const noCoord = games.filter((g) => typeof g.lat !== 'number' || typeof g.lng !== 'number')
+
+  const clusters: Array<{ centroid: { lat: number; lng: number }; games: Game[] }> = []
+  for (const g of coordGames) {
+    const pt = { lat: g.lat!, lng: g.lng! }
+    let target = clusters.find((c) => haversineMiles(c.centroid, pt) <= CLUSTER_RADIUS_MILES)
+    if (!target) {
+      target = { centroid: pt, games: [] }
+      clusters.push(target)
+    }
+    target.games.push(g)
+    // Recompute centroid as the running mean.
+    const n = target.games.length
+    target.centroid = {
+      lat: target.games.reduce((s, x) => s + x.lat!, 0) / n,
+      lng: target.games.reduce((s, x) => s + x.lng!, 0) / n,
+    }
+  }
+
+  const result: Game[][] = clusters.map((c) => c.games)
+
+  // State-bucket the coordinate-less games.
+  const byState = new Map<string, Game[]>()
+  for (const g of noCoord) {
+    const key = g.state || 'Unknown'
+    const list = byState.get(key) ?? []
+    list.push(g)
+    byState.set(key, list)
+  }
+  for (const list of byState.values()) result.push(list)
+
+  return result
+}
+
+/** Pick a human region label for a cluster from its venues' cities/states. */
+function regionLabel(games: Game[]): string {
+  const cityCounts = new Map<string, number>()   // "City, ST"
+  const stateCounts = new Map<string, number>()
+  for (const g of games) {
+    if (g.city && g.state) cityCounts.set(`${g.city}, ${g.state}`, (cityCounts.get(`${g.city}, ${g.state}`) ?? 0) + 1)
+    if (g.state) stateCounts.set(g.state, (stateCounts.get(g.state) ?? 0) + 1)
+  }
+  const topCity = [...cityCounts.entries()].sort((a, b) => b[1] - a[1])[0]
+  const topState = [...stateCounts.entries()].sort((a, b) => b[1] - a[1])[0]
+  if (cityCounts.size === 1 && topCity) return `${topCity[0]} area`
+  if (topState) {
+    // Multiple cities in one dominant state → "<ST> area"; lead with the busiest city.
+    if (topCity && stateCounts.size === 1) return `${topCity[0]} area`
+    return topState[0]
+  }
+  // No location info at all — fall back to the venue with the most games.
+  const venueCounts = new Map<string, number>()
+  for (const g of games) venueCounts.set(g.venueName, (venueCounts.get(g.venueName) ?? 0) + 1)
+  const topVenue = [...venueCounts.entries()].sort((a, b) => b[1] - a[1])[0]
+  return topVenue ? topVenue[0] : 'Unknown region'
+}
+
+function venueWithCity(g: Game): string {
+  return g.city && g.state ? `${g.venueName} (${g.city}, ${g.state})` : g.venueName
+}
+
+/** Turn one drivable cluster (already date-windowed) into a scored trip. */
+function clusterToTrip(cluster: Game[], wStart: string, wEnd: string): { trip: WindowResult; score: number; players: Set<string> } {
+  // Earliest in-cluster game per player; tier = best (lowest) tier seen.
+  const earliest = new Map<string, Game>()
+  const tierByPlayer = new Map<string, number>()
+  const venueCounts = new Map<string, number>()
+  for (const g of cluster) {
+    const cur = earliest.get(g.player)
+    if (!cur || g.date < cur.date) earliest.set(g.player, g)
+    const t = tierByPlayer.get(g.player)
+    if (t === undefined || g.tier < t) tierByPlayer.set(g.player, g.tier)
+    venueCounts.set(venueWithCity(g), (venueCounts.get(venueWithCity(g)) ?? 0) + 1)
+  }
+  let score = 0, t1 = 0, t2 = 0, t3 = 0
+  const players: WindowResult['players'] = []
+  for (const [name, g] of earliest) {
+    const tier = tierByPlayer.get(name)!
+    players.push({ name, tier, venueName: g.venueName, city: g.city, state: g.state, date: g.date })
+    score += tierWeight(tier)
+    if (tier === 1) t1++; else if (tier === 2) t2++; else if (tier === 3) t3++
+  }
+  players.sort((a, b) => (a.tier - b.tier) || a.date.localeCompare(b.date))
+  const topVenues = [...venueCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map((e) => e[0])
+  return {
+    trip: {
+      startDate: wStart, endDate: wEnd, regionLabel: regionLabel(cluster),
+      players, uniquePlayerCount: earliest.size, t1Count: t1, t2Count: t2, t3Count: t3, topVenues,
+    },
+    score,
+    players: new Set(earliest.keys()),
+  }
+}
+
+function computeTopTripsInRange(games: Game[], start: string, end: string): WeekTrips {
+  // Slide a 3-day window through [start, end]. Within each window, cluster
+  // games into drivable regions and score each region by tier-weighted unique
+  // players. Surface the best TWO distinct-region trips of the week (a real
+  // itinerary Kent can pick from), not a nationwide headcount no trip covers.
   const inRange = games.filter((g) => g.date >= start && g.date <= end)
-  if (inRange.length === 0) return null
+  if (inRange.length === 0) return { trips: [], elsewhere: 0 }
   const days: string[] = []
   for (let d = new Date(start + 'T00:00:00Z'); isoDate(d) <= end; d.setUTCDate(d.getUTCDate() + 1)) {
     days.push(isoDate(d))
   }
-  let best: WindowResult | null = null
-  let bestScore = -1
+
+  const candidates: Array<{ trip: WindowResult; score: number; players: Set<string> }> = []
   for (let i = 0; i < days.length - 2; i++) {
     const wStart = days[i]!, wEnd = days[i + 2]!
     const inWin = inRange.filter((g) => g.date >= wStart && g.date <= wEnd)
     if (inWin.length === 0) continue
-    const playerMap = new Map<string, number>() // name → tier
-    const venueCounts = new Map<string, number>()
-    for (const g of inWin) {
-      const existing = playerMap.get(g.player)
-      if (existing === undefined || g.tier < existing) playerMap.set(g.player, g.tier)
-      venueCounts.set(g.venueName, (venueCounts.get(g.venueName) ?? 0) + 1)
-    }
-    let score = 0, t1 = 0, t2 = 0, t3 = 0
-    const players: Array<{ name: string; tier: number }> = []
-    for (const [name, tier] of playerMap) {
-      players.push({ name, tier })
-      score += tier === 1 ? 5 : tier === 2 ? 3 : tier === 3 ? 1 : 0
-      if (tier === 1) t1++
-      else if (tier === 2) t2++
-      else if (tier === 3) t3++
-    }
-    const topVenues = Array.from(venueCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map((e) => e[0])
-    if (score > bestScore) {
-      bestScore = score
-      best = { startDate: wStart, endDate: wEnd, players, uniquePlayerCount: playerMap.size, t1Count: t1, t2Count: t2, t3Count: t3, topVenues }
-    }
+    for (const cluster of clusterGames(inWin)) candidates.push(clusterToTrip(cluster, wStart, wEnd))
   }
-  return best
+  if (candidates.length === 0) return { trips: [], elsewhere: 0 }
+
+  // Best candidate per region (a region can recur across overlapping windows).
+  const bestByRegion = new Map<string, { trip: WindowResult; score: number; players: Set<string> }>()
+  for (const c of candidates) {
+    const prev = bestByRegion.get(c.trip.regionLabel)
+    if (!prev || c.score > prev.score) bestByRegion.set(c.trip.regionLabel, c)
+  }
+  const ranked = [...bestByRegion.values()].sort((a, b) => b.score - a.score).slice(0, 2)
+
+  const covered = new Set<string>()
+  for (const c of ranked) for (const p of c.players) covered.add(p)
+  const weekPlayers = new Set(inRange.map((g) => g.player))
+  const elsewhere = weekPlayers.size - covered.size
+
+  return { trips: ranked.map((c) => c.trip), elsewhere }
 }
 
 function computeOverduePlayers(
@@ -427,7 +559,7 @@ function computeOverduePlayers(
 // ─── Message composition ────────────────────────────────────────────────────
 
 function composeSlackMessage(
-  windows: Array<WindowResult | null>,
+  windows: WeekTrips[],
   weeks: Array<{ label: string; start: string; end: string }>,
   overdue: Array<{ player: RosterPlayer; daysSince: number; nextGame: Game | null }>,
   rosterSize: number,
@@ -436,20 +568,38 @@ function composeSlackMessage(
   lines.push(`*🗓️ Travel Hub recap*`)
   lines.push('')
 
-  lines.push('*Best 3-day windows in the next 4 weeks:*')
+  lines.push('*Best 3-day trips in the next 4 weeks:*')
   for (let i = 0; i < weeks.length; i++) {
-    const wk = weeks[i]!, w = windows[i]
-    if (!w) {
-      lines.push(`• ${wk.label} — no SV games in window`)
+    const wk = weeks[i]!, week = windows[i]!
+    if (!week || week.trips.length === 0) {
+      lines.push(`• ${wk.label} — no SV games`)
       continue
     }
-    const tierBits: string[] = []
-    if (w.t1Count > 0) tierBits.push(`${w.t1Count} T1`)
-    if (w.t2Count > 0) tierBits.push(`${w.t2Count} T2`)
-    if (w.t3Count > 0) tierBits.push(`${w.t3Count} T3`)
-    const tierStr = tierBits.length > 0 ? ` (${tierBits.join(' · ')})` : ''
-    const venuesStr = w.topVenues.length > 0 ? ` — ${w.topVenues.slice(0, 3).join(', ')}` : ''
-    lines.push(`• ${shortDate(new Date(w.startDate + 'T00:00:00Z'))}–${shortDate(new Date(w.endDate + 'T00:00:00Z'))}: *${w.uniquePlayerCount} players*${tierStr}${venuesStr}`)
+    week.trips.forEach((w, idx) => {
+      const tierBits: string[] = []
+      if (w.t1Count > 0) tierBits.push(`${w.t1Count} T1`)
+      if (w.t2Count > 0) tierBits.push(`${w.t2Count} T2`)
+      if (w.t3Count > 0) tierBits.push(`${w.t3Count} T3`)
+      const tierStr = tierBits.length > 0 ? ` (${tierBits.join(' · ')})` : ''
+      const dateRange = `${shortDate(new Date(w.startDate + 'T00:00:00Z'))}–${shortDate(new Date(w.endDate + 'T00:00:00Z'))}`
+      const prefix = idx === 0 ? '•' : '◦'
+      lines.push(`${prefix} *${w.regionLabel}* · ${dateRange} — *${w.uniquePlayerCount} players*${tierStr}`)
+
+      // Name the players Kent prioritizes (T1/T2) with where + which day.
+      const named = w.players.filter((p) => p.tier <= 2)
+      const shown = named.slice(0, 8)
+      for (const p of shown) {
+        const tag = p.tier === 1 ? 'T1' : 'T2'
+        const day = weekday(new Date(p.date + 'T00:00:00Z'))
+        const loc = p.city && p.state ? `${p.venueName}, ${p.city}` : p.venueName
+        lines.push(`     ↳ ${tag} *${p.name}* — ${loc} (${day})`)
+      }
+      const extras: string[] = []
+      if (named.length > shown.length) extras.push(`+${named.length - shown.length} more T1/T2`)
+      if (w.t3Count > 0) extras.push(`${w.t3Count} T3`)
+      if (extras.length > 0) lines.push(`     ↳ _${extras.join(' · ')}_`)
+    })
+    if (week.elsewhere > 0) lines.push(`     _+${week.elsewhere} more players elsewhere this week_`)
   }
   lines.push('')
 
@@ -457,8 +607,10 @@ function composeSlackMessage(
     lines.push(`*🔥 Overdue T1/T2 with upcoming games (${overdue.length}):*`)
     for (const r of overdue.slice(0, 6)) {
       const tierTag = r.player.tier === 1 ? 'T1' : 'T2'
-      const nextStr = r.nextGame
-        ? ` — next ${shortDate(new Date(r.nextGame.date + 'T00:00:00Z'))} at ${r.nextGame.venueName}`
+      const ng = r.nextGame
+      const ngLoc = ng ? (ng.city && ng.state ? `${ng.venueName}, ${ng.city}, ${ng.state}` : ng.venueName) : ''
+      const nextStr = ng
+        ? ` — next ${shortDate(new Date(ng.date + 'T00:00:00Z'))} (${weekday(new Date(ng.date + 'T00:00:00Z'))}) at ${ngLoc}`
         : ' — no game in next 5 weeks'
       lines.push(`• ${tierTag} *${r.player.name}* (${r.daysSince}d since visit)${nextStr}`)
     }
@@ -533,4 +685,8 @@ function normalizeIsoDate(s: string): string {
 function shortDate(d: Date): string {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`
+}
+
+function weekday(d: Date): string {
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()]!
 }

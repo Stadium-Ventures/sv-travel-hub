@@ -4,6 +4,7 @@ import type { Coordinates } from '../types/roster'
 import type { TripPlan } from '../types/schedule'
 import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, DEFAULT_HOME_BASE } from '../lib/tripEngine'
 import { findDoubleUps } from '../lib/doubleUps'
+import { debugLog } from '../lib/debugLog'
 import type { UrgencyMap } from '../lib/tripEngine'
 import type { WorkerParams, WorkerMessage } from '../lib/tripEngine.worker'
 import { useRosterStore } from './rosterStore'
@@ -268,12 +269,12 @@ export const useTripStore = create<TripState>()(
     const hsPlayers = players.filter((p) => p.level === 'HS')
     if (hsPlayers.length > 0) {
       const hsInAll = allGames.filter((g) => g.source === 'hs-lookup')
-      console.log(`[HS-DEBUG] HS games in allGames: ${hsInAll.length}, realHsGames: ${realHsGames.length}, hsSynthetic: ${hsSyntheticEvents.length}`)
+      debugLog(`[HS-DEBUG] HS games in allGames: ${hsInAll.length}, realHsGames: ${realHsGames.length}, hsSynthetic: ${hsSyntheticEvents.length}`)
       for (const p of hsPlayers) {
         const playerGames = allGames.filter((g) => g.playerNames.includes(p.playerName))
         const inRange = playerGames.filter((g) => g.date >= startDate && g.date <= endDate)
         if (playerGames.length > 0 || inRange.length === 0) {
-          console.log(`[HS-DEBUG] ${p.playerName}: ${playerGames.length} total games, ${inRange.length} in range (${startDate} to ${endDate})${playerGames.length > 0 ? `, dates: ${playerGames[0]!.date} to ${playerGames[playerGames.length - 1]!.date}` : ''}`)
+          debugLog(`[HS-DEBUG] ${p.playerName}: ${playerGames.length} total games, ${inRange.length} in range (${startDate} to ${endDate})${playerGames.length > 0 ? `, dates: ${playerGames[0]!.date} to ${playerGames[playerGames.length - 1]!.date}` : ''}`)
         }
       }
     }

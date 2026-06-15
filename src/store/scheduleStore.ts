@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { idbStorage } from '../lib/idbStorage'
+import { debugLog } from '../lib/debugLog'
 import type { MLBAffiliate, MLBGameRaw, MLBTransaction } from '../lib/mlbApi'
 import { fetchAllAffiliates, fetchAllSchedules, fetchAllTransactions, fetchAllRosters } from '../lib/mlbApi'
 import { MLB_PARENT_IDS, resolveNcaaName, resolveMLBTeamId } from '../data/aliases'
@@ -1075,8 +1076,8 @@ export const useScheduleStore = create<ScheduleState>()(
         }
       },
       fetchHsSchedules: async (playerOrgs, { merge = false, forceRefresh: _forceRefresh = false } = {}) => {
-        console.log(`[HS-ENTRY] fetchHsSchedules called with ${playerOrgs.length} players, hsLoading=${get().hsLoading}`)
-        if (get().hsLoading) { console.log('[HS-ENTRY] SKIPPED — already loading'); return }
+        debugLog(`[HS-ENTRY] fetchHsSchedules called with ${playerOrgs.length} players, hsLoading=${get().hsLoading}`)
+        if (get().hsLoading) { debugLog('[HS-ENTRY] SKIPPED — already loading'); return }
 
         // CSV is the SOLE source of truth for HS schedules. The previous
         // bundled fallback was a 2.5-month-old snapshot that could silently
@@ -1086,7 +1087,7 @@ export const useScheduleStore = create<ScheduleState>()(
         try {
           const result = await fetchScheduleCsv()
           csvSchedules = result.schedules
-          console.log(`[HS] CSV fetch OK: ${csvSchedules.size} schools`)
+          debugLog(`[HS] CSV fetch OK: ${csvSchedules.size} schools`)
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           console.error('[HS] CSV fetch failed:', msg)
@@ -1118,7 +1119,7 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
-          console.log(`[HS-KEY] ${playerName}: "${org}|${state}" → "${key}" (csv: ${csvSchedules.has(key)}, coords: ${!!HS_VENUE_COORDS[key]})`)
+          debugLog(`[HS-KEY] ${playerName}: "${org}|${state}" → "${key}" (csv: ${csvSchedules.has(key)}, coords: ${!!HS_VENUE_COORDS[key]})`)
           const existing = schoolToPlayers.get(key)
           if (existing) existing.push(playerName)
           else schoolToPlayers.set(key, [playerName])
@@ -1193,11 +1194,11 @@ export const useScheduleStore = create<ScheduleState>()(
               }
               if (hc) {
                 homeVenue = { name: hc.name, coords: { lat: hc.lat, lng: hc.lng } }
-                console.log(`[HS-VENUE] ${schoolKey}: using hardcoded coords [${hc.lat}, ${hc.lng}]`)
+                debugLog(`[HS-VENUE] ${schoolKey}: using hardcoded coords [${hc.lat}, ${hc.lng}]`)
               }
             }
 
-            console.log(`[HS-VENUE] ${schoolKey}: venue=${homeVenue ? homeVenue.name : 'NONE'}, games=${schedule.games.length}`)
+            debugLog(`[HS-VENUE] ${schoolKey}: venue=${homeVenue ? homeVenue.name : 'NONE'}, games=${schedule.games.length}`)
             const normalizedSchoolOrg = (schoolOrg ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
             if (!homeVenue) for (const [vKey, v] of Object.entries(venueState)) {
               if (v.source === 'hs-geocoded') {
@@ -1291,8 +1292,8 @@ export const useScheduleStore = create<ScheduleState>()(
               playerGameCounts.set(n, (playerGameCounts.get(n) ?? 0) + 1)
             }
           }
-          console.log(`[HS] Conversion complete: ${allGames.length} games from ${schedules.size} schools, ${failedSchools.length} failed`)
-          console.log(`[HS] Per-player: ${[...playerGameCounts.entries()].map(([n, c]) => `${n}:${c}`).join(', ')}`)
+          debugLog(`[HS] Conversion complete: ${allGames.length} games from ${schedules.size} schools, ${failedSchools.length} failed`)
+          debugLog(`[HS] Per-player: ${[...playerGameCounts.entries()].map(([n, c]) => `${n}:${c}`).join(', ')}`)
           // Flag players in roster but missing from games
           for (const [, players] of schoolToPlayers) {
             for (const name of players) {
