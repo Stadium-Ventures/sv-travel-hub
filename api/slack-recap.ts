@@ -448,35 +448,34 @@ function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: 
   return 2 * R * Math.asin(Math.sqrt(h))
 }
 
-// A 3-day trip is realistically one drivable region. Games whose venues sit
-// within this radius of a cluster's centroid count as the same trip.
-const CLUSTER_RADIUS_MILES = 200
+// Max distance between ANY two venues in one trip (~3h drive). Complete-linkage
+// (below) enforces this as the cluster DIAMETER, so a 3-day trip can't sprawl
+// across an entire region.
+const CLUSTER_RADIUS_MILES = 175
 
-/** Group a window's games into drivable regions. Games with coordinates are
- *  greedily clustered by distance; games without coordinates (e.g. HS from the
- *  CSV) fall back to one cluster per home state so they still surface. */
+/** Group a window's games into drivable regions via complete-linkage: a game
+ *  joins a cluster only if its venue is within CLUSTER_RADIUS_MILES of EVERY
+ *  game already in that cluster. This caps the cluster's diameter at the radius
+ *  — unlike centroid clustering, which let a trip "chain" outward (Boston →
+ *  Baltimore was landing in one cluster). Coordinate-less games (e.g. HS from
+ *  the CSV) fall back to one cluster per home state so they still surface. */
 function clusterGames(games: Game[]): Game[][] {
   const coordGames = games.filter((g) => typeof g.lat === 'number' && typeof g.lng === 'number')
   const noCoord = games.filter((g) => typeof g.lat !== 'number' || typeof g.lng !== 'number')
 
-  const clusters: Array<{ centroid: { lat: number; lng: number }; games: Game[] }> = []
+  const clusters: Game[][] = []
   for (const g of coordGames) {
     const pt = { lat: g.lat!, lng: g.lng! }
-    let target = clusters.find((c) => haversineMiles(c.centroid, pt) <= CLUSTER_RADIUS_MILES)
-    if (!target) {
-      target = { centroid: pt, games: [] }
-      clusters.push(target)
+    let target: Game[] | undefined
+    for (const c of clusters) {
+      if (c.every((m) => haversineMiles({ lat: m.lat!, lng: m.lng! }, pt) <= CLUSTER_RADIUS_MILES)) {
+        target = c
+        break
+      }
     }
-    target.games.push(g)
-    // Recompute centroid as the running mean.
-    const n = target.games.length
-    target.centroid = {
-      lat: target.games.reduce((s, x) => s + x.lat!, 0) / n,
-      lng: target.games.reduce((s, x) => s + x.lng!, 0) / n,
-    }
+    if (!target) { target = []; clusters.push(target) }
+    target.push(g)
   }
-
-  const result: Game[][] = clusters.map((c) => c.games)
 
   // State-bucket the coordinate-less games.
   const byState = new Map<string, Game[]>()
@@ -486,9 +485,9 @@ function clusterGames(games: Game[]): Game[][] {
     list.push(g)
     byState.set(key, list)
   }
-  for (const list of byState.values()) result.push(list)
+  for (const list of byState.values()) clusters.push(list)
 
-  return result
+  return clusters
 }
 
 // Friendly metro names for the busiest city in a cluster, so the recap reads
@@ -534,12 +533,11 @@ function regionLabel(games: Game[]): string {
   }
   const topCity = [...cityCounts.entries()].sort((a, b) => b[1] - a[1])[0]
   const topState = [...stateCounts.entries()].sort((a, b) => b[1] - a[1])[0]
-  if (cityCounts.size === 1 && topCity) return cityAreaLabel(topCity[0])
-  if (topState) {
-    // Multiple cities in one dominant state → metro/"<City> area"; lead with the busiest city.
-    if (topCity && stateCounts.size === 1) return cityAreaLabel(topCity[0])
-    return topState[0]
-  }
+  // Lead with the busiest city's metro/area label. Clusters are now tight
+  // (complete-linkage) so the busiest city fairly represents the whole trip —
+  // far better than a bare "NY"/"OH" state code.
+  if (topCity) return cityAreaLabel(topCity[0])
+  if (topState) return topState[0]
   // No location info at all — fall back to the venue with the most games.
   const venueCounts = new Map<string, number>()
   for (const g of games) venueCounts.set(g.venueName, (venueCounts.get(g.venueName) ?? 0) + 1)
