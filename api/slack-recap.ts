@@ -138,6 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
     const slackBody = await slackRes.json() as { ok: boolean; error?: string; ts?: string; channel?: string }
     if (!slackRes.ok || !slackBody.ok) {
+      console.error('[slack-recap] chat.postMessage failed:', slackRes.status, JSON.stringify(slackBody))
       return res.status(502).json({ error: 'Slack chat.postMessage failed', status: slackRes.status, body: slackBody })
     }
     return res.status(200).json({ posted: true, channel: slackBody.channel, ts: slackBody.ts })
@@ -733,12 +734,27 @@ function composeSlackMessage(
   lines.push(`_${rosterSize} clients · NCAA coverage coming in a follow-up_`)
 
   const text = lines.join('\n')
-  return {
-    text,
-    blocks: [
-      { type: 'section', text: { type: 'mrkdwn', text } },
-    ],
+  return { text, blocks: buildBlocks(text) }
+}
+
+/** Split a long message into multiple Slack section blocks. A single section's
+ *  mrkdwn text is capped at 3000 chars by Slack (exceeding it → invalid_blocks,
+ *  which is what broke the verbose recap). We chunk on line boundaries, keeping
+ *  each block comfortably under the limit. */
+function buildBlocks(text: string): Array<{ type: 'section'; text: { type: 'mrkdwn'; text: string } }> {
+  const MAX = 2900
+  const blocks: Array<{ type: 'section'; text: { type: 'mrkdwn'; text: string } }> = []
+  let buf = ''
+  for (const line of text.split('\n')) {
+    if (buf.length > 0 && (buf.length + 1 + line.length) > MAX) {
+      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buf } })
+      buf = line
+    } else {
+      buf = buf ? `${buf}\n${line}` : line
+    }
   }
+  if (buf.length > 0) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buf } })
+  return blocks
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
