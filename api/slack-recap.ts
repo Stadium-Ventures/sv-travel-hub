@@ -516,6 +516,9 @@ const CITY_METRO: Record<string, string> = {
   'newark, nj': 'NYC area', 'jersey city, nj': 'NYC area',
   // Chicago
   'chicago, il': 'Chicago area', 'schaumburg, il': 'Chicago area',
+  // A few common MiLB towns → their recognizable metro
+  'moosic, pa': 'Scranton area', 'allentown, pa': 'Lehigh Valley',
+  'wappingers falls, ny': 'Hudson Valley', 'sacramento, ca': 'Sacramento area',
 }
 
 /** "City, ST" → friendly metro name, or `${city} area` fallback. */
@@ -531,11 +534,17 @@ function regionLabel(games: Game[]): string {
     if (g.city && g.state) cityCounts.set(`${g.city}, ${g.state}`, (cityCounts.get(`${g.city}, ${g.state}`) ?? 0) + 1)
     if (g.state) stateCounts.set(g.state, (stateCounts.get(g.state) ?? 0) + 1)
   }
+  // Prefer a recognizable metro if ANY venue in the cluster maps to one — so a
+  // cluster anchored by Yankee Stadium reads "NYC area", not "Bridgewater, NJ".
+  const metroCounts = new Map<string, number>()
+  for (const [cs, n] of cityCounts) {
+    const metro = CITY_METRO[cs.toLowerCase()]
+    if (metro) metroCounts.set(metro, (metroCounts.get(metro) ?? 0) + n)
+  }
+  const topMetro = [...metroCounts.entries()].sort((a, b) => b[1] - a[1])[0]
+  if (topMetro) return topMetro[0]
   const topCity = [...cityCounts.entries()].sort((a, b) => b[1] - a[1])[0]
   const topState = [...stateCounts.entries()].sort((a, b) => b[1] - a[1])[0]
-  // Lead with the busiest city's metro/area label. Clusters are now tight
-  // (complete-linkage) so the busiest city fairly represents the whole trip —
-  // far better than a bare "NY"/"OH" state code.
   if (topCity) return cityAreaLabel(topCity[0])
   if (topState) return topState[0]
   // No location info at all — fall back to the venue with the most games.
@@ -664,38 +673,24 @@ function composeSlackMessage(
   lines.push(`*🗓️ Travel Hub recap*`)
   lines.push('')
 
-  lines.push('*Best 3-day trips in the next 4 weeks:*')
+  lines.push('*Best 3-day trip each week:*')
   for (let i = 0; i < weeks.length; i++) {
     const wk = weeks[i]!, week = windows[i]!
     if (!week || week.trips.length === 0) {
       lines.push(`• ${wk.label} — no SV games`)
       continue
     }
-    week.trips.forEach((w, idx) => {
-      const tierBits: string[] = []
-      if (w.t1Count > 0) tierBits.push(`${w.t1Count} T1`)
-      if (w.t2Count > 0) tierBits.push(`${w.t2Count} T2`)
-      if (w.t3Count > 0) tierBits.push(`${w.t3Count} T3`)
-      const tierStr = tierBits.length > 0 ? ` (${tierBits.join(' · ')})` : ''
-      const dateRange = `${shortDate(new Date(w.startDate + 'T00:00:00Z'))}–${shortDate(new Date(w.endDate + 'T00:00:00Z'))}`
-      const prefix = idx === 0 ? '•' : '◦'
-      lines.push(`${prefix} *${w.regionLabel}* · ${dateRange} — *${w.uniquePlayerCount} players*${tierStr}`)
-
-      // Name the players Kent prioritizes (T1/T2) with where + which day.
-      const named = w.players.filter((p) => p.tier <= 2)
-      const shown = named.slice(0, 8)
-      for (const p of shown) {
-        const tag = p.tier === 1 ? 'T1' : 'T2'
-        const day = weekday(new Date(p.date + 'T00:00:00Z'))
-        const loc = p.city && p.state ? `${p.venueName}, ${p.city}` : p.venueName
-        lines.push(`     ↳ ${tag} *${p.name}* — ${loc} (${day})`)
-      }
-      const extras: string[] = []
-      if (named.length > shown.length) extras.push(`+${named.length - shown.length} more T1/T2`)
-      if (w.t3Count > 0) extras.push(`${w.t3Count} T3`)
-      if (extras.length > 0) lines.push(`     ↳ _${extras.join(' · ')}_`)
-    })
-    if (week.elsewhere > 0) lines.push(`     _+${week.elsewhere} more players elsewhere this week_`)
+    // One scannable line per week: dates · region — N players · marquee names.
+    // The full who/where/when breakdown lives in the app (link below).
+    const w = week.trips[0]!
+    const dateRange = `${shortDate(new Date(w.startDate + 'T00:00:00Z'))}–${shortDate(new Date(w.endDate + 'T00:00:00Z'))}`
+    const t1s = w.players.filter((p) => p.tier === 1)
+    const pick = (t1s.length > 0 ? t1s : w.players).slice(0, 3)
+    const more = w.uniquePlayerCount - pick.length
+    const names = pick.map((p) => p.name).join(', ') + (more > 0 ? ` +${more}` : '')
+    const t1Str = w.t1Count > 0 ? ` · ${w.t1Count} T1` : ''
+    lines.push(`• *${dateRange}* · *${w.regionLabel}* — ${w.uniquePlayerCount} players${t1Str}`)
+    lines.push(`     ${names}`)
   }
   lines.push('')
 
