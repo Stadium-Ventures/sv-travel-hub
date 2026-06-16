@@ -429,7 +429,7 @@ export default function MapContainer({ tierMarkers, colorBy, fitToMarkersKey }: 
   }, [loaded, selectedTripIndex, tripPlan, homeBase])
 
   return (
-    <div className="relative w-full rounded-lg border border-border" style={{ height: 'calc(100vh - 160px)', minHeight: '500px' }}>
+    <div className="relative h-full w-full rounded-lg border border-border" style={{ minHeight: '500px' }}>
       <div ref={mapRef} className="absolute inset-0 rounded-lg" />
 
       {/* Floating drive-radius chip — placed adjacent to the dashed circle

@@ -154,9 +154,12 @@ export default function MapView() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
-      {/* Compact help disclosure replaces the old "Start here" welcome
-          banner + rotating TIP line. Reclaims ~120px of vertical space so
-          the map is closer to the fold. Click "?" to expand the guide. */}
+      {/* Help + the wide control strips stay full-width across the top so the
+          date/origin/filter rows don't get cramped. Everything below splits
+          into a two-pane layout: a scrolling recommendations rail on the left
+          and a sticky, always-visible map on the right. The map used to live
+          ~1,250px down the page (below both recommenders); pinning it keeps
+          the namesake feature in view while Kent reads the picks. */}
       <MapHelp />
 
       {/* Schedule banner */}
@@ -189,68 +192,81 @@ export default function MapView() {
         />
       )}
 
-      {/* Summer coverage gap — only renders if any SV player is in a
-          non-live summer league (e.g. PGCBL, NECBL, Northwoods). */}
-      <SummerCoverageNotice />
+      {/* Two-pane: recommendations rail (left) · sticky map (right). */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+        {/* ── Left rail: recommendations (scrolls with the page) ── */}
+        <div className="flex flex-col gap-3 lg:w-[460px] lg:shrink-0">
+          {/* Summer coverage gap — only renders if any SV player is in a
+              non-live summer league (e.g. PGCBL, NECBL, Northwoods). */}
+          <SummerCoverageNotice />
 
-      {/* Trip preview banner — shown when a Trip Card highlighted itself on the map */}
-      {selectedTripIndex != null && tripPlan && tripPlan.trips[selectedTripIndex] && (
-        <div className="flex items-center justify-between rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs">
-          <span className="text-yellow-200">
-            Previewing <strong>Trip #{selectedTripIndex + 1}</strong>
-            {tripPlan.trips[selectedTripIndex]!.anchorGame.venue.name && (
-              <span className="text-yellow-200/70"> · {tripPlan.trips[selectedTripIndex]!.anchorGame.venue.name}</span>
-            )}
-          </span>
-          <button
-            onClick={() => useTripStore.getState().setSelectedTripIndex(null)}
-            className="text-yellow-200/80 hover:text-yellow-200 underline-offset-2 hover:underline"
-          >
-            clear preview
-          </button>
+          {/* Trip preview banner — shown when a Trip Card highlighted itself on the map */}
+          {selectedTripIndex != null && tripPlan && tripPlan.trips[selectedTripIndex] && (
+            <div className="flex items-center justify-between rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs">
+              <span className="text-yellow-200">
+                Previewing <strong>Trip #{selectedTripIndex + 1}</strong>
+                {tripPlan.trips[selectedTripIndex]!.anchorGame.venue.name && (
+                  <span className="text-yellow-200/70"> · {tripPlan.trips[selectedTripIndex]!.anchorGame.venue.name}</span>
+                )}
+              </span>
+              <button
+                onClick={() => useTripStore.getState().setSelectedTripIndex(null)}
+                className="text-yellow-200/80 hover:text-yellow-200 underline-offset-2 hover:underline"
+              >
+                clear preview
+              </button>
+            </div>
+          )}
+
+          {/* Best window recommender — Use button sets the dates AND jumps
+              straight to the Trip Planner with Generate Trips queued. Kent's
+              mental flow is pick window → plan trip; chain them. */}
+          {hasSchedules && tierMarkers.length > 0 && (
+            <BestWindowsPanel
+              windows={bestWindows}
+              windowDays={windowDays}
+              setWindowDays={setWindowDays}
+              strategy={bestWindowStrategy}
+              setStrategy={setBestWindowStrategy}
+              onApply={(w) => {
+                setFilterStart(w.startDate)
+                setFilterEnd(w.endDate)
+                // Jump to Trip Planner; the planner picks up the new dates from
+                // the shared trip store and we kick off generation after a brief
+                // delay so the date state propagates before generateTrips reads it.
+                dispatchMapEvent('app:switch-tab', { tab: 'trips' })
+                setTimeout(() => {
+                  useTripStore.getState().generateTrips().catch((e) => console.warn('[map] auto-generate after Use Window failed:', e))
+                }, 100)
+              }}
+            />
+          )}
+
+          {/* Where to go? — destination-anchored recommender. Surfaces the top
+              cities to visit nationally, not just what's reachable from the
+              current From city. Especially valuable when the Best Windows panel
+              shows thin coverage from where you are. */}
+          {hasSchedules && allTierMarkers.length > 0 && (
+            <WhereToGoPanel picks={destinationPicks} />
+          )}
         </div>
-      )}
 
-      {/* Best window recommender — Use button sets the dates AND jumps
-          straight to the Trip Planner with Generate Trips queued. Kent's
-          mental flow is pick window → plan trip; chain them. */}
-      {hasSchedules && tierMarkers.length > 0 && (
-        <BestWindowsPanel
-          windows={bestWindows}
-          windowDays={windowDays}
-          setWindowDays={setWindowDays}
-          strategy={bestWindowStrategy}
-          setStrategy={setBestWindowStrategy}
-          onApply={(w) => {
-            setFilterStart(w.startDate)
-            setFilterEnd(w.endDate)
-            // Jump to Trip Planner; the planner picks up the new dates from
-            // the shared trip store and we kick off generation after a brief
-            // delay so the date state propagates before generateTrips reads it.
-            dispatchMapEvent('app:switch-tab', { tab: 'trips' })
-            setTimeout(() => {
-              useTripStore.getState().generateTrips().catch((e) => console.warn('[map] auto-generate after Use Window failed:', e))
-            }, 100)
-          }}
-        />
-      )}
-
-      {/* Where to go? — destination-anchored recommender. Surfaces the top
-          cities to visit nationally, not just what's reachable from the
-          current From city. Especially valuable when the Best Windows panel
-          shows thin coverage from where you are. */}
-      {hasSchedules && allTierMarkers.length > 0 && (
-        <WhereToGoPanel picks={destinationPicks} />
-      )}
-
-      {/* Map — when a specific player is selected, fitToMarkersKey changes,
-          telling MapContainer to zoom to wherever that player's venues are.
-          ("Find Jake Munroe for me.") */}
-      <MapContainer
-        tierMarkers={tierMarkers}
-        colorBy={filterState.colorBy}
-        fitToMarkersKey={filterState.selectedPlayer || undefined}
-      />
+        {/* ── Right: sticky map. Fills the viewport height and pins in place
+            on desktop so it stays visible while the left rail scrolls. On
+            mobile it stacks below with a fixed height. ── */}
+        <div className="min-w-0 flex-1">
+          <div className="h-[calc(100vh-180px)] min-h-[500px] lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]">
+            {/* Map — when a specific player is selected, fitToMarkersKey changes,
+                telling MapContainer to zoom to wherever that player's venues are.
+                ("Find Jake Munroe for me.") */}
+            <MapContainer
+              tierMarkers={tierMarkers}
+              colorBy={filterState.colorBy}
+              fitToMarkersKey={filterState.selectedPlayer || undefined}
+            />
+          </div>
+        </div>
+      </div>
 
       {/* Schedule panel (side drawer) */}
       {schedulePanelPlayer && (
@@ -267,15 +283,17 @@ export default function MapView() {
  *  banner + rotating tip line. Click to expand; remembers dismiss state in
  *  localStorage so repeat users don't see it every load. */
 function MapHelp() {
+  // Default collapsed — Kent uses this view weekly and doesn't need the
+  // tutorial open on every load. Expanding is remembered so it can be pinned.
   const [open, setOpen] = useState(() => {
-    try { return localStorage.getItem('sv-map-help-dismissed') !== '1' } catch { return true }
+    try { return localStorage.getItem('sv-map-help-open') === '1' } catch { return false }
   })
   function toggle() {
     const next = !open
     setOpen(next)
     try {
-      if (!next) localStorage.setItem('sv-map-help-dismissed', '1')
-      else localStorage.removeItem('sv-map-help-dismissed')
+      if (next) localStorage.setItem('sv-map-help-open', '1')
+      else localStorage.removeItem('sv-map-help-open')
     } catch {}
   }
   return (
