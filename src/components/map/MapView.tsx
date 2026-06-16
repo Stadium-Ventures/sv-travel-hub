@@ -178,7 +178,6 @@ export default function MapView() {
         onNext7Days={setNext7Days}
         onNext30Days={setNext30Days}
         onUseTripDates={syncFromTrip}
-        venueCount={tierMarkers.length}
       />
 
       {/* Filter strip — tier / level / search / overdue (acts as legend too) */}

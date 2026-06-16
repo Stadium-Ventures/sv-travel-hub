@@ -106,12 +106,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const weeks = nextFourWeeks(today)
     const topWindows = weeks.map((wk) => computeTopTripsInRange(games, wk.start, wk.end))
 
-    const overdue = computeOverduePlayers(players, heartbeat, games, today)
+    const plannedVisits = await loadPlannedVisits(players)
+    const allOverdue = computeOverduePlayers(players, heartbeat, games, today)
+    // Drop players another agent has already flagged a visit for — no point
+    // nagging Kent about someone who's already being covered.
+    const overdue = allOverdue.filter((o) => !plannedVisits.has(o.player.name.trim().toLowerCase()))
+    const covered = [...plannedVisits.values()]
 
-    const message = composeSlackMessage(topWindows, weeks, overdue, players.length)
+    const message = composeSlackMessage(topWindows, weeks, overdue, covered, players.length)
 
     if (dryRun) {
-      return res.status(200).json({ dryRun: true, message, weeks, topWindows, overdueCount: overdue.length })
+      return res.status(200).json({ dryRun: true, message, weeks, topWindows, overdueCount: overdue.length, coveredCount: covered.length })
     }
 
     // Post via chat.postMessage (modern Slack app API). Requires the bot
@@ -194,6 +199,64 @@ async function loadHeartbeat(): Promise<Map<string, HeartbeatPlayer>> {
     console.warn('[slack-recap] heartbeat fetch failed:', e)
   }
   return map
+}
+
+interface PlannedVisit { player: string; snippet: string }
+
+/** Cross-agent visit awareness. Reads recent #travel-schedule messages and
+ *  detects when another agent (Mike/Damon/etc.) has already flagged a visit
+ *  for a rostered player — so the recap can stop nagging about that player and
+ *  call out who's already being covered. Avoids two agents doubling up.
+ *
+ *  Degrades to a no-op (empty map) if anything is missing — most importantly
+ *  the Slack app needs the `channels:history` (public) or `groups:history`
+ *  (private) scope added + reinstalled; until then conversations.history
+ *  returns `missing_scope` and we simply skip. Matches on full player name
+ *  near a visit verb, keyed by lowercased name. */
+async function loadPlannedVisits(players: RosterPlayer[]): Promise<Map<string, PlannedVisit>> {
+  const out = new Map<string, PlannedVisit>()
+  const botToken = process.env.SLACK_BOT_TOKEN
+  let channel = process.env.SLACK_CHANNEL_TRAVEL_SCHEDULE
+  if (!botToken || !channel) return out
+  try {
+    // conversations.history needs a channel ID. If we were handed a #name,
+    // resolve it (needs channels:read scope; skips gracefully if absent).
+    if (!/^C[A-Z0-9]/.test(channel)) {
+      const name = channel.replace(/^#/, '')
+      const listRes = await fetch('https://slack.com/api/conversations.list?types=public_channel,private_channel&limit=1000', {
+        headers: { Authorization: `Bearer ${botToken}` },
+      })
+      const listBody = await listRes.json() as { ok: boolean; channels?: Array<{ id: string; name: string }> }
+      const found = (listBody.channels ?? []).find((c) => c.name === name)
+      if (!found) return out
+      channel = found.id
+    }
+    // Last 14 days of messages. (Date.now is fine in the Vercel Node runtime.)
+    const oldest = Math.floor((Date.now() - 14 * 86400 * 1000) / 1000)
+    const res = await fetch(`https://slack.com/api/conversations.history?channel=${encodeURIComponent(channel)}&oldest=${oldest}&limit=200`, {
+      headers: { Authorization: `Bearer ${botToken}` },
+    })
+    const body = await res.json() as { ok: boolean; error?: string; messages?: Array<{ text?: string; bot_id?: string }> }
+    if (!body.ok) { console.warn('[slack-recap] conversations.history:', body.error); return out }
+    // Require a visit verb near the name to avoid matching the recap's own
+    // "next game" lines or idle chatter.
+    const VISIT_RE = /\b(visit|visiting|saw|seeing|see|eyes on|covered|covering|met with|meeting|going to see|catch|catching|headed to)\b/i
+    for (const m of body.messages ?? []) {
+      if (m.bot_id) continue // skip our own recap posts and other bots
+      const text = m.text ?? ''
+      if (!VISIT_RE.test(text)) continue
+      const lower = text.toLowerCase()
+      for (const p of players) {
+        const nameLower = p.name.trim().toLowerCase()
+        if (nameLower.length > 0 && lower.includes(nameLower)) {
+          out.set(nameLower, { player: p.name, snippet: text.replace(/\s+/g, ' ').slice(0, 120) })
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[slack-recap] loadPlannedVisits failed:', e)
+  }
+  return out
 }
 
 /** Pull every game we can reach server-side: HS+JUCO from CSV, Summer from CSV,
@@ -427,6 +490,39 @@ function clusterGames(games: Game[]): Game[][] {
   return result
 }
 
+// Friendly metro names for the busiest city in a cluster, so the recap reads
+// "LA area" instead of "Anaheim, CA area". Keyed by lowercased "city, st".
+const CITY_METRO: Record<string, string> = {
+  // LA
+  'los angeles, ca': 'LA area', 'anaheim, ca': 'LA area', 'long beach, ca': 'LA area',
+  'inglewood, ca': 'LA area', 'pasadena, ca': 'LA area', 'rancho cucamonga, ca': 'LA area',
+  'lake elsinore, ca': 'LA area', 'san bernardino, ca': 'LA area',
+  // Bay Area
+  'san francisco, ca': 'Bay Area', 'oakland, ca': 'Bay Area', 'san jose, ca': 'Bay Area',
+  // Phoenix (incl. spring training towns)
+  'phoenix, az': 'Phoenix area', 'mesa, az': 'Phoenix area', 'tempe, az': 'Phoenix area',
+  'scottsdale, az': 'Phoenix area', 'glendale, az': 'Phoenix area', 'surprise, az': 'Phoenix area',
+  'peoria, az': 'Phoenix area', 'goodyear, az': 'Phoenix area',
+  // Tampa Bay
+  'tampa, fl': 'Tampa Bay area', 'st. petersburg, fl': 'Tampa Bay area', 'st petersburg, fl': 'Tampa Bay area',
+  'clearwater, fl': 'Tampa Bay area', 'bradenton, fl': 'Tampa Bay area', 'dunedin, fl': 'Tampa Bay area',
+  // South Florida
+  'miami, fl': 'South Florida', 'fort lauderdale, fl': 'South Florida', 'jupiter, fl': 'South Florida',
+  'west palm beach, fl': 'South Florida',
+  // DFW
+  'dallas, tx': 'DFW area', 'arlington, tx': 'DFW area', 'fort worth, tx': 'DFW area', 'frisco, tx': 'DFW area',
+  // NYC
+  'new york, ny': 'NYC area', 'bronx, ny': 'NYC area', 'brooklyn, ny': 'NYC area', 'queens, ny': 'NYC area',
+  'newark, nj': 'NYC area', 'jersey city, nj': 'NYC area',
+  // Chicago
+  'chicago, il': 'Chicago area', 'schaumburg, il': 'Chicago area',
+}
+
+/** "City, ST" → friendly metro name, or `${city} area` fallback. */
+function cityAreaLabel(cityState: string): string {
+  return CITY_METRO[cityState.toLowerCase()] ?? `${cityState} area`
+}
+
 /** Pick a human region label for a cluster from its venues' cities/states. */
 function regionLabel(games: Game[]): string {
   const cityCounts = new Map<string, number>()   // "City, ST"
@@ -437,10 +533,10 @@ function regionLabel(games: Game[]): string {
   }
   const topCity = [...cityCounts.entries()].sort((a, b) => b[1] - a[1])[0]
   const topState = [...stateCounts.entries()].sort((a, b) => b[1] - a[1])[0]
-  if (cityCounts.size === 1 && topCity) return `${topCity[0]} area`
+  if (cityCounts.size === 1 && topCity) return cityAreaLabel(topCity[0])
   if (topState) {
-    // Multiple cities in one dominant state → "<ST> area"; lead with the busiest city.
-    if (topCity && stateCounts.size === 1) return `${topCity[0]} area`
+    // Multiple cities in one dominant state → metro/"<City> area"; lead with the busiest city.
+    if (topCity && stateCounts.size === 1) return cityAreaLabel(topCity[0])
     return topState[0]
   }
   // No location info at all — fall back to the venue with the most games.
@@ -562,6 +658,7 @@ function composeSlackMessage(
   windows: WeekTrips[],
   weeks: Array<{ label: string; start: string; end: string }>,
   overdue: Array<{ player: RosterPlayer; daysSince: number; nextGame: Game | null }>,
+  covered: PlannedVisit[],
   rosterSize: number,
 ): { text: string; blocks: any[] } {
   const lines: string[] = []
@@ -618,6 +715,17 @@ function composeSlackMessage(
     lines.push('')
   } else {
     lines.push('_No overdue T1/T2 players. Nice work._')
+    lines.push('')
+  }
+
+  // Cross-agent awareness: players another agent has already flagged a visit
+  // for in #travel-schedule. Surfaced so trips don't double up coverage.
+  if (covered.length > 0) {
+    lines.push(`*🤝 Already being covered (${covered.length}):*`)
+    for (const c of covered.slice(0, 6)) {
+      lines.push(`• *${c.player}* — flagged in #travel-schedule`)
+    }
+    if (covered.length > 6) lines.push(`+${covered.length - 6} more`)
     lines.push('')
   }
 

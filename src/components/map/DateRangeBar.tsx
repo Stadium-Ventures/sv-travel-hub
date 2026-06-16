@@ -34,7 +34,6 @@ interface DateRangeBarProps {
   onNext30Days: () => void
   /** @deprecated date range is unified with Trip Planner now; retained for API compat */
   onUseTripDates?: () => void
-  venueCount: number
 }
 
 export default function DateRangeBar({
@@ -44,7 +43,6 @@ export default function DateRangeBar({
   setFilterEnd,
   onNext7Days,
   onNext30Days,
-  venueCount,
 }: DateRangeBarProps) {
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const setHomeBase = useTripStore((s) => s.setHomeBase)
@@ -359,12 +357,13 @@ export default function DateRangeBar({
         />
       </div>
 
+      {/* Venue count intentionally omitted here — the filter strip below shows
+          it with richer context ("X of Y" + clear-filters), so showing it twice
+          within ~100px was redundant. */}
       <span className="ml-auto flex items-center gap-2 text-[11px] text-text-dim whitespace-nowrap">
         <span className="text-text-dim/50" title="Date range, drive radius, and starting city are shared between Map and Trip Planner. Change in either, both update.">
           synced w/ Trip Planner
         </span>
-        <span>·</span>
-        <span>{venueCount} venue{venueCount !== 1 ? 's' : ''} with games</span>
       </span>
     </div>
   )
