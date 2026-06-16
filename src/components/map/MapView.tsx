@@ -465,6 +465,12 @@ function BestWindowsPanel({
         </div>
       </div>
 
+      {/* One-line "what is this panel" clarifier — distinguishes it from the
+          Where to go? panel, which answers WHERE (a city) rather than WHEN. */}
+      <p className="mt-1.5 text-[10px] text-text-dim/60 italic">
+        The best <strong className="text-text-dim/80">dates</strong> to travel from {homeBaseName}, within your drive radius. (Where to go? answers <em>where</em>; this answers <em>when</em>.)
+      </p>
+
       {/* Strategy implication line — tells Kent what the current "Prioritize
           by" choice is actually doing. Recomputed from the live window set so
           it stays accurate as filters change. */}

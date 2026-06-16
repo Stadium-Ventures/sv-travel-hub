@@ -46,7 +46,7 @@ export default function WhereToGoPanel({ picks }: { picks: DestinationPick[] }) 
           )}
         </button>
         <span className="text-[10px] text-text-dim/60 italic">
-          Hunts the US for the best destination — not just what's reachable from {homeBaseName}.
+          The best <strong className="text-text-dim/80">city</strong> to fly/drive to — searches the whole US, ignores your drive radius. (Best Windows answers <em>when</em>; this answers <em>where</em>.)
         </span>
       </div>
 
