@@ -88,6 +88,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (headerSecret !== expected && querySecret !== expected) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
+  // Distinguish the scheduled cron (Authorization header) from the in-app admin
+  // button (?secret=). Only the cron gets a failure alert — when the button
+  // fails the human is right there and the UI already shows the error; alerting
+  // then would just be channel noise.
+  const isCron = headerSecret === expected
 
   const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true'
   const botToken = process.env.SLACK_BOT_TOKEN
@@ -139,12 +144,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const slackBody = await slackRes.json() as { ok: boolean; error?: string; ts?: string; channel?: string }
     if (!slackRes.ok || !slackBody.ok) {
       console.error('[slack-recap] chat.postMessage failed:', slackRes.status, JSON.stringify(slackBody))
+      if (isCron) await postFailureAlert(botToken, channel, `Slack rejected the post (${slackBody.error ?? slackRes.status}).`)
       return res.status(502).json({ error: 'Slack chat.postMessage failed', status: slackRes.status, body: slackBody })
     }
     return res.status(200).json({ posted: true, channel: slackBody.channel, ts: slackBody.ts })
   } catch (e) {
     console.error('[slack-recap] handler error:', e)
-    return res.status(500).json({ error: e instanceof Error ? e.message : 'unknown error' })
+    const msg = e instanceof Error ? e.message : 'unknown error'
+    if (isCron) await postFailureAlert(botToken, channel, `Couldn't build the recap: ${msg}.`)
+    return res.status(500).json({ error: msg })
+  }
+}
+
+/** Best-effort plain-text failure alert so a broken Monday cron is visible
+ *  instead of a silent no-post. Plain text (no blocks) so it still lands even
+ *  when a block-formatting error is what killed the real recap. Never throws. */
+async function postFailureAlert(botToken: string | undefined, channel: string | undefined, reason: string): Promise<void> {
+  if (!botToken || !channel) return
+  try {
+    await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${botToken}` },
+      body: JSON.stringify({
+        channel,
+        text: `:warning: *Travel Hub recap didn't post this morning.* ${reason} The schedule data is unaffected — open the hub directly: https://sv-travel-hub.vercel.app`,
+        unfurl_links: false,
+      }),
+    })
+  } catch (e) {
+    console.error('[slack-recap] failure alert also failed:', e)
   }
 }
 

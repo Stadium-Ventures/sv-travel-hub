@@ -3,6 +3,11 @@ import { useEffect, useRef, useState } from 'react'
 // being reachable. Previously a <link> to unpkg was injected at runtime which
 // could hang the init flow if the CDN was slow.
 import 'leaflet/dist/leaflet.css'
+// Marker-cluster CSS is safe to import statically (no window.L dependency). The
+// plugin JS itself is loaded dynamically in init() AFTER window.L is set — a
+// static plugin import gets hoisted ahead of that and breaks under Vite.
+import 'leaflet.markercluster/dist/MarkerCluster.css'
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { useTripStore } from '../../store/tripStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { dispatchMapEvent } from '../../lib/mapEvents'
@@ -123,8 +128,19 @@ export default function MapContainer({ tierMarkers, colorBy, fitToMarkersKey }: 
       if (cancelled) return
       leafletRef.current = L
 
-      // MarkerCluster expects L on window — attach before importing
-      ;(window as any).L = L
+      // MarkerCluster is a UMD plugin that augments L via window.L. Set it,
+      // THEN dynamically import the plugin (sequential, so window.L exists when
+      // it runs). Wrapped so a plugin load failure degrades to un-clustered
+      // markers instead of breaking the whole map.
+      // Plugin augments the underlying default object — point window.L at it
+      // (not the ESM namespace) so the runtime-added markerClusterGroup sticks.
+      ;(window as any).L = (L as any).default ?? L
+      try {
+        await import('leaflet.markercluster')
+      } catch (e) {
+        console.warn('[map] markercluster plugin failed to load — markers will not cluster', e)
+      }
+      if (cancelled) return
 
       // Custom styles (Leaflet CSS is statically imported above)
       injectMapStyles()
@@ -279,8 +295,22 @@ export default function MapContainer({ tierMarkers, colorBy, fitToMarkersKey }: 
       clusterGroupRef.current = null
     }
 
-    // Use a simple layer group (markercluster removed — Vite module compat issue)
-    const layerGroup = L.layerGroup()
+    // Cluster overlapping venues into count badges that expand on zoom (113
+    // venues overlap badly when zoomed out). Falls back to a plain layer group
+    // if the plugin didn't load, so the map always renders.
+    // markerClusterGroup is added at runtime; under Vite's CJS interop it lands
+    // on the default object, not the ESM namespace — check both.
+    const makeCluster = ((L as any).markerClusterGroup ?? (L as any).default?.markerClusterGroup) as
+      | ((opts?: Record<string, unknown>) => L.LayerGroup)
+      | undefined
+    const layerGroup: L.LayerGroup = typeof makeCluster === 'function'
+      ? makeCluster({
+          chunkedLoading: true,
+          maxClusterRadius: 50,
+          showCoverageOnHover: false,
+          spiderfyOnMaxZoom: true,
+        })
+      : L.layerGroup()
 
     // Build lookups used for both dot color and popup enrichment.
     // We always populate daysByPlayer (popup needs it even in Tier color mode)
