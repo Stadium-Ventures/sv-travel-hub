@@ -118,7 +118,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const overdue = allOverdue.filter((o) => !plannedVisits.has(o.player.name.trim().toLowerCase()))
     const covered = [...plannedVisits.values()]
 
-    const message = composeSlackMessage(topWindows, weeks, overdue, covered, players.length)
+    // Non-game events overlapping the recap horizon (today → last week's end).
+    const horizonEnd = weeks[weeks.length - 1]!.end
+    const todayStr = isoDate(today)
+    const upcomingEvents = (await loadEvents())
+      .filter((e) => e.startDate && e.endDate && e.endDate >= todayStr && e.startDate <= horizonEnd)
+      .sort((a, b) => a.startDate.localeCompare(b.startDate))
+
+    const message = composeSlackMessage(topWindows, weeks, overdue, covered, upcomingEvents, players.length)
 
     if (dryRun) {
       return res.status(200).json({ dryRun: true, message, weeks, topWindows, overdueCount: overdue.length, coveredCount: covered.length })
@@ -690,11 +697,66 @@ function computeOverduePlayers(
 
 // ─── Message composition ────────────────────────────────────────────────────
 
+// ─── Non-game events (Combine, showcases, industry meetings) ──────────────────
+// Maintained by the team in the "Events" tab of the schedule sheet. Published
+// to CSV per-tab; URL overridable via env, defaults to the live published tab
+// (public-by-URL, same posture as the other sheets — no secret here).
+
+interface EventRow {
+  event: string
+  bucket: string   // Recruiting | Client-facing | Industry
+  agents: string   // which SV agent(s) attend — also feeds cross-agent awareness
+  startDate: string
+  endDate: string
+  city: string
+  state: string
+  venue: string
+  notes: string
+}
+
+const EVENTS_CSV_URL = process.env.VITE_EVENTS_CSV_URL
+  ?? 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSLL54GdIgGGKitqbfAEG4KxgFP3ft_NzoeA-o1OGh17J3LJI-AYEGV_mB1qr-SVBL-n8CGTzZoXq3J/pub?gid=314114825&single=true&output=csv'
+
+async function loadEvents(): Promise<EventRow[]> {
+  try {
+    const csv = await fetchText(EVENTS_CSV_URL)
+    const rows = parseCsv(csv)
+    if (rows.length < 2) return []
+    const header = rows[0]!.map((h) => h.trim().toLowerCase())
+    const col = (name: string) => header.indexOf(name)
+    const iEvent = col('event'), iBucket = col('bucket'), iAgents = col('agents'),
+      iStart = col('start_date'), iEnd = col('end_date'), iCity = col('city'),
+      iState = col('state'), iVenue = col('venue'), iNotes = col('notes')
+    const out: EventRow[] = []
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r]!
+      const event = (row[iEvent] ?? '').trim()
+      if (!event) continue
+      out.push({
+        event,
+        bucket: (row[iBucket] ?? '').trim(),
+        agents: (row[iAgents] ?? '').trim(),
+        startDate: normalizeIsoDate((row[iStart] ?? '').trim()),
+        endDate: normalizeIsoDate((row[iEnd] ?? '').trim()),
+        city: (row[iCity] ?? '').trim(),
+        state: (row[iState] ?? '').trim(),
+        venue: (row[iVenue] ?? '').trim(),
+        notes: (row[iNotes] ?? '').trim(),
+      })
+    }
+    return out
+  } catch (e) {
+    console.warn('[slack-recap] loadEvents failed:', e)
+    return []
+  }
+}
+
 function composeSlackMessage(
   windows: WeekTrips[],
   weeks: Array<{ label: string; start: string; end: string }>,
   overdue: Array<{ player: RosterPlayer; daysSince: number; nextGame: Game | null }>,
   covered: PlannedVisit[],
+  events: EventRow[],
   rosterSize: number,
 ): { text: string; blocks: any[] } {
   const lines: string[] = []
@@ -721,6 +783,22 @@ function composeSlackMessage(
     lines.push(`     ${names}`)
   }
   lines.push('')
+
+  // Non-game events in the same horizon (Combine, showcases, meetings) with
+  // who's attending — so trips can be planned around them.
+  if (events.length > 0) {
+    lines.push('*📌 Events — next 4 weeks:*')
+    for (const e of events) {
+      const dr = e.startDate === e.endDate
+        ? shortDate(new Date(e.startDate + 'T00:00:00Z'))
+        : `${shortDate(new Date(e.startDate + 'T00:00:00Z'))}–${shortDate(new Date(e.endDate + 'T00:00:00Z'))}`
+      const loc = e.city && e.state ? `${e.city}, ${e.state}` : (e.city || e.venue || '')
+      const locStr = loc ? ` · ${loc}` : ''
+      const who = e.agents ? ` — ${e.agents}` : ''
+      lines.push(`• *${dr}* · ${e.event}${locStr}${who}`)
+    }
+    lines.push('')
+  }
 
   if (overdue.length > 0) {
     lines.push(`*🔥 Overdue T1/T2 with upcoming games (${overdue.length}):*`)
