@@ -8,6 +8,7 @@ import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import DateRangeBar from './DateRangeBar'
 import MapContainer from './MapContainer'
 import { useVenuePlayerMap } from './hooks/useVenuePlayerMap'
+import { useEventMarkers } from './hooks/useEventMarkers'
 import { useDateFilteredVenues } from './hooks/useDateFilteredVenues'
 import { useMapDateRange } from './hooks/useMapDateRange'
 import { useTierMarkers } from './hooks/useTierMarkers'
@@ -49,6 +50,7 @@ export default function MapView() {
 
   // Data hooks
   const venuePlayerMap = useVenuePlayerMap()
+  const eventMarkers = useEventMarkers(filterStart, filterEnd)
   const dateFilteredVenues = useDateFilteredVenues(filterStart, filterEnd)
   const allTierMarkers = useTierMarkers(venuePlayerMap, dateFilteredVenues, filterStart, filterEnd)
 
@@ -261,6 +263,7 @@ export default function MapView() {
             <MapContainer
               tierMarkers={tierMarkers}
               colorBy={filterState.colorBy}
+              eventMarkers={eventMarkers}
               fitToMarkersKey={filterState.selectedPlayer || undefined}
             />
           </div>

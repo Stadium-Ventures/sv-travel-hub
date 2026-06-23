@@ -109,6 +109,42 @@ export async function geocodeVenue(
   return null
 }
 
+/** Geocode a plain "City, ST" to coordinates (for non-game events whose only
+ *  location is a city). Reuses the same localStorage cache + retry/backoff as
+ *  venue geocoding, so each city is fetched at most once ever. */
+export async function geocodeCity(city: string, state: string): Promise<Coordinates | null> {
+  if (!city) return null
+  const cache = getCache()
+  const key = `city:${city.toLowerCase()}|${state.toLowerCase()}`
+  if (cache[key]) return cache[key]!
+
+  const q = state ? `${city}, ${state}, USA` : `${city}, USA`
+  const params = new URLSearchParams({ q, format: 'json', limit: '1', countrycodes: 'us' })
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetchWithTimeout(`${NOMINATIM_BASE}?${params}`, {
+        timeoutMs: 8000,
+        headers: { 'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures internal tool)' },
+      })
+      if (res.status === 429) { await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); continue }
+      if (!res.ok) return null
+      const results = await res.json()
+      if (results.length > 0) {
+        const coords: Coordinates = { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) }
+        if (!isInContinentalUS(coords)) return null
+        cache[key] = coords
+        setCache(cache)
+        return coords
+      }
+      return null
+    } catch {
+      if (attempt < 2) { await new Promise((r) => setTimeout(r, 1000 * (attempt + 1))); continue }
+      return null
+    }
+  }
+  return null
+}
+
 // Batch geocode all HS venues with 1-second delay between requests
 export async function geocodeAllHsVenues(
   schools: Array<{ schoolName: string; city: string; state: string }>,

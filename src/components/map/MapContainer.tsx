@@ -17,6 +17,7 @@ import { TIER_COLORS } from './hooks/useTierMarkers'
 import type { TierMarker } from './hooks/useTierMarkers'
 import type { TripCandidate } from '../../types/schedule'
 import { heartbeatColorFor, type MapColorMode } from './MapFilters'
+import type { EventMarker } from './hooks/useEventMarkers'
 
 // Nearest preset city name for a dragged custom location
 const STARTING_LOCATIONS = [
@@ -85,16 +86,20 @@ const US_STATE_ABBR: Record<string, string> = {
 interface MapContainerProps {
   tierMarkers: TierMarker[]
   colorBy: MapColorMode
+  /** Non-game events (Combine, showcases) SV travels to — rendered as distinct
+   *  pins so Kent can see "who's where" alongside player venues. */
+  eventMarkers?: EventMarker[]
   /** When set, map auto-fits bounds to the visible tierMarkers (so picking
    *  a player jumps to wherever he is — "find him for me"). */
   fitToMarkersKey?: string
 }
 
-export default function MapContainer({ tierMarkers, colorBy, fitToMarkersKey }: MapContainerProps) {
+export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey }: MapContainerProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<import('leaflet').Map | null>(null)
   const leafletRef = useRef<typeof import('leaflet') | null>(null)
   const clusterGroupRef = useRef<import('leaflet').LayerGroup | null>(null)
+  const eventLayerRef = useRef<import('leaflet').LayerGroup | null>(null)
   const homeMarkerRef = useRef<import('leaflet').Marker | null>(null)
   const radiusCircleRef = useRef<import('leaflet').Circle | null>(null)
   const tripHighlightRef = useRef<import('leaflet').LayerGroup | null>(null)
@@ -209,6 +214,7 @@ export default function MapContainer({ tierMarkers, colorBy, fitToMarkersKey }: 
         mapInstance.current = null
       }
       if (clusterGroupRef.current) clusterGroupRef.current = null
+      if (eventLayerRef.current) eventLayerRef.current = null
       if (homeMarkerRef.current) homeMarkerRef.current = null
       if (radiusCircleRef.current) radiusCircleRef.current = null
       if (tripHighlightRef.current) tripHighlightRef.current = null
@@ -370,6 +376,52 @@ export default function MapContainer({ tierMarkers, colorBy, fitToMarkersKey }: 
     map.addLayer(layerGroup)
     clusterGroupRef.current = layerGroup as any
   }, [loaded, tierMarkers, colorBy, heartbeatPlayers])
+
+  // Render non-game event pins — distinct amber 📌 markers, separate from the
+  // round player-venue dots, so "who's where" reads at a glance.
+  useEffect(() => {
+    if (!loaded || !mapInstance.current || !leafletRef.current) return
+    const L = leafletRef.current
+    const map = mapInstance.current
+
+    if (eventLayerRef.current) {
+      map.removeLayer(eventLayerRef.current)
+      eventLayerRef.current = null
+    }
+    if (eventMarkers.length === 0) return
+
+    const fmt = (iso: string) => {
+      const d = new Date(iso + 'T00:00:00Z')
+      const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]
+      return `${m} ${d.getUTCDate()}`
+    }
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+    const layer = L.layerGroup()
+    for (const e of eventMarkers) {
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:#f59e0b;color:#1a1a1a;font-size:13px;box-shadow:0 0 0 2px rgba(245,158,11,0.4)">📌</div>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+      })
+      const dr = e.startDate === e.endDate ? fmt(e.startDate) : `${fmt(e.startDate)}–${fmt(e.endDate)}`
+      const loc = e.city && e.state ? `${e.city}, ${e.state}` : (e.city || '')
+      const clients = e.clients.length > 0
+        ? `<div style="margin-top:4px"><span style="color:#94a3b8">Clients:</span> ${esc(e.clients.join(', '))}</div>`
+        : ''
+      const staff = e.staff ? `<div style="margin-top:4px"><span style="color:#94a3b8">SV:</span> ${esc(e.staff)}</div>` : ''
+      const html = `<div style="font-family:system-ui;font-size:12px;color:#f1f5f9;min-width:180px">`
+        + `<div style="font-weight:700;color:#f59e0b">📌 ${esc(e.event)}</div>`
+        + `<div style="margin-top:2px">${dr}${loc ? ` · ${esc(loc)}` : ''}</div>`
+        + staff + clients + `</div>`
+      L.marker([e.coords.lat, e.coords.lng], { icon, zIndexOffset: 500 })
+        .bindPopup(html, { className: 'sv-dark-popup' })
+        .addTo(layer)
+    }
+    map.addLayer(layer)
+    eventLayerRef.current = layer
+  }, [loaded, eventMarkers])
 
   // Auto-fit the map to the visible markers whenever the filter narrows in
   // a "find this for me" way (e.g. user picks a specific player). Keyed off
