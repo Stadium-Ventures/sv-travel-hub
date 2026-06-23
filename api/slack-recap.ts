@@ -122,7 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const horizonEnd = weeks[weeks.length - 1]!.end
     const todayStr = isoDate(today)
     const upcomingEvents = (await loadEvents())
-      .filter((e) => e.startDate && e.endDate && e.endDate >= todayStr && e.startDate <= horizonEnd)
+      .filter((e) => e.travels && e.startDate && e.endDate && e.endDate >= todayStr && e.startDate <= horizonEnd)
       .sort((a, b) => a.startDate.localeCompare(b.startDate))
 
     const message = composeSlackMessage(topWindows, weeks, overdue, covered, upcomingEvents, players.length)
@@ -704,18 +704,32 @@ function computeOverduePlayers(
 
 interface EventRow {
   event: string
-  bucket: string   // Recruiting | Client-facing | Industry
-  agents: string   // which SV agent(s) attend — also feeds cross-agent awareness
-  startDate: string
-  endDate: string
+  tier: number | null
   city: string
   state: string
-  venue: string
-  notes: string
+  startDate: string
+  endDate: string
+  staff: string    // SV Staff — who's attending (also feeds cross-agent awareness)
+  clients: string  // SV Clients Attending — raw comma list
+  travels: boolean // SV is physically traveling (staff assigned, not "Stream"/empty)
 }
 
+// Source: the team's maintained "SV Summer Coverage" sheet (published CSV).
+// It already carries who's attending AND which clients will be there — so the
+// recap gets client-level "who can I see" with zero extra upkeep. Summer-scoped
+// for now; winter/industry events (ABCA, Winter Meetings) are a future add.
 const EVENTS_CSV_URL = process.env.VITE_EVENTS_CSV_URL
-  ?? 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSLL54GdIgGGKitqbfAEG4KxgFP3ft_NzoeA-o1OGh17J3LJI-AYEGV_mB1qr-SVBL-n8CGTzZoXq3J/pub?gid=314114825&single=true&output=csv'
+  ?? 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSWoPys4nn-twC2weVoG-DlOHu9JhzXZgYVMJXNmJwPFbNbsLPgzjMzHVK2nUNfLbp7h10itgnAlTPU/pub?output=csv'
+
+/** "Atlanta GA" → {city:'Atlanta', state:'GA'}; "West Palm FL" → {city:'West
+ *  Palm', state:'FL'}; "Philly" → {city:'Philly', state:''}. */
+function splitLocation(loc: string): { city: string; state: string } {
+  const t = loc.trim().split(/\s+/)
+  if (t.length >= 2 && /^[A-Z]{2}$/.test(t[t.length - 1]!)) {
+    return { city: t.slice(0, -1).join(' '), state: t[t.length - 1]! }
+  }
+  return { city: loc.trim(), state: '' }
+}
 
 async function loadEvents(): Promise<EventRow[]> {
   try {
@@ -724,24 +738,30 @@ async function loadEvents(): Promise<EventRow[]> {
     if (rows.length < 2) return []
     const header = rows[0]!.map((h) => h.trim().toLowerCase())
     const col = (name: string) => header.indexOf(name)
-    const iEvent = col('event'), iBucket = col('bucket'), iAgents = col('agents'),
-      iStart = col('start_date'), iEnd = col('end_date'), iCity = col('city'),
-      iState = col('state'), iVenue = col('venue'), iNotes = col('notes')
+    const iTier = col('tier'), iEvent = col('event'), iLoc = col('location'),
+      iStart = col('start date'), iEnd = col('end date'),
+      iStaff = col('sv staff'), iClients = col('sv clients attending')
     const out: EventRow[] = []
     for (let r = 1; r < rows.length; r++) {
       const row = rows[r]!
       const event = (row[iEvent] ?? '').trim()
       if (!event) continue
+      const { city, state } = splitLocation(row[iLoc] ?? '')
+      const staff = (row[iStaff] ?? '').trim()
+      const staffLower = staff.toLowerCase()
+      const tierNum = parseInt((row[iTier] ?? '').trim(), 10)
       out.push({
         event,
-        bucket: (row[iBucket] ?? '').trim(),
-        agents: (row[iAgents] ?? '').trim(),
+        tier: Number.isFinite(tierNum) ? tierNum : null,
+        city,
+        state,
         startDate: normalizeIsoDate((row[iStart] ?? '').trim()),
         endDate: normalizeIsoDate((row[iEnd] ?? '').trim()),
-        city: (row[iCity] ?? '').trim(),
-        state: (row[iState] ?? '').trim(),
-        venue: (row[iVenue] ?? '').trim(),
-        notes: (row[iNotes] ?? '').trim(),
+        staff,
+        clients: (row[iClients] ?? '').trim(),
+        // "Stream" = watching remotely (no travel); empty staff = not covered.
+        // This also auto-handles Damon's "might not attend" events.
+        travels: staff !== '' && staffLower !== 'stream',
       })
     }
     return out
@@ -787,16 +807,22 @@ function composeSlackMessage(
   // Non-game events in the same horizon (Combine, showcases, meetings) with
   // who's attending — so trips can be planned around them.
   if (events.length > 0) {
-    lines.push('*📌 Events — next 4 weeks:*')
-    for (const e of events) {
+    lines.push('*📌 Events SV is traveling to — next 4 weeks:*')
+    const shown = events.slice(0, 6)
+    for (const e of shown) {
       const dr = e.startDate === e.endDate
         ? shortDate(new Date(e.startDate + 'T00:00:00Z'))
         : `${shortDate(new Date(e.startDate + 'T00:00:00Z'))}–${shortDate(new Date(e.endDate + 'T00:00:00Z'))}`
-      const loc = e.city && e.state ? `${e.city}, ${e.state}` : (e.city || e.venue || '')
+      const loc = e.city && e.state ? `${e.city}, ${e.state}` : (e.city || '')
       const locStr = loc ? ` · ${loc}` : ''
-      const who = e.agents ? ` — ${e.agents}` : ''
-      lines.push(`• *${dr}* · ${e.event}${locStr}${who}`)
+      const who = e.staff ? ` — ${e.staff}` : ''
+      // Short client list (the "who can I see" payoff).
+      let cl = ''
+      const names = e.clients.split(',').map((s) => s.trim()).filter(Boolean)
+      if (names.length > 0) cl = ` · _${names.slice(0, 3).join(', ')}${names.length > 3 ? ` +${names.length - 3}` : ''}_`
+      lines.push(`• *${dr}* · ${e.event}${locStr}${who}${cl}`)
     }
+    if (events.length > shown.length) lines.push(`     _+${events.length - shown.length} more — see hub_`)
     lines.push('')
   }
 
