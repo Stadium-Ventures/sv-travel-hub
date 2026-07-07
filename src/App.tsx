@@ -17,28 +17,31 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
     return { error }
   }
 
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
+    // Full stack goes to the console for debugging — Kent never needs to see it.
+    console.error('[sv-travel-hub] App crashed:', error, info.componentStack ?? '')
+  }
+
   render() {
     if (this.state.error) {
       return (
         <div className="mx-auto max-w-2xl p-10">
           <h1 className="text-xl font-bold text-accent-red">Something went wrong</h1>
-          <pre className="mt-4 overflow-auto rounded-lg bg-surface p-4 text-sm text-text-dim">
-            {this.state.error.message}
-            {'\n\n'}
-            {this.state.error.stack}
-          </pre>
+          <p className="mt-3 text-sm text-text-dim">
+            The app hit an unexpected error. Reloading usually fixes it — your data is safe.
+          </p>
           <div className="mt-4 flex gap-3">
             <button
-              onClick={() => this.setState({ error: null })}
+              onClick={() => window.location.reload()}
               className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/80"
             >
-              Try Again
+              Reload
             </button>
             <button
-              onClick={() => window.location.reload()}
+              onClick={() => this.setState({ error: null })}
               className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-text-dim hover:text-text"
             >
-              Reload Page
+              Try Again Without Reloading
             </button>
           </div>
         </div>
@@ -189,9 +192,11 @@ function AutoFetchData() {
       // NCAA — bundled instant
       const ncaaOrgs = players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))
       if (ncaaOrgs.length > 0) sched.fetchNcaaSchedules(ncaaOrgs)
-      // HS — CSV (per yesterday's change, no bundled fallback)
+      // HS — CSV (per yesterday's change, no bundled fallback).
+      // Same `p.state` filter as the warm path above — players without a
+      // state can't be matched to a school schedule.
       if (hasHs) {
-        const hsOrgs = players.filter((p) => p.level === 'HS').map((p) => ({ playerName: p.playerName, org: p.org, state: p.state }))
+        const hsOrgs = players.filter((p) => p.level === 'HS' && p.state).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
         if (hsOrgs.length > 0) sched.fetchHsSchedules(hsOrgs)
       }
       // Summer — live partner leagues (CCBL, MLBD, Appalachian)

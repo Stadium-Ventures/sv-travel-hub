@@ -22,6 +22,8 @@ export default function StatusPill() {
   const proFetched = useScheduleStore((s) => s.proFetchedAt)
   const ncaaLoading = useScheduleStore((s) => s.ncaaLoading)
   const ncaaFetched = useScheduleStore((s) => s.ncaaFetchedAt)
+  const hsLoading = useScheduleStore((s) => s.hsLoading)
+  const hsFetched = useScheduleStore((s) => s.hsFetchedAt)
   const summerLoading = useSummerStore((s) => s.loading)
   const summerFetched = useSummerStore((s) => s.fetchedAt)
   const rehabLoading = useRehabStore((s) => Object.keys(s.loading).length > 0)
@@ -38,6 +40,7 @@ export default function StatusPill() {
     { name: 'Heartbeat', loading: heartbeatLoading, fetched: heartbeatFetched, staleMs: SIX_H },
     { name: 'Pro games', loading: proLoading, fetched: proFetched, staleMs: SIX_H },
     { name: 'NCAA games', loading: ncaaLoading, fetched: ncaaFetched, staleMs: SIX_H },
+    { name: 'HS games', loading: hsLoading, fetched: hsFetched, staleMs: SIX_H },
     { name: 'Summer ball', loading: summerLoading, fetched: summerFetched, staleMs: SIX_H },
     { name: 'Rehab windows', loading: rehabLoading, fetched: rehabFetched, staleMs: TWELVE_H },
   ]
@@ -94,11 +97,23 @@ export default function StatusPill() {
             })}
           </div>
           <RecentActivitySection />
-          <SlackRecapAdminSection />
+          {isRecapAdmin() && <SlackRecapAdminSection />}
         </div>
       )}
     </div>
   )
+}
+
+/** The Slack-recap admin controls are for Tom, not Kent. Only show them when
+ *  the CRON_SECRET is already cached locally, or the page was opened with
+ *  ?admin (which lets Tom bootstrap the secret prompt on a new machine). */
+function isRecapAdmin(): boolean {
+  try {
+    if (new URLSearchParams(window.location.search).has('admin')) return true
+    return !!localStorage.getItem('sv-cron-secret')
+  } catch {
+    return false
+  }
 }
 
 /** Admin-only "Send weekly Slack recap now" trigger. Hits the same serverless
@@ -119,8 +134,10 @@ function SlackRecapAdminSection() {
     }
     setStatus('sending'); setErrMsg(null)
     try {
-      const url = `/api/slack-recap?secret=${encodeURIComponent(secret)}${mode === 'dry' ? '&dryRun=1' : ''}`
-      const res = await fetch(url)
+      // Secret travels as an Authorization header, never as a query param
+      // (query strings end up in server/proxy logs).
+      const url = `/api/slack-recap${mode === 'dry' ? '?dryRun=1' : ''}`
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } })
       const body = await res.json()
       if (!res.ok) {
         setStatus('err'); setErrMsg(body?.error ?? `HTTP ${res.status}`)

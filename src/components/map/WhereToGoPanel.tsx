@@ -16,7 +16,11 @@ const TIER_DOT_COLORS: Record<number, string> = { 1: 'bg-[#ef4444]', 2: 'bg-[#f9
  * (current date range). They use the same tier weights and player set.
  */
 export default function WhereToGoPanel({ picks }: { picks: DestinationPick[] }) {
-  const [open, setOpen] = useState(true)
+  // Open by default on desktop; collapsed on small screens so the map
+  // (rendered first there) stays the star of the tab.
+  const [open, setOpen] = useState(() => {
+    try { return window.matchMedia('(min-width: 1024px)').matches } catch { return true }
+  })
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const setHomeBase = useTripStore((s) => s.setHomeBase)
 

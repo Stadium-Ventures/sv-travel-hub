@@ -13,8 +13,20 @@ import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 import { MAJOR_AIRPORTS, findNearestAirport } from '../../data/majorAirports'
+import { groupAndNumberTrips, itemHasPriorityPlayer, type UnifiedTripItem } from './groupAndNumberTrips'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+
+// 5 priority slots per Kent's interview ("if I select five players...").
+// Shared by the picker AND the Not Covered click-to-add flow so they agree.
+const PRIORITY_SLOTS = 5
+
+/** Estimated pure-flight time for a fly-in. estimatedTravelHours includes
+ *  ~3h of airport/rental overhead; never show "~0h flight" for short hops. */
+function flightHoursLabel(estimatedTravelHours: number): string {
+  const h = Math.max(0.5, Math.round((estimatedTravelHours - 3) * 10) / 10)
+  return h % 1 === 0 ? String(h) : h.toFixed(1)
+}
 
 const STARTING_LOCATIONS = [
   { name: 'Orlando, FL', coords: { lat: 28.5383, lng: -81.3792 } },
@@ -145,7 +157,7 @@ function PlayerSearchPicker({
                 >
                   <span className={`h-2 w-2 shrink-0 rounded-full ${TIER_DOT_COLORS[p.tier] ?? 'bg-gray-500'}`} />
                   <span className="text-text">{p.playerName}</span>
-                  <span className="text-[10px] text-text-dim/50">T{p.tier}</span>
+                  <span className="text-[10px] text-text-dim/50">{TIER_LABELS[p.tier] ?? ''}</span>
                   <span className="ml-auto text-[10px] text-text-dim">{p.org}</span>
                 </button>
               ))}
@@ -314,6 +326,9 @@ export default function TripPlanner() {
   // tierFilter removed — was adding clutter to the results toolbar
   const [anchorPlayerNames, setAnchorPlayerNames] = useState<string[]>([])
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
+  // "Not Covered" explainer — lives in the Details section; also toggled by
+  // clicking the Not Covered stat card, so the state lives up here.
+  const [notCoveredOpen, setNotCoveredOpen] = useState(false)
 
 
 
@@ -350,9 +365,6 @@ export default function TripPlanner() {
     setPriorityPlayers([...new Set(next.filter(Boolean))])
   }
 
-  // 5 priority slots per Kent's interview ("if I select five players...")
-  const PRIORITY_SLOTS = 5
-
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
   const flyInLimit = 5
 
@@ -370,90 +382,16 @@ export default function TripPlanner() {
   }, [tripPlan, priorityPlayers, flyInLimit])
   const [showOverlaps, setShowOverlaps] = useState(false)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
-  const cachedProTeamIds = useScheduleStore((s) => s.cachedProTeamIds)
 
-  // ----------------------------------------------------------------------
-  // Shared trip-numbering helper. Used by Priority Player Results, status
-  // banner, AND the rendered trip list — so the displayed "Trip #N" matches
-  // everywhere. Previously each site re-derived the order on its own and they
-  // diverged when same-player+same-venue trips got merged into alt-date cards.
-  // (Bug reported 2026-06-08: "Cade Doughty → Trip #8" pointed at the wrong
-  // card because numbering didn't account for the merge.)
-  //
-  // Also applies a priority-first sort: when priorityPlayers is non-empty,
-  // trips containing any priority player get pushed to the top so Kent
-  // doesn't have to scroll past 8 irrelevant trips to find his guys.
-  // ----------------------------------------------------------------------
-  const tripDisplayInfo = useMemo(() => {
-    if (!tripPlan) return { findTripNum: (_n: string) => 0, findAllTripNums: (_n: string) => [] as number[], groupCount: 0 }
-    type Item =
-      | { type: 'road'; trip: import('../../types/schedule').TripCandidate; sortDate: string }
-      | { type: 'flyin'; visit: import('../../types/schedule').FlyInVisit; sortDate: string }
-    const items: Item[] = [
-      ...tripPlan.trips.map((trip): Item => ({ type: 'road', trip, sortDate: trip.anchorGame.date })),
-      ...displayedFlyIns.map((visit): Item => ({ type: 'flyin', visit, sortDate: visit.dates[0] ?? '' })),
-    ]
-    const prioSet = new Set(priorityPlayers)
-    function hasPriority(item: Item): boolean {
-      if (prioSet.size === 0) return false
-      if (item.type === 'road') {
-        if (item.trip.anchorGame.playerNames.some((n) => prioSet.has(n))) return true
-        return item.trip.nearbyGames.some((g) => g.playerNames.some((n) => prioSet.has(n)))
-      }
-      return item.visit.playerNames.some((n) => prioSet.has(n))
-    }
-    // Sort: priority-bearing first (when priority set), then by score (or date)
-    items.sort((a, b) => {
-      if (prioSet.size > 0) {
-        const ap = hasPriority(a) ? 0 : 1
-        const bp = hasPriority(b) ? 0 : 1
-        if (ap !== bp) return ap - bp
-      }
-      if (sortBy === 'date') return a.sortDate.localeCompare(b.sortDate)
-      const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : a.visit.visitValue
-      const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : b.visit.visitValue
-      return scoreB - scoreA
-    })
-    // Group identical trips by player-set + venue coords (same key the
-    // render path uses for alternative-dates collapsing).
-    function getGroupKey(item: Item): string {
-      if (item.type === 'road') {
-        const players = new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap((g) => g.playerNames)])
-        const venueKey = `${item.trip.anchorGame.venue.coords.lat.toFixed(3)},${item.trip.anchorGame.venue.coords.lng.toFixed(3)}`
-        return `road|${[...players].sort().join(',')}|${venueKey}`
-      }
-      const venueKey = `${item.visit.venue.coords.lat.toFixed(3)},${item.visit.venue.coords.lng.toFixed(3)}`
-      return `flyin|${[...item.visit.playerNames].sort().join(',')}|${venueKey}`
-    }
-    const playerToTripNum = new Map<string, number>()
-    const playerToAllTripNums = new Map<string, number[]>()
-    const seenGroups = new Set<string>()
-    let displayIdx = 0
-    for (const item of items) {
-      const key = getGroupKey(item)
-      if (seenGroups.has(key)) continue
-      seenGroups.add(key)
-      displayIdx++
-      const playerNames = item.type === 'road'
-        ? new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap((g) => g.playerNames)])
-        : new Set(item.visit.playerNames)
-      // Track first occurrence (for backwards compat) AND every trip this
-      // player appears in (so the status banner can show "Trips #1, #2, #4"
-      // when a priority player is in multiple matched trips — Kent's
-      // 2026-06-09 catch: "Cebert is in all trips so why does it say Trip 1?").
-      for (const name of playerNames) {
-        if (!playerToTripNum.has(name)) playerToTripNum.set(name, displayIdx)
-        const arr = playerToAllTripNums.get(name) ?? []
-        arr.push(displayIdx)
-        playerToAllTripNums.set(name, arr)
-      }
-    }
-    return {
-      findTripNum: (playerName: string) => playerToTripNum.get(playerName) ?? 0,
-      findAllTripNums: (playerName: string) => playerToAllTripNums.get(playerName) ?? [],
-      groupCount: displayIdx,
-    }
-  }, [tripPlan, displayedFlyIns, priorityPlayers, sortBy])
+  // Shared trip grouping + numbering — one source of truth for "Trip #N"
+  // across the Priority Player Results, status banner, and the card list.
+  // See groupAndNumberTrips.ts for the history of why this must be shared.
+  const tripGrouping = useMemo(
+    () => tripPlan
+      ? groupAndNumberTrips({ trips: tripPlan.trips, flyInVisits: displayedFlyIns, priorityPlayers, sortBy })
+      : null,
+    [tripPlan, displayedFlyIns, priorityPlayers, sortBy],
+  )
 
   const anyScheduleLoading = schedulesLoading || ncaaLoading || hsLoading
   const allSchedulesLoaded = proGames.length > 0 && ncaaGames.length > 0 && (!hasHsPlayers || hsGames.length > 0)
@@ -486,67 +424,10 @@ export default function TripPlanner() {
 
   // (formatAge removed — schedule badges simplified)
 
-  // Auto-load on mount: use cached data if fresh, otherwise fetch
-  // Also detect new teams/schools not in cache (roster changes)
-  const schedulesInitialized = useRef(false)
-  useEffect(() => {
-    if (schedulesInitialized.current) return
-    if (players.length === 0) return // wait for roster
-    if (anyScheduleLoading) return // already in progress
-
-    // If we have cached data, check for gaps (new players/teams not in cache)
-    if (allSchedulesLoaded) {
-      schedulesInitialized.current = true
-      // Check for new teams not in cached Pro data
-      const assignments = useScheduleStore.getState().playerTeamAssignments
-      const assignedTeamIds = new Set(Object.values(assignments).map((a) => a.teamId))
-      const cachedSet = new Set(cachedProTeamIds)
-      const missingProTeams = [...assignedTeamIds].filter((id) => !cachedSet.has(id))
-
-      // Always re-run HS + NCAA schedule conversion on startup — bundled data is
-      // instant and ensures venue coords from the latest generation are used.
-      const hsOrgs = players
-        .filter((p) => p.level === 'HS' && p.state)
-        .map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
-      if (hsOrgs.length > 0) {
-        useScheduleStore.getState().fetchHsSchedules(hsOrgs)
-      }
-      const ncaaAllOrgs = players
-        .filter((p) => p.level === 'NCAA' && true)
-        .map((p) => ({ playerName: p.playerName, org: p.org }))
-      if (ncaaAllOrgs.length > 0) {
-        useScheduleStore.getState().fetchNcaaSchedules(ncaaAllOrgs)
-      }
-
-      if (missingProTeams.length > 0) {
-        handleIncrementalLoad(missingProTeams, [])
-      }
-      return
-    }
-
-    // No cached data — full load
-    schedulesInitialized.current = true
-    handleLoadAllSchedules()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [players.length, allSchedulesLoaded, anyScheduleLoading])
-
-  async function handleIncrementalLoad(missingProTeamIds: number[], missingNcaaOrgs: string[]) {
-    const schedStore = useScheduleStore.getState()
-    // For Pro: re-fetch will include new teams automatically since it reads current assignments
-    if (missingProTeamIds.length > 0) {
-      const y = new Date().getFullYear()
-      schedStore.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
-    }
-    // For NCAA: fetch only the missing schools
-    if (missingNcaaOrgs.length > 0) {
-      const ncaaOrgs = players
-        .filter((p) => p.level === 'NCAA' && missingNcaaOrgs.includes(p.org) && true)
-        .map((p) => ({ playerName: p.playerName, org: p.org }))
-      if (ncaaOrgs.length > 0) {
-        schedStore.fetchNcaaSchedules(ncaaOrgs, { merge: true })
-      }
-    }
-  }
+  // NOTE: schedule auto-loading happens ONCE at the App level (AutoFetchData
+  // in App.tsx) — it fires as soon as the roster loads, regardless of which
+  // tab Kent lands on first. TripPlanner only reads the store; the manual
+  // "Load Schedules" button below covers retry/refresh.
 
   async function handleLoadAllSchedules() {
     if (anyScheduleLoading) return
@@ -626,36 +507,6 @@ export default function TripPlanner() {
             )}
           </div>
 
-          {/* Freshness row — small status pills for each data layer */}
-          {allSchedulesLoaded && !anyScheduleLoading && (
-            <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-text-dim">
-              <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title={`Pro schedules last fetched ${relativeAge(proFetchedAt ? new Date(proFetchedAt).toISOString() : null)}. Live from MLB Stats API.`}>
-                Pro · {proGames.length} games · {proStale ? <span className="text-accent-orange">stale</span> : relativeAge(proFetchedAt ? new Date(proFetchedAt).toISOString() : null)}
-              </span>
-              <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title="NCAA schedules are bundled from D1Baseball generation. Static.">
-                NCAA · {ncaaGames.length} games · bundled
-              </span>
-              {hasHsPlayers && (
-                <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title="HS schedules are bundled from a generated CSV. Static.">
-                  HS · {hsGames.length} games · bundled
-                </span>
-              )}
-              {summerAssignmentsCount > 0 && (
-                <span className="rounded bg-gray-800/60 px-1.5 py-0.5"
-                  title={`${summerActiveCount} active summer assignment(s); ${summerGamesCount} games loaded${summerUnresolved > 0 ? `; ${summerUnresolved} player(s) without fetchable schedule (PGCBL/NECBL/FCBL pending)` : ''}.`}>
-                  Summer · {summerGamesCount} games · {relativeAge(summerFetchedAt)}
-                  {summerUnresolved > 0 && <span className="ml-1 text-accent-orange">({summerUnresolved} pending)</span>}
-                </span>
-              )}
-              {rosterMovesCheckedAt && (
-                <span className="rounded bg-gray-800/60 px-1.5 py-0.5"
-                  title={`MLB transactions checked ${relativeAge(rosterMovesCheckedAt)}. ${rosterMovesCount} player movement(s) detected.`}>
-                  Roster moves · {rosterMovesCount === 0 ? 'none' : `${rosterMovesCount} detected`} · {relativeAge(rosterMovesCheckedAt)}
-                </span>
-              )}
-            </div>
-          )}
-
           {/* Per-source progress bars — only during active network fetches, not cached restores */}
           {anyScheduleLoading && !allSchedulesLoaded && (
             <div className="mt-3 space-y-2">
@@ -701,36 +552,79 @@ export default function TripPlanner() {
           </div>
         )}
 
-        {/* Refine bar — the date range, starting city, and drive radius are
-            all shared with the Map tab via the trip store. Most users set
-            them on the Map and arrive here ready to generate. We surface a
-            one-line summary by default and offer "Edit" to expand. */}
-        <div className="mb-3 rounded-lg border border-border bg-gray-950/30 px-3 py-2">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-            <span className="text-text-dim/60 uppercase tracking-wide text-[10px]">Synced w/ Map:</span>
-            <span className="text-text">
-              <span className="text-text-dim/60">Dates</span> {formatDate(startDate)}–{formatDate(endDate)}
-            </span>
-            <span className="text-text-dim/30">·</span>
-            <span className="text-text">
-              <span className="text-text-dim/60">From</span> {homeBaseName}
-            </span>
-            <span className="text-text-dim/30">·</span>
-            <span className="text-text">
-              <span className="text-text-dim/60">Drive</span> {Math.floor(maxDriveMinutes / 60)}h
-            </span>
-            <button
-              onClick={() => setSharedControlsOpen((v) => !v)}
-              className="ml-auto rounded-md border border-border px-2 py-0.5 text-[10px] text-text-dim hover:text-text hover:border-accent-blue/50"
-              title="Show the shared filter controls in this tab"
-            >
-              {sharedControlsOpen ? 'Hide' : 'Edit'}
-            </button>
+        {/* Top row — dates + starting city + Generate, always visible.
+            These are shared with the Map tab via the trip store. */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="mb-1 block text-xs text-text-dim">Start Date</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  const val = e.target.value
+                  if (!val) return
+                  if (val > endDate) {
+                    const end = new Date(val + 'T12:00:00')
+                    end.setDate(end.getDate() + 7)
+                    setDateRange(val, end.toISOString().split('T')[0]!)
+                  } else {
+                    setDateRange(val, endDate)
+                  }
+                }}
+                className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
+              />
+              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
+                {getDayName(startDate)}
+              </span>
+            </div>
           </div>
+          <div>
+            <label className="mb-1 block text-xs text-text-dim">End Date</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setDateRange(startDate, e.target.value)}
+                className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
+              />
+              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
+                {getDayName(endDate)}
+              </span>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-text-dim">Starting From</label>
+            <CityPicker
+              value={homeBaseName}
+              onChange={(coords, name) => setHomeBase(coords, name)}
+              presets={STARTING_LOCATIONS.map((l) => ({ name: l.name, coords: { lat: l.coords.lat, lng: l.coords.lng } }))}
+              buttonClass="min-w-[160px] py-1.5 text-sm"
+              title="Where you'll be traveling from. Type any city or pick from common ones."
+            />
+          </div>
+          {startDate > endDate && (
+            <p className="self-center text-xs text-accent-red">End date is before start date</p>
+          )}
+          <button
+            onClick={generateTrips}
+            disabled={!canGenerate || startDate > endDate}
+            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
+          >
+            {computing ? 'Computing...' : 'Generate Trips'}
+          </button>
+          {tripPlan && (
+            <button
+              onClick={clearTrips}
+              className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-dim hover:text-text hover:bg-gray-800 transition-colors"
+            >
+              Clear Results
+            </button>
+          )}
         </div>
 
-        {/* Quick date presets — always available as a one-click shortcut. */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        {/* Quick date presets + shared-with-Map note */}
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           {([
             { label: 'Next 30 days', days: 30 },
             { label: 'Next 3 months', days: 90 },
@@ -754,63 +648,25 @@ export default function TripPlanner() {
               {label}
             </button>
           ))}
+          <span className="text-[11px] text-text-dim/50" title="Dates and starting city are shared with the Map tab — change them here or there, both stay in sync.">
+            Same dates as Map
+          </span>
         </div>
 
-        <div className="flex flex-wrap items-end gap-3">
-          {/* Shared-with-Map controls — hidden by default behind the "Edit"
-              toggle in the Synced banner above. Keeps the planner focused on
-              trip-specific knobs (flight cap, trip length) which can't be
-              set elsewhere. */}
+        {/* Trip options — the drive/flight/length caps. Tucked behind a
+            disclosure so results stay close to the Generate button. */}
+        <div className="mt-3">
+          <button
+            onClick={() => setSharedControlsOpen((v) => !v)}
+            className="text-xs text-text-dim hover:text-text transition-colors"
+          >
+            {sharedControlsOpen ? '▾' : '▸'} Trip options
+            <span className="text-text-dim/50">
+              {' '}— drive up to {Math.floor(maxDriveMinutes / 60)}h · flight up to {maxFlightHours}h · {maxNights} night{maxNights !== 1 ? 's' : ''} max
+            </span>
+          </button>
           {sharedControlsOpen && (
-            <>
-              <div>
-                <label className="mb-1 block text-xs text-text-dim">Start Date</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      if (!val) return
-                      if (val > endDate) {
-                        const end = new Date(val + 'T12:00:00')
-                        end.setDate(end.getDate() + 7)
-                        setDateRange(val, end.toISOString().split('T')[0]!)
-                      } else {
-                        setDateRange(val, endDate)
-                      }
-                    }}
-                    className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
-                  />
-                  <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
-                    {getDayName(startDate)}
-                  </span>
-                </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-text-dim">End Date</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setDateRange(startDate, e.target.value)}
-                    className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
-                  />
-                  <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
-                    {getDayName(endDate)}
-                  </span>
-                </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-text-dim">Starting From</label>
-                <CityPicker
-                  value={homeBaseName}
-                  onChange={(coords, name) => setHomeBase(coords, name)}
-                  presets={STARTING_LOCATIONS.map((l) => ({ name: l.name, coords: { lat: l.coords.lat, lng: l.coords.lng } }))}
-                  buttonClass="min-w-[160px] py-1.5 text-sm"
-                  title="Where you'll be traveling from. Type any city or pick from common ones."
-                />
-              </div>
+            <div className="mt-2 flex flex-wrap items-end gap-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
               <div>
                 <label className="mb-1 block text-xs text-text-dim">
                   Max Drive: {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''}
@@ -818,94 +674,73 @@ export default function TripPlanner() {
                 <input
                   type="range"
                   min={120}
-                  max={300}
-                  step={15}
+                  max={480}
+                  step={30}
                   value={maxDriveMinutes}
                   onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
                   className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
                 />
-                <p className="mt-0.5 text-[9px] text-text-dim/50" title="Drive times are rough estimates — actual times depend on traffic and route">
+                <p className="mt-0.5 text-[11px] text-text-dim/50" title="Drive times are rough estimates — actual times depend on traffic and route">
                   {homeBaseName === 'Orlando, FL'
-                    ? (maxDriveMinutes <= 150 ? 'Covers central FL' : maxDriveMinutes <= 210 ? 'Reaches Tampa, Jacksonville, Port St. Lucie' : maxDriveMinutes <= 270 ? 'Reaches Tallahassee, South FL' : 'Reaches most of FL + southern GA')
+                    ? (maxDriveMinutes <= 150 ? 'Covers central FL' : maxDriveMinutes <= 210 ? 'Reaches Tampa, Jacksonville, Port St. Lucie' : maxDriveMinutes <= 270 ? 'Reaches Tallahassee, South FL' : maxDriveMinutes <= 360 ? 'Reaches most of FL + southern GA' : 'Reaches FL, GA, and into the Carolinas')
                     : `~${Math.round(maxDriveMinutes / 60)}h radius from ${homeBaseName}`}
                   {' · estimates only'}
                 </p>
               </div>
-            </>
-          )}
-          <div>
-            <label className="mb-1 block text-xs text-text-dim">
-              Max Flight: {maxFlightHours}h
-            </label>
-            <input
-              type="range"
-              min={1}
-              max={8}
-              step={0.5}
-              value={maxFlightHours}
-              onChange={(e) => setMaxFlightHours(parseFloat(e.target.value))}
-              className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
-            />
-            <p className="mt-0.5 text-[9px] text-text-dim/50" title="Pure flight (air) time only — does not include airport / rental car overhead. Add ~3h for door-to-door.">
-              {maxFlightHours <= 1.5 ? 'Short hops only (NY→BOS, ATL→CLT)' : maxFlightHours <= 2.5 ? 'Reaches NE corridor / Midwest' : maxFlightHours <= 4 ? 'Most domestic (coast-to-coast tight)' : maxFlightHours <= 5.5 ? 'Coast-to-coast comfortable' : 'All domestic + Hawaii'}
-              {' · pure flight, not door-to-door'}
-            </p>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-text-dim">
-              Max Trip: {maxNights} night{maxNights !== 1 ? 's' : ''}
-            </label>
-            <div className="flex gap-1">
-              {([1, 2, 3, 4] as const).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setMaxNights(n)}
-                  title={n === 1 ? 'Day trips and overnights only — back home the next day.' : n === 2 ? 'Up to 2 nights away — covers most multi-stop trips.' : n === 3 ? 'Up to 3 nights — good when family is coming along.' : 'Extended trips up to 4 nights away.'}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                    maxNights === n ? 'bg-accent-blue/20 text-accent-blue ring-1 ring-accent-blue/30' : 'bg-gray-950 border border-border text-text-dim hover:text-text'
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
+              <div>
+                <label className="mb-1 block text-xs text-text-dim">
+                  Max Flight: {maxFlightHours}h
+                </label>
+                <input
+                  type="range"
+                  min={1}
+                  max={8}
+                  step={0.5}
+                  value={maxFlightHours}
+                  onChange={(e) => setMaxFlightHours(parseFloat(e.target.value))}
+                  className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
+                />
+                <p className="mt-0.5 text-[11px] text-text-dim/50" title="Pure flight (air) time only — does not include airport / rental car overhead. Add ~3h for door-to-door.">
+                  {maxFlightHours <= 1.5 ? 'Short hops only (NY→BOS, ATL→CLT)' : maxFlightHours <= 2.5 ? 'Reaches NE corridor / Midwest' : maxFlightHours <= 4 ? 'Most domestic (coast-to-coast tight)' : maxFlightHours <= 5.5 ? 'Coast-to-coast comfortable' : 'All domestic + Hawaii'}
+                  {' · pure flight, not door-to-door'}
+                </p>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-text-dim">
+                  Max Trip: {maxNights} night{maxNights !== 1 ? 's' : ''}
+                </label>
+                <div className="flex gap-1">
+                  {([1, 2, 3] as const).map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => setMaxNights(n)}
+                      title={n === 1 ? 'Day trips and overnights only — back home the next day.' : n === 2 ? 'Up to 2 nights away — covers most multi-stop trips.' : 'Up to 3 nights — the maximum trip length.'}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                        maxNights === n ? 'bg-accent-blue/20 text-accent-blue ring-1 ring-accent-blue/30' : 'bg-gray-950 border border-border text-text-dim hover:text-text'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-0.5 text-[11px] text-text-dim/50">
+                  {maxNights === 1 ? 'Quick trips — 1-2 days max' : maxNights === 2 ? 'Standard trips — up to 3 days' : 'Longest trips — 3-day rule'}
+                </p>
+              </div>
+              {/* Heartbeat boost toggle */}
+              <label className="flex w-full items-center gap-2 text-xs text-text-dim cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useHeartbeatBoost}
+                  onChange={(e) => setUseHeartbeatBoost(e.target.checked)}
+                  className="rounded border-border accent-accent-blue"
+                />
+                Prioritize overdue players
+                <span className="text-text-dim/50">(boost players who haven't been visited recently according to the <a href="https://sv-heartbeat.vercel.app/" target="_blank" rel="noopener noreferrer" className="text-accent-blue hover:underline">Heartbeat app</a>)</span>
+              </label>
             </div>
-            <p className="mt-0.5 text-[9px] text-text-dim/50">
-              {maxNights === 1 ? 'Quick trips — 1-2 days max' : maxNights === 2 ? 'Standard trips — up to 3 days' : maxNights === 3 ? 'Extended trips — up to 4 days' : 'Long trips — up to 5 days'}
-            </p>
-          </div>
-          {/* Starting From was previously rendered here on the right; moved
-              up to sit next to End Date. */}
-          {startDate > endDate && (
-            <p className="self-center text-xs text-accent-red">End date is before start date</p>
-          )}
-          <button
-            onClick={generateTrips}
-            disabled={!canGenerate || startDate > endDate}
-            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
-          >
-            {computing ? 'Computing...' : 'Generate Trips'}
-          </button>
-          {tripPlan && (
-            <button
-              onClick={clearTrips}
-              className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-dim hover:text-text hover:bg-gray-800 transition-colors"
-            >
-              Clear Results
-            </button>
           )}
         </div>
-
-        {/* Heartbeat boost toggle */}
-        <label className="mt-3 flex items-center gap-2 text-xs text-text-dim cursor-pointer">
-          <input
-            type="checkbox"
-            checked={useHeartbeatBoost}
-            onChange={(e) => setUseHeartbeatBoost(e.target.checked)}
-            className="rounded border-border accent-accent-blue"
-          />
-          Prioritize overdue players
-          <span className="text-text-dim/50">(boost players who haven't been visited recently according to the <a href="https://sv-heartbeat.vercel.app/" target="_blank" rel="noopener noreferrer" className="text-accent-blue hover:underline">Heartbeat app</a>)</span>
-        </label>
 
         {/* Priority players */}
         <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
@@ -967,14 +802,18 @@ export default function TripPlanner() {
               <p className="mt-2 text-sm text-text-dim whitespace-pre-line">{progressDetail}</p>
             )}
             <p className="mt-3 text-xs text-text-dim">
-              Make sure all schedule data is loaded before generating trips. Go to the <strong>Player Setup</strong> tab to load schedules.
+              Trips need game schedules. Load them right here, or check the <strong>Schedule</strong> tab to see what's already loaded.
             </p>
+            <button
+              onClick={handleLoadAllSchedules}
+              disabled={anyScheduleLoading}
+              className="mt-2 rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
+            >
+              {anyScheduleLoading ? 'Loading schedules...' : 'Load Schedules'}
+            </button>
           </div>
         )}
       </div>
-
-      {/* Did you know? — rotating app tips */}
-      <DidYouKnow />
 
       {/* First-time welcome — dismissible */}
       {!tripPlan && !computing && <WelcomeHint />}
@@ -994,8 +833,8 @@ export default function TripPlanner() {
               different regions (e.g. Tampa drive vs Phoenix flight), don't
               force-combine into one impractical 4-day trip — show them
               separately AND name the situation up-front. */}
-          {tripPlan.priorityResults && tripPlan.priorityResults.length > 0 && (() => {
-            const findUnifiedTripNum = tripDisplayInfo.findTripNum
+          {tripPlan.priorityResults && tripPlan.priorityResults.length > 0 && tripGrouping && (() => {
+            const findUnifiedTripNum = tripGrouping.findTripNum
             const assignments = useScheduleStore.getState().playerTeamAssignments
 
             // Build per-player display rows with transport mode + city
@@ -1097,95 +936,14 @@ export default function TripPlanner() {
             </div>
             )})()}
 
-          {/* Player Coverage — answers "where is Player X?" */}
-          <PlayerCoverageCard
-            players={players}
-            allGames={[...proGames, ...ncaaGames, ...hsGames]}
-            onPlayerClick={setSelectedPlayer}
-            onLoadAll={handleLoadAllSchedules}
-            loadingAll={anyScheduleLoading}
-          />
-
-          {/* Coverage stats */}
-          {(() => {
-            // Collect all player names that appear in road trips
-            const roadTripPlayerNames = [...new Set(tripPlan.trips.flatMap((t) => [
-              ...t.anchorGame.playerNames,
-              ...t.nearbyGames.flatMap((g) => g.playerNames),
-            ]))]
-            // Collect fly-in player names
-            const flyInPlayerNames = [...new Set(tripPlan.flyInVisits.flatMap((v) => v.playerNames))]
-            // Unique players across ALL trip types
-            const allTripPlayerNames = [...new Set([...roadTripPlayerNames, ...flyInPlayerNames])]
-            const totalEligible = players.length
-
-            const notCoveredCount = Math.max(0, totalEligible - allTripPlayerNames.length)
-
-            // Build detailed breakdown of why players aren't covered
-            const coveredSet = new Set(allTripPlayerNames)
-            const uncoveredPlayers = players.filter((p) => !coveredSet.has(p.playerName))
-            const unvisitableMap = new Map(tripPlan.unvisitablePlayers.map((u) => [u.name, u.reason]))
-
-            // Group by reason — inactive players (from skippedPlayers) first
-            const skippedMap = new Map(tripPlan.skippedPlayers.map((s) => [s.name, s.reason]))
-            const inactivePlayers = uncoveredPlayers.filter((p) => {
-              const reason = skippedMap.get(p.playerName)
-              return reason && reason !== 'Tier 4 — no visits required'
-            })
-            const inactiveSet = new Set(inactivePlayers.map(p => p.playerName))
-            const remainingUncovered = uncoveredPlayers.filter(p => !inactiveSet.has(p.playerName))
-
-            const beyondFlight = remainingUncovered.filter((p) => unvisitableMap.get(p.playerName)?.startsWith('Beyond max flight'))
-            const noGamesInRange = remainingUncovered.filter((p) => {
-              const r = unvisitableMap.get(p.playerName)
-              return r && !r.includes('not selected') && (r.includes('No games in date range') || r.includes('season may be over'))
-            })
-            const noSchedule = remainingUncovered.filter((p) => {
-              const r = unvisitableMap.get(p.playerName)
-              return r && (r.includes('No schedule') || r.includes('No venue') || r.includes('geocoding'))
-            })
-            const otherUncovered = remainingUncovered.filter((p) =>
-              !beyondFlight.includes(p) && !noGamesInRange.includes(p) && !noSchedule.includes(p)
-            )
-
-            return (
-            <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatCard label="Total Trips" value={tripPlan.trips.length + displayedFlyIns.length} scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
-              <div title={`${allTripPlayerNames.length} of your ${totalEligible} players appear in at least one trip option.`}>
-                <StatCard label="Players in Trips" value={allTripPlayerNames.length} accent="blue" scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
-              </div>
-              <StatCard
-                label="Not Covered"
-                value={notCoveredCount}
-                accent={notCoveredCount <= 2 ? 'green' : 'orange'}
-                hoverNames={uncoveredPlayers.map((p) => p.playerName)}
-              />
-            </div>
-
-            {/* Not Covered explainer — expandable */}
-            {notCoveredCount > 0 && (
-              <NotCoveredExplainer
-                inactivePlayers={inactivePlayers}
-                skippedMap={skippedMap}
-                beyondFlight={beyondFlight}
-                noGamesInRange={noGamesInRange}
-                noSchedule={noSchedule}
-                otherUncovered={otherUncovered}
-                unvisitableMap={unvisitableMap}
-                onPlayerClick={setSelectedPlayer}
-                priorityPlayers={priorityPlayers}
-                setPriorityPlayers={setPriorityPlayers}
-              />
-            )}
-            </>
-            )
-          })()}
+          {/* Player Coverage + coverage stats moved into the collapsible
+              "Details" section below the results — Kent asked for results
+              first, diagnostics second. */}
 
           {/* Priority player status — the most important thing */}
-          {priorityPlayers.length > 0 && (() => {
-            // Use shared tripDisplayInfo for matching trip numbers.
-            const findAllTripNums = tripDisplayInfo.findAllTripNums
+          {priorityPlayers.length > 0 && tripGrouping && (() => {
+            // Use the shared grouping for matching trip numbers.
+            const findAllTripNums = tripGrouping.findAllTripNums
             const prioInTrip = priorityPlayers.filter((n) => findAllTripNums(n).length > 0)
             const prioMissing = priorityPlayers.filter((n) => findAllTripNums(n).length === 0)
             function formatTrips(name: string): string {
@@ -1233,96 +991,15 @@ export default function TripPlanner() {
             </div>
           )}
 
-          {/* Unified trip list — road trips and fly-ins sorted together */}
-          {(tripPlan.trips.length > 0 || tripPlan.flyInVisits.length > 0) && (() => {
-            // Build unified list: each item has a type, sort date, and the original data
-            type UnifiedItem =
-              | { type: 'road'; trip: typeof tripPlan.trips[0]; sortDate: string }
-              | { type: 'flyin'; visit: typeof tripPlan.flyInVisits[0]; sortDate: string }
-
-            const unified: UnifiedItem[] = [
-              ...tripPlan.trips.map((trip) => ({
-                type: 'road' as const,
-                trip,
-                sortDate: trip.anchorGame.date,
-              })),
-              ...displayedFlyIns.map((visit) => ({
-                type: 'flyin' as const,
-                visit,
-                sortDate: visit.dates[0] ?? '',
-              })),
-            ]
-
-            // Sort: when priority players are set, trips containing them
-            // rank FIRST (Kent 2026-06-08: "frustrating to get trips that do
-            // not include those players"). Within each group, by score desc.
+          {/* Unified trip list — road trips and fly-ins sorted together.
+              Grouping/numbering comes from the SHARED tripGrouping memo so
+              "Trip #N" here always matches the banners above. */}
+          {tripGrouping && (tripPlan.trips.length > 0 || tripPlan.flyInVisits.length > 0) && (() => {
+            const { unified, groups: numbered } = tripGrouping
             const prioritySet = new Set(priorityPlayers)
-            function itemHasPriorityPlayer(item: UnifiedItem): boolean {
-              if (prioritySet.size === 0) return false
-              if (item.type === 'road') {
-                if (item.trip.anchorGame.playerNames.some((n) => prioritySet.has(n))) return true
-                return item.trip.nearbyGames.some((g) => g.playerNames.some((n) => prioritySet.has(n)))
-              }
-              return item.visit.playerNames.some((n) => prioritySet.has(n))
-            }
-            unified.sort((a, b) => {
-              if (prioritySet.size > 0) {
-                const ap = itemHasPriorityPlayer(a) ? 0 : 1
-                const bp = itemHasPriorityPlayer(b) ? 0 : 1
-                if (ap !== bp) return ap - bp
-              }
-              const scoreA = a.type === 'road' ? (a.trip.scoreBreakdown?.finalScore ?? a.trip.visitValue) : (a.visit.visitValue)
-              const scoreB = b.type === 'road' ? (b.trip.scoreBreakdown?.finalScore ?? b.trip.visitValue) : (b.visit.visitValue)
-              return scoreB - scoreA
-            })
-
-            // --- Alternative Dates Grouping ---
-            // Group trips with the same players + destination into one card with date alternatives.
-            // Signature: type + sorted player names + venue coords (3 decimal places)
-            function getGroupKey(item: UnifiedItem): string {
-              if (item.type === 'road') {
-                const players = new Set([...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)])
-                const venueKey = `${item.trip.anchorGame.venue.coords.lat.toFixed(3)},${item.trip.anchorGame.venue.coords.lng.toFixed(3)}`
-                return `road|${[...players].sort().join(',')}|${venueKey}`
-              } else {
-                const venueKey = `${item.visit.venue.coords.lat.toFixed(3)},${item.visit.venue.coords.lng.toFixed(3)}`
-                return `flyin|${[...item.visit.playerNames].sort().join(',')}|${venueKey}`
-              }
-            }
-
-            type GroupedItem = {
-              primary: UnifiedItem
-              alternatives: UnifiedItem[] // other date options (sorted by score, best first)
-            }
-
-            const groupMap = new Map<string, GroupedItem>()
-            const groupOrder: string[] = [] // preserve insertion order (= score order)
-            for (const item of unified) {
-              const key = getGroupKey(item)
-              const existing = groupMap.get(key)
-              if (existing) {
-                existing.alternatives.push(item)
-              } else {
-                groupMap.set(key, { primary: item, alternatives: [] })
-                groupOrder.push(key)
-              }
-            }
-            const grouped: GroupedItem[] = groupOrder.map(k => groupMap.get(k)!)
-
-            // Apply final sort to grouped list
-            if (sortBy === 'date') {
-              grouped.sort((a, b) => a.primary.sortDate.localeCompare(b.primary.sortDate))
-            }
-            // (score sort is already applied — primary is the best-scored variant)
-
-            // Number trips sequentially — one counter across groups
-            const numbered = grouped.map((group, i) => ({
-              ...group,
-              displayIndex: i + 1,
-            }))
 
             // Filter helper — works on the primary item of each group
-            function passesFilters(item: UnifiedItem): boolean {
+            function passesFilters(item: UnifiedTripItem): boolean {
               // Transport type filter
               if (tripFilter === 'drive' && item.type !== 'road') return false
               if (tripFilter === 'fly' && item.type !== 'flyin') return false
@@ -1369,7 +1046,7 @@ export default function TripPlanner() {
             // options and just make sure the ones we suggest are good and
             // relevant to the filters."
             const relevantToFilters = prioritySet.size > 0
-              ? filtered.filter((g) => itemHasPriorityPlayer(g.primary))
+              ? filtered.filter((g) => itemHasPriorityPlayer(g.primary, prioritySet))
               : filtered
 
             // Cap displayed trips (default 5) with a Show all expander —
@@ -1379,30 +1056,7 @@ export default function TripPlanner() {
             const capped = showAllTrips ? relevantToFilters : relevantToFilters.slice(0, DEFAULT_TRIP_CAP)
             const hasMore = relevantToFilters.length > capped.length
 
-            const totalCollapsed = unified.length - grouped.length // how many trips were collapsed
-
-            // Confidence summary: count games by source across all trips
-            const confidenceCounts = { mlb: 0, d1: 0, hsConfirmed: 0, estimated: 0 }
-            const countedGameIds = new Set<string>()
-            function countGame(g: { id: string; source: import('../../types/schedule').ScheduleSource; confidence?: import('../../types/schedule').VisitConfidence }) {
-              if (countedGameIds.has(g.id)) return
-              countedGameIds.add(g.id)
-              if (g.source === 'mlb-api') confidenceCounts.mlb++
-              else if (g.source === 'ncaa-lookup' && g.confidence === 'high') confidenceCounts.d1++
-              else if (g.source === 'hs-lookup' && g.confidence === 'high') confidenceCounts.hsConfirmed++
-              else confidenceCounts.estimated++
-            }
-            for (const item of unified) {
-              if (item.type === 'road') {
-                countGame(item.trip.anchorGame)
-                for (const g of item.trip.nearbyGames) countGame(g)
-              } else if (item.visit.isCombo && item.visit.stops) {
-                for (const s of item.visit.stops) countGame({ id: `${s.venue.name}-${s.date}`, source: s.source, confidence: s.confidence })
-              } else {
-                countGame({ id: `${item.visit.venue.name}-${item.visit.dates[0]}`, source: item.visit.source, confidence: item.visit.confidence })
-              }
-            }
-            const totalGames = confidenceCounts.mlb + confidenceCounts.d1 + confidenceCounts.hsConfirmed + confidenceCounts.estimated
+            const totalCollapsed = unified.length - numbered.length // how many trips were collapsed
 
             return (
             <div id="section-road-trips">
@@ -1410,28 +1064,17 @@ export default function TripPlanner() {
                 <h3 className="text-sm font-semibold text-text">
                   Your Trips
                   <span className="ml-2 text-xs font-normal text-text-dim">
-                    {filtered.length === grouped.length
-                      ? `${grouped.length} trip options`
-                      : `${filtered.length} of ${grouped.length} trips`}
+                    {filtered.length === numbered.length
+                      ? `${numbered.length} trip options`
+                      : `${filtered.length} of ${numbered.length} trips`}
                     {totalCollapsed > 0 && ` (${totalCollapsed} alt dates merged)`}
                   </span>
                 </h3>
-                {totalGames > 0 && (
-                  <p className="mt-1 text-[11px] text-text-dim/70">
-                    Data quality: {' '}
-                    {confidenceCounts.mlb > 0 && <span className="text-accent-green">{confidenceCounts.mlb} confirmed <span className="text-text-dim/40">(MLB API)</span></span>}
-                    {confidenceCounts.mlb > 0 && (confidenceCounts.d1 + confidenceCounts.hsConfirmed + confidenceCounts.estimated > 0) && <span className="text-text-dim/30"> · </span>}
-                    {confidenceCounts.d1 > 0 && <span className="text-accent-blue/70">{confidenceCounts.d1} likely <span className="text-text-dim/40">(D1Baseball)</span></span>}
-                    {confidenceCounts.d1 > 0 && (confidenceCounts.hsConfirmed + confidenceCounts.estimated > 0) && <span className="text-text-dim/30"> · </span>}
-                    {confidenceCounts.hsConfirmed > 0 && <span className="text-accent-blue/70">{confidenceCounts.hsConfirmed} confirmed <span className="text-text-dim/40">(MaxPreps)</span></span>}
-                    {confidenceCounts.hsConfirmed > 0 && confidenceCounts.estimated > 0 && <span className="text-text-dim/30"> · </span>}
-                    {confidenceCounts.estimated > 0 && <span className="text-accent-orange">{confidenceCounts.estimated} estimated <span className="text-text-dim/40">(location approximate)</span></span>}
-                  </p>
-                )}
+                {/* Data-quality line moved into the Details section below */}
               </div>
 
               {/* Compact toolbar */}
-              <div className="sticky top-0 z-10 -mx-5 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-b-lg bg-surface px-5 pb-2 pt-2 border-b border-border/30">
+              <div className="sticky top-0 z-10 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-b-lg bg-surface pb-2 pt-2 border-b border-border/30">
                 <span className="text-[11px] text-text-dim">Sort:</span>
                 {([
                   { key: 'score', label: 'Best', tip: 'Sort by our recommendation — factors in player tier, travel efficiency, and how many players you can see per trip.' },
@@ -1441,7 +1084,7 @@ export default function TripPlanner() {
                     key={key}
                     onClick={() => setSortBy(key)}
                     title={tip}
-                    className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    className={`rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${
                       sortBy === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
                     }`}
                   >
@@ -1462,7 +1105,7 @@ export default function TripPlanner() {
                     key={key}
                     onClick={() => setTripFilter(key)}
                     title={tip}
-                    className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    className={`rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${
                       tripFilter === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
                     }`}
                   >
@@ -1481,7 +1124,7 @@ export default function TripPlanner() {
                     key={key}
                     onClick={() => setTripLengthFilter(key)}
                     title={tip}
-                    className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    className={`rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${
                       tripLengthFilter === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
                     }`}
                   >
@@ -1550,7 +1193,7 @@ export default function TripPlanner() {
                 )}
                 {unified.length > 0 && filtered.length === 0 && (
                   <p className="py-4 text-center text-sm text-text-dim">
-                    No trips match these filters. Try loosening the Days or Tier filter.
+                    No trips match these filters. Try switching Show back to "All" or Days to "Any".
                   </p>
                 )}
                 {prioritySet.size > 0 && filtered.length > 0 && relevantToFilters.length === 0 && (
@@ -1634,21 +1277,21 @@ export default function TripPlanner() {
                           <p className="mb-1 font-medium text-accent-blue">Only in #{o.idxA}</p>
                           {o.uniqueA.length > 0 ? o.uniqueA.map((n) => {
                             const p = playerMap.get(n)
-                            return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(T${p.tier})` : ''}</p>
+                            return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(${TIER_LABELS[p.tier] ?? ''})` : ''}</p>
                           }) : <p className="text-text-dim/50">None</p>}
                         </div>
                         <div>
                           <p className="mb-1 font-medium text-text-dim">Shared</p>
                           {o.shared.length > 0 ? o.shared.map((n) => {
                             const p = playerMap.get(n)
-                            return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(T${p.tier})` : ''}</p>
+                            return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(${TIER_LABELS[p.tier] ?? ''})` : ''}</p>
                           }) : <p className="text-text-dim/50">None</p>}
                         </div>
                         <div>
                           <p className="mb-1 font-medium text-accent-green">Only in #{o.idxB}</p>
                           {o.uniqueB.length > 0 ? o.uniqueB.map((n) => {
                             const p = playerMap.get(n)
-                            return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(T${p.tier})` : ''}</p>
+                            return <p key={n} className="text-text-dim cursor-pointer hover:text-accent-blue transition-colors" onClick={() => setSelectedPlayer(n)}>{n} {p ? `(${TIER_LABELS[p.tier] ?? ''})` : ''}</p>
                           }) : <p className="text-text-dim/50">None</p>}
                         </div>
                       </div>
@@ -1738,7 +1381,7 @@ export default function TripPlanner() {
                         {noGames.length} player{noGames.length !== 1 ? 's' : ''} with no games in date range
                         {(t1Count > 0 || t2Count > 0) && (
                           <span className="ml-2 text-xs font-normal text-accent-orange">
-                            ({t1Count > 0 ? `${t1Count} T1` : ''}{t1Count > 0 && t2Count > 0 ? ', ' : ''}{t2Count > 0 ? `${t2Count} T2` : ''} need attention)
+                            ({t1Count > 0 ? `${t1Count} must-see` : ''}{t1Count > 0 && t2Count > 0 ? ', ' : ''}{t2Count > 0 ? `${t2Count} high-priority` : ''} need attention)
                           </span>
                         )}
                       </summary>
@@ -1787,14 +1430,182 @@ export default function TripPlanner() {
             )
           })()}
 
-          {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length === 0 && (
-            <div className="rounded-xl border border-border bg-surface p-10 text-center">
-              <p className="text-text-dim">No trips could be generated for the selected date range.</p>
-              <p className="mt-1 text-xs text-text-dim/60">Try expanding the date range or assigning more players.</p>
-            </div>
-          )}
         </>
       )}
+
+      {/* Details — data freshness, quality, and coverage diagnostics.
+          Collapsed by default so results stay front and center. */}
+      <details className="rounded-xl border border-border/50 bg-surface">
+        <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-text-dim hover:text-text">
+          Details
+          <span className="ml-2 text-xs font-normal text-text-dim/50">data freshness, quality &amp; player coverage</span>
+        </summary>
+        <div className="border-t border-border/30 px-5 py-4 space-y-4">
+          {/* Freshness pills — one per data layer */}
+          {allSchedulesLoaded && !anyScheduleLoading ? (
+            <div className="flex flex-wrap gap-1.5 text-[10px] text-text-dim">
+              <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title={`Pro schedules last fetched ${relativeAge(proFetchedAt ? new Date(proFetchedAt).toISOString() : null)}. Live from MLB Stats API.`}>
+                Pro · {proGames.length} games · {proStale ? <span className="text-accent-orange">stale</span> : relativeAge(proFetchedAt ? new Date(proFetchedAt).toISOString() : null)}
+              </span>
+              <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title="NCAA schedules are bundled from D1Baseball generation. Static.">
+                NCAA · {ncaaGames.length} games · bundled
+              </span>
+              {hasHsPlayers && (
+                <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title="HS schedules are bundled from a generated CSV. Static.">
+                  HS · {hsGames.length} games · bundled
+                </span>
+              )}
+              {summerAssignmentsCount > 0 && (
+                <span className="rounded bg-gray-800/60 px-1.5 py-0.5"
+                  title={`${summerActiveCount} active summer assignment(s); ${summerGamesCount} games loaded${summerUnresolved > 0 ? `; ${summerUnresolved} player(s) without fetchable schedule (PGCBL/NECBL/FCBL pending)` : ''}.`}>
+                  Summer · {summerGamesCount} games · {relativeAge(summerFetchedAt)}
+                  {summerUnresolved > 0 && <span className="ml-1 text-accent-orange">({summerUnresolved} pending)</span>}
+                </span>
+              )}
+              {rosterMovesCheckedAt && (
+                <span className="rounded bg-gray-800/60 px-1.5 py-0.5"
+                  title={`MLB transactions checked ${relativeAge(rosterMovesCheckedAt)}. ${rosterMovesCount} player movement(s) detected.`}>
+                  Roster moves · {rosterMovesCount === 0 ? 'none' : `${rosterMovesCount} detected`} · {relativeAge(rosterMovesCheckedAt)}
+                </span>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-text-dim">{anyScheduleLoading ? 'Schedules are still loading...' : 'Schedules not loaded yet.'}</p>
+          )}
+
+          {/* Data quality — game-source confidence across the current results */}
+          {tripPlan && tripGrouping && (() => {
+            const confidenceCounts = { mlb: 0, d1: 0, hsConfirmed: 0, estimated: 0 }
+            const countedGameIds = new Set<string>()
+            function countGame(g: { id: string; source: import('../../types/schedule').ScheduleSource; confidence?: import('../../types/schedule').VisitConfidence }) {
+              if (countedGameIds.has(g.id)) return
+              countedGameIds.add(g.id)
+              if (g.source === 'mlb-api') confidenceCounts.mlb++
+              else if (g.source === 'ncaa-lookup' && g.confidence === 'high') confidenceCounts.d1++
+              else if (g.source === 'hs-lookup' && g.confidence === 'high') confidenceCounts.hsConfirmed++
+              else confidenceCounts.estimated++
+            }
+            for (const item of tripGrouping.unified) {
+              if (item.type === 'road') {
+                countGame(item.trip.anchorGame)
+                for (const g of item.trip.nearbyGames) countGame(g)
+              } else if (item.visit.isCombo && item.visit.stops) {
+                for (const s of item.visit.stops) countGame({ id: `${s.venue.name}-${s.date}`, source: s.source, confidence: s.confidence })
+              } else {
+                countGame({ id: `${item.visit.venue.name}-${item.visit.dates[0]}`, source: item.visit.source, confidence: item.visit.confidence })
+              }
+            }
+            const totalGames = confidenceCounts.mlb + confidenceCounts.d1 + confidenceCounts.hsConfirmed + confidenceCounts.estimated
+            if (totalGames === 0) return null
+            return (
+              <p className="text-[11px] text-text-dim/70">
+                Data quality: {' '}
+                {confidenceCounts.mlb > 0 && <span className="text-accent-green">{confidenceCounts.mlb} confirmed <span className="text-text-dim/40">(MLB API)</span></span>}
+                {confidenceCounts.mlb > 0 && (confidenceCounts.d1 + confidenceCounts.hsConfirmed + confidenceCounts.estimated > 0) && <span className="text-text-dim/30"> · </span>}
+                {confidenceCounts.d1 > 0 && <span className="text-accent-blue/70">{confidenceCounts.d1} likely <span className="text-text-dim/40">(D1Baseball)</span></span>}
+                {confidenceCounts.d1 > 0 && (confidenceCounts.hsConfirmed + confidenceCounts.estimated > 0) && <span className="text-text-dim/30"> · </span>}
+                {confidenceCounts.hsConfirmed > 0 && <span className="text-accent-blue/70">{confidenceCounts.hsConfirmed} confirmed <span className="text-text-dim/40">(MaxPreps)</span></span>}
+                {confidenceCounts.hsConfirmed > 0 && confidenceCounts.estimated > 0 && <span className="text-text-dim/30"> · </span>}
+                {confidenceCounts.estimated > 0 && <span className="text-accent-orange">{confidenceCounts.estimated} estimated <span className="text-text-dim/40">(location approximate)</span></span>}
+              </p>
+            )
+          })()}
+
+          {/* Coverage stats — who made it into a trip and who didn't */}
+          {tripPlan && (() => {
+            // Collect all player names that appear in road trips
+            const roadTripPlayerNames = [...new Set(tripPlan.trips.flatMap((t) => [
+              ...t.anchorGame.playerNames,
+              ...t.nearbyGames.flatMap((g) => g.playerNames),
+            ]))]
+            // Collect fly-in player names
+            const flyInPlayerNames = [...new Set(tripPlan.flyInVisits.flatMap((v) => v.playerNames))]
+            // Unique players across ALL trip types
+            const allTripPlayerNames = [...new Set([...roadTripPlayerNames, ...flyInPlayerNames])]
+            const totalEligible = players.length
+
+            const notCoveredCount = Math.max(0, totalEligible - allTripPlayerNames.length)
+
+            // Build detailed breakdown of why players aren't covered
+            const coveredSet = new Set(allTripPlayerNames)
+            const uncoveredPlayers = players.filter((p) => !coveredSet.has(p.playerName))
+            const unvisitableMap = new Map(tripPlan.unvisitablePlayers.map((u) => [u.name, u.reason]))
+
+            // Group by reason — inactive players (from skippedPlayers) first
+            const skippedMap = new Map(tripPlan.skippedPlayers.map((s) => [s.name, s.reason]))
+            const inactivePlayers = uncoveredPlayers.filter((p) => {
+              const reason = skippedMap.get(p.playerName)
+              return reason && reason !== 'Tier 4 — no visits required'
+            })
+            const inactiveSet = new Set(inactivePlayers.map(p => p.playerName))
+            const remainingUncovered = uncoveredPlayers.filter(p => !inactiveSet.has(p.playerName))
+
+            const beyondFlight = remainingUncovered.filter((p) => unvisitableMap.get(p.playerName)?.startsWith('Beyond max flight'))
+            const noGamesInRange = remainingUncovered.filter((p) => {
+              const r = unvisitableMap.get(p.playerName)
+              return r && !r.includes('not selected') && (r.includes('No games in date range') || r.includes('season may be over'))
+            })
+            const noSchedule = remainingUncovered.filter((p) => {
+              const r = unvisitableMap.get(p.playerName)
+              return r && (r.includes('No schedule') || r.includes('No venue') || r.includes('geocoding'))
+            })
+            const otherUncovered = remainingUncovered.filter((p) =>
+              !beyondFlight.includes(p) && !noGamesInRange.includes(p) && !noSchedule.includes(p)
+            )
+
+            return (
+            <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <StatCard label="Total Trips" value={tripPlan.trips.length + displayedFlyIns.length} scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
+              <div title={`${allTripPlayerNames.length} of your ${totalEligible} players appear in at least one trip option.`}>
+                <StatCard label="Players in Trips" value={allTripPlayerNames.length} accent="blue" scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
+              </div>
+              <StatCard
+                label="Not Covered"
+                value={notCoveredCount}
+                accent={notCoveredCount <= 2 ? 'green' : 'orange'}
+                hoverNames={uncoveredPlayers.map((p) => p.playerName)}
+                onClick={notCoveredCount > 0 ? () => setNotCoveredOpen((v) => !v) : undefined}
+              />
+            </div>
+
+            {/* Not Covered explainer — expandable (also toggled by clicking
+                the Not Covered card above) */}
+            {notCoveredCount > 0 && (
+              <NotCoveredExplainer
+                expanded={notCoveredOpen}
+                onToggle={() => setNotCoveredOpen((v) => !v)}
+                inactivePlayers={inactivePlayers}
+                skippedMap={skippedMap}
+                beyondFlight={beyondFlight}
+                noGamesInRange={noGamesInRange}
+                noSchedule={noSchedule}
+                otherUncovered={otherUncovered}
+                unvisitableMap={unvisitableMap}
+                onPlayerClick={setSelectedPlayer}
+                priorityPlayers={priorityPlayers}
+                setPriorityPlayers={setPriorityPlayers}
+              />
+            )}
+            </>
+            )
+          })()}
+
+          {/* Player Coverage — answers "where is Player X?" */}
+          {tripPlan && (
+            <PlayerCoverageCard
+              players={players}
+              allGames={[...proGames, ...ncaaGames, ...hsGames]}
+              onPlayerClick={setSelectedPlayer}
+              onLoadAll={handleLoadAllSchedules}
+              loadingAll={anyScheduleLoading}
+            />
+          )}
+        </div>
+      </details>
+
+      {/* Did you know? — rotating app tips (below results per Kent's flow) */}
+      <DidYouKnow />
 
       {/* Trip Anchor — "Already have a trip planned?" */}
       <TripAnchor
@@ -1816,14 +1627,20 @@ export default function TripPlanner() {
   )
 }
 
-function StatCard({ label, value, accent, scrollTo, hoverNames }: {
+function StatCard({ label, value, accent, scrollTo, hoverNames, onClick }: {
   label: string
   value: string | number
   accent?: string
   scrollTo?: string
   hoverNames?: string[]
+  onClick?: () => void
 }) {
-  const [showHover, setShowHover] = useState(false)
+  // Popover shows on hover (desktop) and PINS on click/tap (mobile-friendly —
+  // hover-only meant iPad users could never see the player list).
+  const [pinned, setPinned] = useState(false)
+  const [hovering, setHovering] = useState(false)
+  const hasNames = !!hoverNames && hoverNames.length > 0
+  const showPopover = hasNames && (pinned || hovering)
   const accentColor =
     accent === 'green' ? 'text-accent-green' :
     accent === 'blue' ? 'text-accent-blue' :
@@ -1831,20 +1648,26 @@ function StatCard({ label, value, accent, scrollTo, hoverNames }: {
     accent === 'red' ? 'text-accent-red' :
     'text-text'
 
-  const isClickable = !!scrollTo
+  // Click precedence: explicit onClick > toggle the popover > scroll target.
+  function handleClick() {
+    if (onClick) { onClick(); return }
+    if (hasNames) { setPinned((v) => !v); return }
+    if (scrollTo) document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  const isClickable = !!onClick || hasNames || !!scrollTo
   return (
     <div
       className={`relative rounded-xl border border-border bg-surface p-4 ${isClickable ? 'cursor-pointer hover:border-border/80 hover:bg-surface/80 transition-colors' : ''}`}
-      onClick={scrollTo ? () => document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) : undefined}
-      onMouseEnter={hoverNames && hoverNames.length > 0 ? () => setShowHover(true) : undefined}
-      onMouseLeave={() => setShowHover(false)}
+      onClick={isClickable ? handleClick : undefined}
+      onMouseEnter={hasNames ? () => setHovering(true) : undefined}
+      onMouseLeave={() => setHovering(false)}
     >
       <p className="text-xs font-medium text-text-dim">{label}</p>
       <p className={`mt-1 text-2xl font-bold ${accentColor}`}>{value}</p>
-      {showHover && hoverNames && hoverNames.length > 0 && (
+      {showPopover && (
         <div className="absolute left-0 top-full z-30 mt-1 max-h-48 w-64 overflow-y-auto rounded-lg border border-border bg-gray-950 p-2 shadow-lg">
-          <p className="mb-1 text-[10px] font-medium text-text-dim">{label} ({hoverNames.length})</p>
-          <p className="text-[11px] text-text leading-relaxed">{hoverNames.join(', ')}</p>
+          <p className="mb-1 text-[10px] font-medium text-text-dim">{label} ({hoverNames!.length}){pinned ? ' — tap card to close' : ''}</p>
+          <p className="text-[11px] text-text leading-relaxed">{hoverNames!.join(', ')}</p>
         </div>
       )}
     </div>
@@ -1866,7 +1689,8 @@ function TripAnchor({
   onPlayersFound?: (names: string[]) => void
 }) {
   const [anchorCity, setAnchorCity] = useState('')
-  const [, setAnchorCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [anchorCoords, setAnchorCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [anchorLabel, setAnchorLabel] = useState('') // cleaned city name for the Build-trip CTA
   const [searching, setSearching] = useState(false)
   const [results, setResults] = useState<Array<{ playerName: string; venue: string; date: string; driveMin: number; org: string; tier: number }>>([])
   const [expanded, setExpanded] = useState(false)
@@ -1906,6 +1730,7 @@ function TripAnchor({
       }
 
       setAnchorCoords(coords)
+      setAnchorLabel(airportMatch ? airportMatch.name : cleanCity)
 
       // Find all games within driving range of this anchor during the date range
       const { estimateDriveMinutes } = await import('../../lib/tripEngine')
@@ -1948,6 +1773,22 @@ function TripAnchor({
       console.warn('Anchor search failed:', err)
     }
     setSearching(false)
+  }
+
+  // Build a real trip anchored on this city: make it the trip origin (home
+  // base), keep the current date window, and generate. Mirrors the pattern
+  // DataTab's "Plan trip →" uses so the anchor flow ENDS in a trip, not
+  // just a player list.
+  function handleBuildTrip() {
+    if (!anchorCoords || !anchorLabel) return
+    const store = useTripStore.getState()
+    store.setHomeBase(anchorCoords, anchorLabel)
+    store.setDateRange(startDate, endDate) // seed the window explicitly
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    // Brief delay so the origin/date state propagates before generateTrips reads it.
+    setTimeout(() => {
+      store.generateTrips().catch((e) => console.warn('[trip-anchor] auto-generate failed:', e))
+    }, 100)
   }
 
   return (
@@ -1996,7 +1837,7 @@ function TripAnchor({
           {searching ? 'Searching...' : 'Find Players'}
         </button>
         {results.length > 0 && (
-          <button onClick={() => { setResults([]); setAnchorCity(''); setExpanded(false); onPlayersFound?.([]) }} className="text-xs text-text-dim hover:text-text">Clear</button>
+          <button onClick={() => { setResults([]); setAnchorCity(''); setAnchorCoords(null); setAnchorLabel(''); setExpanded(false); onPlayersFound?.([]) }} className="text-xs text-text-dim hover:text-text">Clear</button>
         )}
       </div>
 
@@ -2016,9 +1857,19 @@ function TripAnchor({
 
         return (
         <div className="mt-3 rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
-          <p className="mb-3 text-xs text-text-dim">
-            <span className="font-medium text-purple-400">{playerEntries.length} players</span> within 3h drive of {anchorCity}
-          </p>
+          {/* Primary action — turn this city into an actual trip */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-text-dim">
+              <span className="font-medium text-purple-400">{playerEntries.length} players</span> within 3h drive of {anchorLabel || anchorCity}
+            </p>
+            <button
+              onClick={handleBuildTrip}
+              className="rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent-blue/80 transition-colors"
+              title={`Set ${anchorLabel || anchorCity} as your starting point and generate trip options for these dates`}
+            >
+              Build trip from {anchorLabel || anchorCity} →
+            </button>
+          </div>
           <div className="max-h-64 overflow-y-auto space-y-2">
             {playerEntries.map(([name, info]) => {
               const sortedDates = info.dates.sort()
@@ -2121,8 +1972,6 @@ function FlyInCard({
     else if (activeVisit.source === 'mlb-api' && firstPlayer) orgLabel = firstPlayer.org
   }
 
-  const milesDisplay = Math.round(activeVisit.distanceKm * 0.621).toLocaleString()
-
   // Date formatting
   const firstDate = activeVisit.dates[0]
   const lastDate = activeVisit.dates[activeVisit.dates.length - 1]
@@ -2130,15 +1979,8 @@ function FlyInCard({
     ? `${formatDate(firstDate)} – ${formatDate(lastDate)}`
     : firstDate ? formatDate(firstDate) : ''
 
-  // Natural language summary
   const t1Names = activeVisit.playerNames.filter((n) => playerMap.get(n)?.tier === 1)
-  const t2Names = activeVisit.playerNames.filter((n) => playerMap.get(n)?.tier === 2)
   const isPriority = activeVisit.playerNames.some((n) => priorityPlayers.includes(n))
-  let summary = `Fly to ${activeVisit.venue.name} to see ${activeVisit.playerNames.length} player${activeVisit.playerNames.length !== 1 ? 's' : ''}`
-  summary += ` — ${activeVisit.isHome ? `${orgLabel || 'team'} home game` : `${orgLabel || 'team'} away series`}.`
-  summary += ` ~${activeVisit.estimatedTravelHours}h travel (${milesDisplay} mi). Rental car likely needed.`
-  if (t1Names.length > 0) summary += ` Top priority: ${t1Names.join(', ')}.`
-  if (t2Names.length > 0) summary += ` Also seeing: ${t2Names.join(', ')}.`
 
   // Build "why this trip" explanation
   let flyInWhy = ''
@@ -2207,7 +2049,7 @@ function FlyInCard({
         <div className="flex shrink-0 items-center gap-2 text-[11px] text-text-dim/60">
           <span>{activeVisit.dates.length + 1} days</span>
           <span className="text-text-dim/20">·</span>
-          <span>~{Math.round(activeVisit.estimatedTravelHours - 3)}h flight</span>
+          <span>~{flightHoursLabel(activeVisit.estimatedTravelHours)}h flight</span>
           {allVariants.length > 1 && (
             <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-bold text-purple-400">
               {allVariants.length} dates
@@ -2238,8 +2080,8 @@ function FlyInCard({
                 }`}
               >
                 {label}
-                {isTue && <span className="ml-1 text-[9px] opacity-70">Tue</span>}
-                {vi === 0 && <span className="ml-1 text-[9px] opacity-50">best</span>}
+                {isTue && <span className="ml-1 text-[11px] opacity-70">Tue</span>}
+                {vi === 0 && <span className="ml-1 text-[11px] opacity-50">best</span>}
               </button>
             )
           })}
@@ -2248,9 +2090,15 @@ function FlyInCard({
 
       {/* Expanded content — day-by-day itinerary */}
       {expanded && (() => {
-        const bestDay = activeVisit.dates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === 2) ?? activeVisit.dates[0]!
-        const isTue = new Date(bestDay + 'T12:00:00Z').getUTCDay() === 2
-        const hasMultipleDays = activeVisit.dates.length > 1
+        // Days render in chronological order. A Tuesday (Kent's preferred day
+        // for position players) gets a "best day" badge instead of being
+        // forced to Day 1 out of order.
+        const isTueDate = (d: string) => new Date(d + 'T12:00:00Z').getUTCDay() === 2
+        const sortedDates = [...activeVisit.dates].sort()
+        const firstDate = sortedDates[0]!
+        const lastDate = sortedDates[sortedDates.length - 1]!
+        const hasMultipleDays = sortedDates.length > 1
+        const anyTue = sortedDates.some(isTueDate)
 
         // Combo trip: multi-stop fly-in with driving between venues
         if (activeVisit.isCombo && activeVisit.stops && activeVisit.stops.length > 1) {
@@ -2270,7 +2118,7 @@ function FlyInCard({
           <div className="mt-4 space-y-3">
             {/* Natural language summary */}
             <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
-              {formatDate(comboStops[0]!.date)} – {formatDate(comboStops[comboStops.length - 1]!.date)}: Fly to {nearestApt.name} ({nearestApt.code}) (~{Math.round(activeVisit.estimatedTravelHours - 3)}h flight).
+              {formatDate(comboStops[0]!.date)} – {formatDate(comboStops[comboStops.length - 1]!.date)}: Fly to {nearestApt.name} ({nearestApt.code}) (~{flightHoursLabel(activeVisit.estimatedTravelHours)}h flight).
               {comboStops.map((s, i) => {
                 const names = s.playerNames.map((n) => {
                   const p = playerMap.get(n)
@@ -2300,7 +2148,7 @@ function FlyInCard({
                       </span>
                     )}
                   </div>
-                  {i === 0 && <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{Math.round(activeVisit.estimatedTravelHours - 3)}h flight</span>}
+                  {i === 0 && <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{flightHoursLabel(activeVisit.estimatedTravelHours)}h flight</span>}
                 </div>
                 <div className="ml-4">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -2386,23 +2234,42 @@ function FlyInCard({
           <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
             {(() => {
               const apt = findNearestAirport(activeVisit.venue.coords)
-              return `${formatDate(bestDay)}${hasMultipleDays ? ` – ${formatDate(activeVisit.dates[activeVisit.dates.length - 1]!)}` : ''}: Fly to ${apt.name} (${apt.code}) (~${Math.round(activeVisit.estimatedTravelHours - 3)}h flight).`
+              return `${formatDate(firstDate)}${hasMultipleDays ? ` – ${formatDate(lastDate)}` : ''}: Fly to ${apt.name} (${apt.code}) (~${flightHoursLabel(activeVisit.estimatedTravelHours)}h flight).`
             })()}
             {' '}See {activeVisit.playerNames.map((n) => {
               const p = playerMap.get(n)
               return p ? `${n} (${p.org})` : n
-            }).join(' and ')}{isTue ? ' (Tuesday — best day for position players)' : ''}.
+            }).join(' and ')}{anyTue ? ` (${hasMultipleDays ? 'includes a Tuesday' : 'Tuesday'} — best day for position players)` : ''}.
             {' '}Fly home after.
           </p>
 
-          {/* Day 1: Travel + Game */}
-          <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
+          {/* Game days — chronological; the Tuesday gets a "best day" badge */}
+          {sortedDates.map((d, i) => {
+            const isTueDay = isTueDate(d)
+            const bestDayBadge = isTueDay && (
+              <span className="rounded bg-accent-blue/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue">best day — Tuesday</span>
+            )
+            if (i > 0) {
+              return (
+                <div key={d} className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-text-dim">Day {i + 1}</span>
+                    <span className="text-xs text-text-dim">{formatDate(d)}</span>
+                    {bestDayBadge}
+                    <span className="text-[10px] text-text-dim/50">Also available for games</span>
+                  </div>
+                </div>
+              )
+            }
+            return (
+          <div key={d} className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-purple-400">Day 1</span>
-                <span className="text-xs text-text-dim">{formatDate(bestDay)}{isTue ? ' (best day)' : ''}</span>
+                <span className="text-xs text-text-dim">{formatDate(d)}</span>
+                {bestDayBadge}
               </div>
-              <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{Math.round(activeVisit.estimatedTravelHours - 3)}h flight</span>
+              <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{flightHoursLabel(activeVisit.estimatedTravelHours)}h flight</span>
             </div>
 
             <div className="ml-4 space-y-2">
@@ -2427,7 +2294,7 @@ function FlyInCard({
                     <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${activeVisit.teamLabel || activeVisit.venue.name} high school baseball field`)}`} target="_blank" rel="noopener noreferrer" className="text-accent-blue/70 hover:text-accent-blue underline">Confirm on Google Maps ↗</a>
                   </p>
                 )}
-                {isTue && (
+                {isTueDay && (
                   <p className="mt-1 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>
                 )}
                 <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -2452,23 +2319,14 @@ function FlyInCard({
               </div>
             </div>
           </div>
-
-          {/* Day 2+ if multi-day */}
-          {hasMultipleDays && activeVisit.dates.filter(d => d !== bestDay).map((d, i) => (
-            <div key={d} className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-text-dim">Day {i + 2}</span>
-                <span className="text-xs text-text-dim">{formatDate(d)}</span>
-                <span className="text-[10px] text-text-dim/50">Also available for games</span>
-              </div>
-            </div>
-          ))}
+            )
+          })}
 
           {/* Return day */}
           <div className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-text-dim">Day {activeVisit.dates.length + 1}</span>
+                <span className="text-xs font-bold text-text-dim">Day {sortedDates.length + 1}</span>
                 <span className="text-xs text-text-dim/50">Fly home</span>
               </div>
             </div>
@@ -2536,10 +2394,13 @@ const APP_TIPS = [
 
 /* ── Not Covered Explainer ── shows who isn't in any trip and why ── */
 function NotCoveredExplainer({
+  expanded, onToggle,
   inactivePlayers, skippedMap,
   beyondFlight, noGamesInRange, noSchedule, otherUncovered, unvisitableMap, onPlayerClick,
   priorityPlayers, setPriorityPlayers,
 }: {
+  expanded: boolean
+  onToggle: () => void
   inactivePlayers: RosterPlayer[]
   skippedMap: Map<string, string>
   beyondFlight: RosterPlayer[]
@@ -2551,14 +2412,13 @@ function NotCoveredExplainer({
   priorityPlayers: string[]
   setPriorityPlayers: (players: string[]) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
   const total = inactivePlayers.length + beyondFlight.length + noGamesInRange.length + noSchedule.length + otherUncovered.length
   if (total === 0) return null
 
   return (
     <div className="rounded-xl border border-accent-orange/20 bg-accent-orange/5">
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={onToggle}
         className="flex w-full items-center justify-between px-4 py-2.5 text-left"
       >
         <span className="text-xs font-medium text-accent-orange">
@@ -2577,7 +2437,7 @@ function NotCoveredExplainer({
                   const reason = skippedMap.get(p.playerName) ?? p.status
                   return (
                     <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
-                      {p.playerName} <span className="rounded bg-accent-red/15 px-1 py-0.5 text-[9px] font-medium text-accent-red ml-0.5">{reason}</span>
+                      {p.playerName} <span className="rounded bg-accent-red/15 px-1 py-0.5 text-[10px] font-medium text-accent-red ml-0.5">{reason}</span>
                     </span>
                   )
                 })}
@@ -2650,7 +2510,7 @@ function NotCoveredExplainer({
             const sortedTiers = [...byTier.entries()].sort((a, b) => a[0] - b[0])
             const highTierCount = (byTier.get(1)?.length ?? 0) + (byTier.get(2)?.length ?? 0)
 
-            const canAddPriority = priorityPlayers.length < 3
+            const canAddPriority = priorityPlayers.length < PRIORITY_SLOTS
             const isAlreadyPriority = (name: string) => priorityPlayers.includes(name)
             const addAsPriority = (name: string) => {
               if (!canAddPriority || isAlreadyPriority(name)) return
@@ -2688,7 +2548,7 @@ function NotCoveredExplainer({
                           <span
                             key={p.playerName}
                             className={`rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10 ${clickable ? 'ring-1 ring-accent-blue/30 hover:ring-accent-blue/60' : ''} ${alreadyPrio ? 'opacity-50' : ''}`}
-                            title={isClickableTier ? (alreadyPrio ? 'Already a Priority Player' : canAddPriority ? 'Click to add as Priority Player' : 'Priority Player slots full (max 3)') : undefined}
+                            title={isClickableTier ? (alreadyPrio ? 'Already a Priority Player' : canAddPriority ? 'Click to add as Priority Player' : `Priority Player slots full (max ${PRIORITY_SLOTS})`) : undefined}
                             onClick={() => {
                               if (clickable) {
                                 addAsPriority(p.playerName)

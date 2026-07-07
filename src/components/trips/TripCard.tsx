@@ -18,6 +18,26 @@ interface Props {
   alternativeTrips?: TripCandidate[] // same players/destination, different dates
 }
 
+/** Badge whose explanation opens on click/tap — title tooltips are invisible
+ *  on touch devices (Kent often uses an iPad). Renders inside a flex-wrap
+ *  row; the expanded detail wraps onto its own full-width line. */
+function TapBadge({ label, detail, className }: { label: string; detail: string; className: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+        className={`${className} cursor-pointer`}
+        title={detail}
+      >
+        {label} {open ? '▴' : '▾'}
+      </button>
+      {open && <span className="basis-full text-[11px] text-text-dim leading-relaxed">{detail}</span>}
+    </>
+  )
+}
+
 function formatGameTime(timeStr?: string, source?: ScheduleSource): string {
   if (!timeStr) return ''
   if (source && source !== 'mlb-api') return 'Unconfirmed'
@@ -367,7 +387,7 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
         : stop.venueName
       const playerDescs = stop.players.map((name) => {
         const p = playerMap.get(name)
-        return p ? `${name} (T${p.tier})` : name
+        return p ? `${name} (${TIER_LABELS[p.tier] ?? `Tier ${p.tier}`})` : name
       })
       text += `  ${label}: ${playerDescs.join(', ')}\n`
     }
@@ -779,27 +799,25 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                                 >{gameTime}</span>
                               )}
                               {stop.confidence && stop.confidence !== 'high' && (
-                                <span
-                                  className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-[10px] text-accent-orange cursor-help"
-                                  title={stop.source === 'hs-lookup' && !stop.isHome
+                                <TapBadge
+                                  className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-[10px] text-accent-orange"
+                                  label={stop.source === 'hs-lookup' && !stop.isHome ? 'Est.' : stop.confidence === 'medium' ? 'Likely' : 'Unconfirmed'}
+                                  detail={stop.source === 'hs-lookup' && !stop.isHome
                                     ? `${stop.players.join(', ')} has an away game vs. ${stop.homeTeam}. We don't have the opponent's field address, so the location is estimated from ${stop.orgLabel}'s home area.`
                                     : stop.confidence === 'medium'
                                       ? `${stop.players.join(', ')}'s game is on the schedule but the exact venue isn't confirmed. Click "Verify" to double-check.`
                                       : `We're not sure where ${stop.players.join(', ')}'s game will be played. The schedule may have changed. Click "Verify" to confirm before planning around it.`}
-                                >
-                                  {stop.source === 'hs-lookup' && !stop.isHome ? 'Est.' : stop.confidence === 'medium' ? 'Likely' : 'Unconfirmed'}
-                                </span>
+                                />
                               )}
                               {stop.awayTeam === 'Spring Training' && (() => {
                                 const gameDate = new Date(stop.dates[0] + 'T12:00:00Z')
                                 const marchCutoff = new Date(gameDate.getUTCFullYear(), 2, 22) // Mar 22
                                 return gameDate >= marchCutoff ? (
-                                  <span
-                                    className="rounded bg-accent-red/10 px-1.5 py-0.5 text-[10px] text-accent-red cursor-help"
-                                    title="Spring training is ending. This player will be reassigned to a minor league affiliate soon — verify their current location before booking travel."
-                                  >
-                                    ST ending — verify location
-                                  </span>
+                                  <TapBadge
+                                    className="rounded bg-accent-red/10 px-1.5 py-0.5 text-[10px] text-accent-red"
+                                    label="Spring training ending — verify location"
+                                    detail="Spring training is ending. This player will be reassigned to a minor league affiliate soon — verify their current location before booking travel."
+                                  />
                                 ) : null
                               })()}
                               {stop.sourceUrl && (
@@ -870,11 +888,11 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
 
 /* ── Score explainer ── shows why this trip is ranked where it is ── */
 function ScoreExplainer({ breakdown, driveMinutes }: { breakdown: ScoreBreakdown; driveMinutes: number }) {
-  // Default open — Kent's 2026-06-08 interview flagged that he stopped trusting
-  // the trip planner because past attempts violated his rules silently.
-  // Showing the breakdown by default surfaces compliance up-front instead of
-  // hiding it behind a click.
-  const [open, setOpen] = useState(true)
+  // The compliance checkmarks (drive cap, trip-length cap) render in the
+  // always-visible row above — that's what rebuilt Kent's trust after the
+  // 2026-06-08 interview. The point-by-point math ("2 must-see (40pts)",
+  // Raw → Final) is scoring jargon, so it stays behind "show details".
+  const [open, setOpen] = useState(false)
   const parts: string[] = []
   if (breakdown.tier1Count > 0) parts.push(`${breakdown.tier1Count} must-see (${breakdown.tier1Points}pts)`)
   if (breakdown.tier2Count > 0) parts.push(`${breakdown.tier2Count} high-priority (${breakdown.tier2Points}pts)`)

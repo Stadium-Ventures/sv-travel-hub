@@ -193,10 +193,13 @@ export default function MapView() {
         />
       )}
 
-      {/* Two-pane: recommendations rail (left) · sticky map (right). */}
+      {/* Two-pane: recommendations rail (left) · sticky map (right).
+          On small screens the MAP renders first (order classes) — it's the
+          tab's namesake and used to sit below the fold under both
+          recommender panels. */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
         {/* ── Left rail: recommendations (scrolls with the page) ── */}
-        <div className="flex flex-col gap-3 lg:w-[460px] lg:shrink-0">
+        <div className="order-2 lg:order-none flex flex-col gap-3 lg:w-[460px] lg:shrink-0">
           {/* Summer coverage gap — only renders if any SV player is in a
               non-live summer league (e.g. PGCBL, NECBL, Northwoods). */}
           <SummerCoverageNotice />
@@ -252,10 +255,10 @@ export default function MapView() {
           )}
         </div>
 
-        {/* ── Right: sticky map. Fills the viewport height and pins in place
-            on desktop so it stays visible while the left rail scrolls. On
-            mobile it stacks below with a fixed height. ── */}
-        <div className="min-w-0 flex-1">
+        {/* ── Right on desktop / FIRST on mobile: sticky map. Fills the
+            viewport height and pins in place on desktop so it stays visible
+            while the left rail scrolls. ── */}
+        <div className="order-1 lg:order-none min-w-0 flex-1">
           <div className="h-[calc(100vh-180px)] min-h-[500px] lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]">
             {/* Map — when a specific player is selected, fitToMarkersKey changes,
                 telling MapContainer to zoom to wherever that player's venues are.
@@ -341,8 +344,8 @@ function ThinCoverageHint({ topPickPlayers }: { topPickPlayers: number }) {
 
 function strategyFooter(strategy: BestWindowStrategy): string {
   switch (strategy) {
-    case 't1-count':         return 'Ranked by T1 player count (windows that add new T1s).'
-    case 'overdue-priority': return 'Ranked by overdue T1/T2 players (windows that catch new overdue players).'
+    case 't1-count':         return 'Ranked by must-see player count (windows that add new must-sees).'
+    case 'overdue-priority': return 'Ranked by overdue must-see/high-priority players (windows that catch new overdue players).'
     case 'player-count':     return 'Ranked by unique player count.'
     case 'tuesday':          return 'Tuesday-bearing windows only, ranked by overall impact.'
     case 'impact':
@@ -357,10 +360,10 @@ function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult
   const top = windows[0]!
   switch (strategy) {
     case 'impact':
-      return `Top pick: ${top.uniquePlayerCount} players (${top.t1Count} T1 · ${top.t2Count} T2).`
+      return `Top pick: ${top.uniquePlayerCount} players (${top.t1Count} must-see · ${top.t2Count} high-priority).`
     case 't1-count': {
       const totalT1 = windows.reduce((s, w) => s + w.t1Count, 0)
-      return `Top pick has ${top.t1Count} T1 player${top.t1Count === 1 ? '' : 's'}. ${totalT1} T1 visit${totalT1 === 1 ? '' : 's'} across all ${windows.length} window${windows.length === 1 ? '' : 's'}.`
+      return `Top pick has ${top.t1Count} must-see player${top.t1Count === 1 ? '' : 's'}. ${totalT1} must-see visit${totalT1 === 1 ? '' : 's'} across all ${windows.length} window${windows.length === 1 ? '' : 's'}.`
     }
     case 'overdue-priority': {
       const totalOverdue = windows.reduce((s, w) => s + w.overdueCount, 0)
@@ -379,9 +382,9 @@ function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult
 }
 
 const STRATEGY_OPTIONS: { value: BestWindowStrategy; label: string; hint: string }[] = [
-  { value: 'impact',            label: 'Highest overall impact',     hint: 'Tier-weighted score — best mix of T1/T2 coverage' },
-  { value: 't1-count',          label: 'Most T1 players in one trip', hint: 'Maximize Tier 1 player count in the window' },
-  { value: 'overdue-priority',  label: 'Overdue high-priority players', hint: 'Catch T1/T2 players you haven\'t seen in 90+ days' },
+  { value: 'impact',            label: 'Highest overall impact',     hint: 'Tier-weighted score — best mix of must-see and high-priority coverage' },
+  { value: 't1-count',          label: 'Most must-see players in one trip', hint: 'Maximize must-see player count in the window' },
+  { value: 'overdue-priority',  label: 'Overdue high-priority players', hint: 'Catch must-see/high-priority players you haven\'t seen in 90+ days' },
   { value: 'player-count',      label: 'Most players (any tier)',     hint: 'Maximize total unique players regardless of tier' },
   { value: 'tuesday',           label: 'Includes a Tuesday',          hint: 'Best day for MiLB position-player visits' },
 ]
@@ -401,9 +404,12 @@ function BestWindowsPanel({
   setStrategy: (s: BestWindowStrategy) => void
   onApply: (w: WindowResult) => void
 }) {
-  // Default open so Kent always sees a recommendation without clicking. The
-  // user's panel state is preserved within the session via this local state.
-  const [open, setOpen] = useState(true)
+  // Default open on desktop so Kent always sees a recommendation without
+  // clicking; collapsed on small screens so the map (rendered first there)
+  // isn't pushed around by a tall panel. Session state preserved locally.
+  const [open, setOpen] = useState(() => {
+    try { return window.matchMedia('(min-width: 1024px)').matches } catch { return true }
+  })
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const topPick = windows[0]
   const currentStrategy = STRATEGY_OPTIONS.find((o) => o.value === strategy) ?? STRATEGY_OPTIONS[0]!
@@ -530,19 +536,19 @@ function BestWindowsPanel({
                     {w.t1Count > 0 && (
                       <span className="flex items-center gap-0.5 text-[11px] text-text-dim">
                         <span className={`inline-block h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[1]}`} />
-                        {w.t1Count} T1
+                        {w.t1Count} must-see
                       </span>
                     )}
                     {w.t2Count > 0 && (
                       <span className="flex items-center gap-0.5 text-[11px] text-text-dim">
                         <span className={`inline-block h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[2]}`} />
-                        {w.t2Count} T2
+                        {w.t2Count} high-priority
                       </span>
                     )}
                     {w.t3Count > 0 && (
                       <span className="flex items-center gap-0.5 text-[11px] text-text-dim">
                         <span className={`inline-block h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[3]}`} />
-                        {w.t3Count} T3
+                        {w.t3Count} standard
                       </span>
                     )}
                     {w.overdueCount > 0 && (
