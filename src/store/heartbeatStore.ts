@@ -14,7 +14,11 @@ async function fetchWithRetry(
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
     try {
-      const res = await fetchWithTimeout(url, { timeoutMs: 10000, ...options })
+      // 30s: the three heartbeat endpoints share Slack rate limits, so when
+      // fetched in parallel each can take 10s+ (observed 10.4s). A 10s budget
+      // silently starved this store for weeks — the fetch failed every
+      // session and lastFetchedAt froze.
+      const res = await fetchWithTimeout(url, { timeoutMs: 30000, ...options })
       if (res.ok || !RETRYABLE_STATUS.has(res.status)) {
         return res
       }
