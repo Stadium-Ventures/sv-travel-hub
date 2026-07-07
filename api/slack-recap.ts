@@ -23,16 +23,18 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 //   VITE_SCHEDULE_CSV_URL               — HS + JUCO schedule sheet (CSV)
 //   VITE_SUMMER_CSV_URL                 — Summer placement sheet (CSV)
 //
-// Usage:
-//   GET /api/slack-recap?secret=<CRON_SECRET>           → posts to Slack
-//   GET /api/slack-recap?secret=<CRON_SECRET>&dryRun=1  → returns the message JSON,
-//                                                         no Slack post (for previewing)
+// Usage (every request needs the header `Authorization: Bearer <CRON_SECRET>`;
+// Vercel's scheduled cron sends it automatically when CRON_SECRET is set):
+//   GET /api/slack-recap            → posts to Slack
+//   GET /api/slack-recap?dryRun=1   → returns the message JSON, no Slack post
+//                                     (for previewing / the health monitor)
 
 interface RosterPlayer {
   name: string
   tier: number
   level: 'Pro' | 'NCAA' | 'HS'
   org: string
+  affiliate?: string   // the specific team the player plays for (e.g. "Tampa Tarpons")
   state?: string
 }
 
@@ -75,24 +77,29 @@ interface WeekTrips {
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
+// Building the recap fans out to Google Sheets, the MLB Stats API, Heartbeat,
+// and Slack — comfortably over the default 10s function limit on a slow day.
+export const config = { maxDuration: 60 }
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Auth: accept EITHER Vercel's Cron Authorization header (preferred path
-  // for the scheduled cron — Vercel adds `Authorization: Bearer <CRON_SECRET>`
-  // automatically) OR a `?secret=` query param (for the in-app admin button).
+  // Auth: `Authorization: Bearer <CRON_SECRET>` ONLY. Vercel's scheduled cron
+  // sends this header automatically when CRON_SECRET is set; manual callers
+  // (health monitor, in-app admin button, curl) must send it too. The old
+  // `?secret=` query-param path was removed — secrets in query strings leak
+  // into request logs and browser history.
   const expected = process.env.CRON_SECRET ?? ''
   if (!expected) {
     return res.status(500).json({ error: 'CRON_SECRET not configured' })
   }
   const headerSecret = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
-  const querySecret = (req.query.secret as string) ?? ''
-  if (headerSecret !== expected && querySecret !== expected) {
+  if (headerSecret !== expected) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
-  // Distinguish the scheduled cron (Authorization header) from the in-app admin
-  // button (?secret=). Only the cron gets a failure alert — when the button
-  // fails the human is right there and the UI already shows the error; alerting
-  // then would just be channel noise.
-  const isCron = headerSecret === expected
+  // Distinguish the scheduled cron (Vercel sends `user-agent: vercel-cron/1.0`)
+  // from manual runs. Only the cron gets a failure alert — when a human triggers
+  // the run they're right there and already see the error in the response;
+  // alerting then would just be channel noise.
+  const isCron = (req.headers['user-agent'] ?? '').toLowerCase().includes('vercel-cron')
 
   const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true'
   const botToken = process.env.SLACK_BOT_TOKEN
@@ -106,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const today = new Date()
     const players = await loadRoster()
     const heartbeat = await loadHeartbeat()
-    const games = await loadAllGames(players, today)
+    const { games, affiliateResolved, affiliateUnresolved } = await loadAllGames(players, today)
 
     const weeks = nextFourWeeks(today)
     const topWindows = weeks.map((wk) => computeTopTripsInRange(games, wk.start, wk.end))
@@ -128,39 +135,89 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const message = composeSlackMessage(topWindows, weeks, overdue, covered, upcomingEvents, players.length)
 
     if (dryRun) {
-      return res.status(200).json({ dryRun: true, message, weeks, topWindows, overdueCount: overdue.length, coveredCount: covered.length })
+      // rosterSize + gameCount let the health monitor (api/health-monitor.ts)
+      // reason about silent data degradation without re-running the pipeline.
+      // affiliateResolved/-Unresolved expose Pro-attribution quality: unresolved
+      // players fall back to org-wide games (noisy regions but never dropped).
+      return res.status(200).json({ dryRun: true, message, weeks, topWindows, overdueCount: overdue.length, coveredCount: covered.length, rosterSize: players.length, gameCount: games.length, eventCount: upcomingEvents.length, affiliateResolved, affiliateUnresolved })
     }
 
     // Post via chat.postMessage (modern Slack app API). Requires the bot
     // to be a member of the channel — invite it with `/invite @SV Travel Hub`
     // before the first run.
-    const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        Authorization: `Bearer ${botToken}`,
-      },
-      body: JSON.stringify({
-        channel,
-        text: message.text,
-        blocks: message.blocks,
-        unfurl_links: false,
-        unfurl_media: false,
-      }),
+    const slackResult = await slackPostMessage(botToken!, {
+      channel,
+      text: message.text,
+      blocks: message.blocks,
+      unfurl_links: false,
+      unfurl_media: false,
     })
-    const slackBody = await slackRes.json() as { ok: boolean; error?: string; ts?: string; channel?: string }
-    if (!slackRes.ok || !slackBody.ok) {
-      console.error('[slack-recap] chat.postMessage failed:', slackRes.status, JSON.stringify(slackBody))
-      if (isCron) await postFailureAlert(botToken, channel, `Slack rejected the post (${slackBody.error ?? slackRes.status}).`)
-      return res.status(502).json({ error: 'Slack chat.postMessage failed', status: slackRes.status, body: slackBody })
+    if (!slackResult.httpOk || !slackResult.body.ok) {
+      const errStr = slackResult.body.error ?? `HTTP ${slackResult.status}`
+      console.error('[slack-recap] chat.postMessage failed:', slackResult.status, JSON.stringify(slackResult.body))
+      if (isCron) {
+        await postFailureAlert(botToken, channel, `Slack rejected the post (${errStr}).`)
+        await notifyAutomationOfRecapFailure(`Slack rejected the Monday recap post with \`${errStr}\` (after retries).`, isSlackConfigError(errStr))
+      }
+      return res.status(502).json({ error: 'Slack chat.postMessage failed', status: slackResult.status, body: slackResult.body })
     }
-    return res.status(200).json({ posted: true, channel: slackBody.channel, ts: slackBody.ts })
+    return res.status(200).json({ posted: true, channel: slackResult.body.channel, ts: slackResult.body.ts })
   } catch (e) {
     console.error('[slack-recap] handler error:', e)
     const msg = e instanceof Error ? e.message : 'unknown error'
-    if (isCron) await postFailureAlert(botToken, channel, `Couldn't build the recap: ${msg}.`)
+    if (isCron) {
+      await postFailureAlert(botToken, channel, `Couldn't build the recap: ${msg}.`)
+      await notifyAutomationOfRecapFailure(`The scheduled recap run crashed while building the message: ${msg}.`, false)
+    }
     return res.status(500).json({ error: msg })
   }
+}
+
+interface SlackPostResult {
+  httpOk: boolean
+  status: number
+  body: { ok: boolean; error?: string; ts?: string; channel?: string }
+}
+
+/** chat.postMessage with a small retry loop: up to 3 attempts, honoring
+ *  Retry-After on 429 and backing off on 5xx / network errors. Slack API
+ *  errors in the JSON body (invalid_auth, channel_not_found, …) are NOT
+ *  retried — they won't get better on the next attempt. Never throws. */
+async function slackPostMessage(botToken: string, payload: Record<string, unknown>): Promise<SlackPostResult> {
+  const MAX_ATTEMPTS = 3
+  let last: SlackPostResult = { httpOk: false, status: 0, body: { ok: false, error: 'not attempted' } }
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let retryAfterMs: number | null = null
+    try {
+      const res = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${botToken}` },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(12_000),
+      })
+      let body: SlackPostResult['body'] = { ok: false, error: `unparseable response (HTTP ${res.status})` }
+      try { body = await res.json() as SlackPostResult['body'] } catch { /* keep placeholder */ }
+      last = { httpOk: res.ok, status: res.status, body }
+      const retryable = res.status === 429 || res.status >= 500
+      if (!retryable) return last
+      const ra = Number(res.headers.get('retry-after'))
+      if (res.status === 429 && Number.isFinite(ra) && ra > 0) retryAfterMs = Math.min(ra * 1000, 15_000)
+    } catch (e) {
+      last = { httpOk: false, status: 0, body: { ok: false, error: e instanceof Error ? e.message : String(e) } }
+    }
+    if (attempt < MAX_ATTEMPTS) await sleep(retryAfterMs ?? 1000 * attempt)
+  }
+  return last
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Slack errors that mean the token/channel config is broken (a human has to
+ *  fix credentials — 👤) as opposed to a payload/code problem (🛠️). */
+function isSlackConfigError(err: string): boolean {
+  return /invalid_auth|token_revoked|token_expired|account_inactive|not_authed|channel_not_found|not_in_channel|is_archived|missing_scope|ekm_access_denied/i.test(err)
 }
 
 /** Best-effort plain-text failure alert so a broken Monday cron is visible
@@ -168,18 +225,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
  *  when a block-formatting error is what killed the real recap. Never throws. */
 async function postFailureAlert(botToken: string | undefined, channel: string | undefined, reason: string): Promise<void> {
   if (!botToken || !channel) return
+  await slackPostMessage(botToken, {
+    channel,
+    text: `:warning: *Travel Hub recap didn't post this morning.* ${reason} The schedule data is unaffected — open the hub directly: https://sv-travel-hub.vercel.app`,
+    unfurl_links: false,
+  })
+}
+
+/** Independent-transport failure alert to #sv-automation. postFailureAlert
+ *  shares the recap's own token + channel, so a revoked token or archived
+ *  channel would otherwise mean a fully silent Monday — this webhook path
+ *  fails independently. No-op if SV_AUTOMATION_WEBHOOK_URL isn't set. Never
+ *  throws. `configIssue` picks the 👤 (fix token/channel) vs 🛠️ (fix code) tag. */
+async function notifyAutomationOfRecapFailure(how: string, configIssue: boolean): Promise<void> {
+  const url = process.env.SV_AUTOMATION_WEBHOOK_URL
+  if (!url) return
+  const tag = configIssue ? '👤 Manual' : '🛠️ Code change'
+  const todo = configIssue
+    ? 'Check the SV Travel Hub Slack app token and the #travel-schedule channel (token revoked? bot kicked? channel archived?), fix SLACK_BOT_TOKEN / SLACK_CHANNEL_TRAVEL_SCHEDULE in Vercel (https://vercel.com/stadium-ventures/sv-travel-hub/settings/environment-variables), then re-run the recap.'
+    : 'Open `sv-travel-hub` in Claude Code and debug api/slack-recap.ts, then re-run the recap.'
+  const text = [
+    `:red_circle: *SV Travel Hub — the Monday recap didn't post to #travel-schedule.*  _(${tag})_`,
+    `   • _How we know:_ ${how}`,
+    `   • _What to do:_ ${todo}`,
+  ].join('\n')
   try {
-    await fetch('https://slack.com/api/chat.postMessage', {
+    await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${botToken}` },
-      body: JSON.stringify({
-        channel,
-        text: `:warning: *Travel Hub recap didn't post this morning.* ${reason} The schedule data is unaffected — open the hub directly: https://sv-travel-hub.vercel.app`,
-        unfurl_links: false,
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(12_000),
     })
   } catch (e) {
-    console.error('[slack-recap] failure alert also failed:', e)
+    console.error('[slack-recap] automation webhook alert failed:', e)
   }
 }
 
@@ -197,6 +275,7 @@ async function loadRoster(): Promise<RosterPlayer[]> {
   const iTier = col(['tier', 'player tier'])
   const iLevel = col(['level', 'player level'])
   const iOrg = col(['org', 'organization', 'team', 'school'])
+  const iAffiliate = col(['affiliate', 'affiliate team'])
   const iState = col(['state', 'home state'])
   const out: RosterPlayer[] = []
   for (let r = 1; r < rows.length; r++) {
@@ -214,6 +293,7 @@ async function loadRoster(): Promise<RosterPlayer[]> {
       tier,
       level,
       org: (row[iOrg] ?? '').trim(),
+      affiliate: (row[iAffiliate] ?? '').trim() || undefined,
       state: (row[iState] ?? '').trim() || undefined,
     })
   }
@@ -225,6 +305,7 @@ async function loadHeartbeat(): Promise<Map<string, HeartbeatPlayer>> {
   try {
     const res = await fetch('https://sv-heartbeat.vercel.app/api/heartbeat/summary', {
       headers: { 'User-Agent': 'SVTravelHub/Slack-Recap' },
+      signal: AbortSignal.timeout(12_000),
     })
     if (!res.ok) return map
     const data = await res.json() as { players?: HeartbeatPlayer[] }
@@ -261,6 +342,7 @@ async function loadPlannedVisits(players: RosterPlayer[]): Promise<Map<string, P
       const name = channel.replace(/^#/, '')
       const listRes = await fetch('https://slack.com/api/conversations.list?types=public_channel,private_channel&limit=1000', {
         headers: { Authorization: `Bearer ${botToken}` },
+        signal: AbortSignal.timeout(12_000),
       })
       const listBody = await listRes.json() as { ok: boolean; channels?: Array<{ id: string; name: string }> }
       const found = (listBody.channels ?? []).find((c) => c.name === name)
@@ -271,6 +353,7 @@ async function loadPlannedVisits(players: RosterPlayer[]): Promise<Map<string, P
     const oldest = Math.floor((Date.now() - 14 * 86400 * 1000) / 1000)
     const res = await fetch(`https://slack.com/api/conversations.history?channel=${encodeURIComponent(channel)}&oldest=${oldest}&limit=200`, {
       headers: { Authorization: `Bearer ${botToken}` },
+      signal: AbortSignal.timeout(12_000),
     })
     const body = await res.json() as { ok: boolean; error?: string; messages?: Array<{ text?: string; bot_id?: string }> }
     if (!body.ok) { console.warn('[slack-recap] conversations.history:', body.error); return out }
@@ -295,14 +378,24 @@ async function loadPlannedVisits(players: RosterPlayer[]): Promise<Map<string, P
   return out
 }
 
+interface GameLoadResult {
+  games: Game[]
+  // Pro-attribution quality: how many org-mapped Pro players resolved to a
+  // specific affiliate team vs fell back to org-wide game attribution.
+  affiliateResolved: number
+  affiliateUnresolved: number
+}
+
 /** Pull every game we can reach server-side: HS+JUCO from CSV, Summer from CSV,
  *  Pro from MLB Stats API. NCAA is skipped in Phase 1. */
-async function loadAllGames(players: RosterPlayer[], today: Date): Promise<Game[]> {
+async function loadAllGames(players: RosterPlayer[], today: Date): Promise<GameLoadResult> {
   const startStr = isoDate(today)
   const endDate = new Date(today); endDate.setDate(endDate.getDate() + 5 * 7)
   const endStr = isoDate(endDate)
 
   const games: Game[] = []
+  let affiliateResolved = 0
+  let affiliateUnresolved = 0
 
   // HS + JUCO via the Schedule CSV
   try {
@@ -315,11 +408,13 @@ async function loadAllGames(players: RosterPlayer[], today: Date): Promise<Game[
   // we surface "X SV players in summer leagues" via the assignment list).
   // Pro via the MLB Stats API for the 5 weeks we care about.
   try {
-    const proGames = await loadProGames(players, startStr, endStr)
-    games.push(...proGames)
+    const pro = await loadProGames(players, startStr, endStr)
+    games.push(...pro.games)
+    affiliateResolved = pro.affiliateResolved
+    affiliateUnresolved = pro.affiliateUnresolved
   } catch (e) { console.warn('[slack-recap] Pro games failed:', e) }
 
-  return games
+  return { games, affiliateResolved, affiliateUnresolved }
 }
 
 async function loadScheduleCsv(players: RosterPlayer[]): Promise<Game[]> {
@@ -362,15 +457,17 @@ async function loadScheduleCsv(players: RosterPlayer[]): Promise<Game[]> {
   return out
 }
 
-/** Server-side Pro schedule via MLB Stats API. We can't replicate the full
- *  autoAssignPlayers flow here, so we keep it simple: for each Pro player,
- *  look up the parent MLB org by their `org` field against MLB_TEAMS, fetch
- *  that org's full schedule (MLB + MiLB affiliates) for the window, and
- *  attribute every game to that player. This is imprecise for rehab /
- *  optioned cases, but the Slack recap is a coarse weekly summary — fine. */
-async function loadProGames(players: RosterPlayer[], start: string, end: string): Promise<Game[]> {
+/** Server-side Pro schedule via MLB Stats API. For each Pro player we resolve
+ *  the SPECIFIC affiliate team they play for (the roster's `Affiliate` column)
+ *  and attribute only that team's games — not the whole org's farm system.
+ *
+ *  This fixes the recap putting players in regions they're not in: org-level
+ *  attribution credited e.g. a Single-A player (Tampa, FL) with his org's
+ *  AAA/AA/A+ games across the country. Players whose affiliate we can't match
+ *  fall back to org-wide attribution so they never silently disappear. */
+async function loadProGames(players: RosterPlayer[], start: string, end: string): Promise<GameLoadResult> {
   const proPlayers = players.filter((p) => p.level === 'Pro')
-  if (proPlayers.length === 0) return []
+  if (proPlayers.length === 0) return { games: [], affiliateResolved: 0, affiliateUnresolved: 0 }
 
   // Build a tiny MLB org name → teamId map. Covers the 30 MLB orgs Kent cares
   // about. (Same canonical names used in the React app's MLB_PARENT_IDS.)
@@ -399,31 +496,87 @@ async function loadProGames(players: RosterPlayer[], start: string, end: string)
     playersByOrgId.set(id, list)
   }
 
+  // Normalize a team name for fuzzy matching: lowercase, strip punctuation.
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+
   const out: Game[] = []
+  let affiliateResolved = 0
+  let affiliateUnresolved = 0
   // Fetch parent + 11=AAA + 12=AA + 13=A+ + 14=A schedules in parallel.
   await Promise.all(Array.from(playersByOrgId.entries()).map(async ([orgId, orgPlayers]) => {
     try {
       const sportIds = [1, 11, 12, 13, 14].join(',')
-      // First get the affiliate team IDs for this org.
-      const affResp = await fetch(`https://statsapi.mlb.com/api/v1/teams/affiliates?teamIds=${orgId}&sportIds=${sportIds}`)
+      // First get this org's affiliate teams (id + name).
+      const affResp = await fetch(`https://statsapi.mlb.com/api/v1/teams/affiliates?teamIds=${orgId}&sportIds=${sportIds}`, {
+        signal: AbortSignal.timeout(12_000),
+      })
       if (!affResp.ok) return
-      const affData = await affResp.json() as { teams?: Array<{ id: number; sport?: { id: number } }> }
-      const teamIds = (affData.teams ?? []).map((t) => t.id)
+      const affData = await affResp.json() as { teams?: Array<{ id: number; name?: string }> }
+      const affiliates = affData.teams ?? []
+      if (affiliates.length === 0) return
+
+      // Resolve each SV player to the team id of their actual affiliate. We
+      // match the roster's `Affiliate` value against the org's affiliate names:
+      // exact normalized first, then one-way containment — the roster value must
+      // be a SUBSTRING of the official affiliate name ("Tarpons" → "Tampa
+      // Tarpons"). The reverse direction ("Rays" ⊃… no) was removed: the
+      // affiliates list includes the MLB parent club (sportIds has 1), so a
+      // roster cell like "Rays" containment-matched "Tampa Bay Rays" and the
+      // player's actual MiLB games were silently dropped. For the same reason a
+      // match that lands ON the parent club is treated as unresolved.
+      // Unresolved → null, meaning "fall back to the whole org" so the player
+      // still surfaces.
+      const teamIdByPlayer = new Map<string, number | null>()
+      for (const p of orgPlayers) {
+        const want = norm(p.affiliate ?? '')
+        let teamId: number | null = null
+        if (want) {
+          const exact = affiliates.find((t) => norm(t.name ?? '') === want)
+          const match = exact ?? affiliates.find((t) => {
+            const n = norm(t.name ?? '')
+            return n.length > 0 && n.includes(want)
+          })
+          if (match && match.id !== orgId) teamId = match.id
+        }
+        teamIdByPlayer.set(p.name, teamId)
+        if (teamId != null) affiliateResolved++
+        else affiliateUnresolved++
+      }
+
+      // Which teams do we actually need schedules for? If every player resolved,
+      // fetch only their affiliate teams; if any fell back to org-wide, we still
+      // need the full affiliate set so that player gets their games.
+      const resolvedIds = new Set<number>()
+      let needAll = false
+      for (const p of orgPlayers) {
+        const id = teamIdByPlayer.get(p.name)
+        if (id == null) needAll = true
+        else resolvedIds.add(id)
+      }
+      const teamIds = needAll ? affiliates.map((t) => t.id) : [...resolvedIds]
       if (teamIds.length === 0) return
-      // Then fetch the schedule for all those teams in the window.
-      // hydrate=venue(location) gives us coordinates + city/state so the recap
-      // can cluster games into a real drivable trip and label each venue.
-      const schedResp = await fetch(`https://statsapi.mlb.com/api/v1/schedule?teamId=${teamIds.join(',')}&startDate=${start}&endDate=${end}&sportId=${sportIds}&hydrate=venue(location)`)
+
+      // hydrate=venue(location) gives coordinates + city/state so the recap can
+      // cluster games into a real drivable trip and label each venue.
+      const schedResp = await fetch(`https://statsapi.mlb.com/api/v1/schedule?teamId=${teamIds.join(',')}&startDate=${start}&endDate=${end}&sportId=${sportIds}&hydrate=venue(location)`, {
+        signal: AbortSignal.timeout(12_000),
+      })
       if (!schedResp.ok) return
-      const schedData = await schedResp.json() as { dates?: Array<{ date: string; games?: Array<{ teams?: { home?: { team?: { name?: string } }; away?: { team?: { name?: string } } }; venue?: { name?: string; location?: { city?: string; stateAbbrev?: string; state?: string; defaultCoordinates?: { latitude?: number; longitude?: number } } } }> }> }
+      const schedData = await schedResp.json() as { dates?: Array<{ date: string; games?: Array<{ teams?: { home?: { team?: { id?: number; name?: string } }; away?: { team?: { id?: number; name?: string } } }; venue?: { name?: string; location?: { city?: string; stateAbbrev?: string; state?: string; defaultCoordinates?: { latitude?: number; longitude?: number } } } }> }> }
       for (const day of schedData.dates ?? []) {
         for (const g of day.games ?? []) {
           const venueName = g.venue?.name ?? 'Unknown'
           const loc = g.venue?.location
           const coords = loc?.defaultCoordinates
+          const homeId = g.teams?.home?.team?.id
+          const awayId = g.teams?.away?.team?.id
           const home = g.teams?.home?.team?.name ?? ''
           const away = g.teams?.away?.team?.name ?? ''
           for (const p of orgPlayers) {
+            const wantId = teamIdByPlayer.get(p.name) ?? null
+            // Resolved player: only their affiliate's own games (home or away).
+            // Unresolved (null): org-wide fallback — attribute every game.
+            if (wantId != null && wantId !== homeId && wantId !== awayId) continue
             out.push({
               date: day.date,
               player: p.name,
@@ -444,14 +597,15 @@ async function loadProGames(players: RosterPlayer[], start: string, end: string)
       console.warn(`[slack-recap] Pro schedule fetch failed for org ${orgId}:`, e)
     }
   }))
-  return out
+  return { games: out, affiliateResolved, affiliateUnresolved }
 }
 
 // ─── Computations ────────────────────────────────────────────────────────────
 
 function nextFourWeeks(today: Date): Array<{ label: string; start: string; end: string }> {
   // Each "week" is Mon-Sun. Start a week from today's Monday.
-  // Today is Mon 6 AM ET when cron fires; we want the FOLLOWING Mon + 3 more.
+  // Today is Mon ~6 AM ET (5 AM in winter — cron is 10:00 UTC) when cron fires;
+  // we want the FOLLOWING Mon + 3 more.
   const monday = new Date(today)
   const dayOfWeek = monday.getUTCDay() // 0=Sun, 1=Mon
   // Go to next Monday (always at least 1 week away)
@@ -794,10 +948,9 @@ function composeSlackMessage(
     // The full who/where/when breakdown lives in the app (link below).
     const w = week.trips[0]!
     const dateRange = `${shortDate(new Date(w.startDate + 'T00:00:00Z'))}–${shortDate(new Date(w.endDate + 'T00:00:00Z'))}`
-    const t1s = w.players.filter((p) => p.tier === 1)
-    const pick = (t1s.length > 0 ? t1s : w.players).slice(0, 3)
-    const more = w.uniquePlayerCount - pick.length
-    const names = pick.map((p) => p.name).join(', ') + (more > 0 ? ` +${more}` : '')
+    // List EVERY player in the area (Kent asked for the full roster per trip,
+    // not a "+N" truncation). Players are already sorted T1-first by date.
+    const names = w.players.map((p) => p.name).join(', ')
     const t1Str = w.t1Count > 0 ? ` · ${w.t1Count} T1` : ''
     lines.push(`• *${dateRange}* · *${w.regionLabel}* — ${w.uniquePlayerCount} players${t1Str}`)
     lines.push(`     ${names}`)
@@ -865,17 +1018,28 @@ function composeSlackMessage(
 /** Split a long message into multiple Slack section blocks. A single section's
  *  mrkdwn text is capped at 3000 chars by Slack (exceeding it → invalid_blocks,
  *  which is what broke the verbose recap). We chunk on line boundaries, keeping
- *  each block comfortably under the limit. */
+ *  each block comfortably under the limit; a single line longer than the limit
+ *  (e.g. a mega roster line) is hard-split mid-line so invalid_blocks can never
+ *  recur. */
 function buildBlocks(text: string): Array<{ type: 'section'; text: { type: 'mrkdwn'; text: string } }> {
   const MAX = 2900
   const blocks: Array<{ type: 'section'; text: { type: 'mrkdwn'; text: string } }> = []
   let buf = ''
-  for (const line of text.split('\n')) {
-    if (buf.length > 0 && (buf.length + 1 + line.length) > MAX) {
-      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buf } })
-      buf = line
+  for (const rawLine of text.split('\n')) {
+    // Hard-split oversized lines first so every piece fits in a block on its own.
+    const pieces: string[] = []
+    if (rawLine.length <= MAX) {
+      pieces.push(rawLine)
     } else {
-      buf = buf ? `${buf}\n${line}` : line
+      for (let i = 0; i < rawLine.length; i += MAX) pieces.push(rawLine.slice(i, i + MAX))
+    }
+    for (const line of pieces) {
+      if (buf.length > 0 && (buf.length + 1 + line.length) > MAX) {
+        blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buf } })
+        buf = line
+      } else {
+        buf = buf ? `${buf}\n${line}` : line
+      }
     }
   }
   if (buf.length > 0) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buf } })
@@ -885,7 +1049,10 @@ function buildBlocks(text: string): Array<{ type: 'section'; text: { type: 'mrkd
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
 async function fetchText(url: string): Promise<string> {
-  const res = await fetch(url, { headers: { 'User-Agent': 'SVTravelHub/Slack-Recap' } })
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'SVTravelHub/Slack-Recap' },
+    signal: AbortSignal.timeout(12_000),
+  })
   if (!res.ok) throw new Error(`fetchText ${url}: HTTP ${res.status}`)
   return res.text()
 }

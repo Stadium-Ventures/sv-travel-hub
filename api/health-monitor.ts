@@ -3,7 +3,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 // SV Travel Hub — self health check.
 //
 // Travel Hub's only server-side job is the weekly Slack recap (api/slack-recap.ts,
-// Vercel cron Mon 6 AM ET). Everything it depends on — the roster/schedule/events
+// Vercel cron Mon ~6 AM ET (5 AM in winter — cron is 10:00 UTC)). Everything it
+// depends on — the roster/schedule/events
 // Google Sheets, the Heartbeat API, the MLB Stats API — can silently 404 or go
 // empty WITHOUT the recap throwing: it just posts a thinner, wronger digest and
 // nobody notices (see the sv-media-pipeline RSS feed that 404'd silently for a
@@ -31,11 +32,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 //   SELF_BASE_URL                  — override for the recap dry-run self-call
 //                                    (defaults to the prod domain)
 //
-// Usage:
-//   GET /api/health-monitor                        (cron: Authorization: Bearer <CRON_SECRET>)
-//   GET /api/health-monitor?secret=<CRON_SECRET>   (manual)
-//   GET /api/health-monitor?secret=…&dryRun=1      (compute findings, do NOT post)
-//   GET /api/health-monitor?secret=…&test=1        (post a harmless test finding — verifies wiring)
+// Usage (every request needs the header `Authorization: Bearer <CRON_SECRET>`;
+// the Vercel cron sends it automatically — the old `?secret=` query-param auth
+// was removed because secrets in query strings leak into logs):
+//   GET /api/health-monitor            (daily cron / manual)
+//   GET /api/health-monitor?dryRun=1   (compute findings, do NOT post)
+//   GET /api/health-monitor?test=1     (post a harmless test finding — verifies wiring)
 
 export const config = { maxDuration: 60 }
 
@@ -55,12 +57,17 @@ interface Finding {
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
+const WEBHOOK_DOWN_ERROR =
+  'Findings could NOT be delivered to #sv-automation — SV_AUTOMATION_WEBHOOK_URL is unset or the webhook post failed. The monitor is effectively mute; fix the webhook.'
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Auth: `Authorization: Bearer <CRON_SECRET>` ONLY (the Vercel cron sends it
+  // automatically). The `?secret=` query-param path was removed — secrets in
+  // query strings leak into request logs.
   const expected = process.env.CRON_SECRET ?? ''
   if (!expected) return res.status(500).json({ error: 'CRON_SECRET not configured' })
   const headerSecret = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
-  const querySecret = (req.query.secret as string) ?? ''
-  if (headerSecret !== expected && querySecret !== expected) {
+  if (headerSecret !== expected) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
 
@@ -77,29 +84,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       todo: 'No action — this confirms Travel Hub can reach #sv-automation.',
     }
     const posted = await notifyAutomation(buildMessage([testFinding]))
+    if (!posted) return res.status(500).json({ test: true, posted, error: WEBHOOK_DOWN_ERROR })
     return res.status(200).json({ test: true, posted })
   }
 
   try {
     const findings = await runChecks()
-    if (!dryRun && findings.length > 0) {
-      const posted = await notifyAutomation(buildMessage(findings))
-      return res.status(200).json({ ok: findings.length === 0, findings, posted })
+    if (dryRun) {
+      return res.status(200).json({ ok: findings.length === 0, findings, posted: false, dryRun: true })
     }
-    return res.status(200).json({ ok: findings.length === 0, findings, posted: false })
+
+    if (findings.length > 0) {
+      const posted = await notifyAutomation(buildMessage(findings))
+      if (!posted) {
+        // A monitor that finds problems but can't say so is itself broken —
+        // surface it as an error instead of silently returning 200.
+        return res.status(500).json({ ok: false, findings, posted: false, error: WEBHOOK_DOWN_ERROR })
+      }
+      return res.status(200).json({ ok: false, findings, posted })
+    }
+
+    // Dead-man's switch: silent-when-healthy means a dead cron looks identical
+    // to a healthy one. Once a week (Mondays, UTC) post a one-line heartbeat
+    // even with zero findings, so a stopped monitor becomes visible within a
+    // week. Every other day stays silent-unless-actionable.
+    if (new Date().getUTCDay() === 1) {
+      const posted = await notifyAutomation(
+        '✅ Travel Hub (sv-travel-hub) — weekly check-in: all monitors ran, no issues',
+      )
+      if (!posted) {
+        return res.status(500).json({ ok: true, findings, heartbeat: false, error: WEBHOOK_DOWN_ERROR })
+      }
+      return res.status(200).json({ ok: true, findings, heartbeat: true })
+    }
+
+    return res.status(200).json({ ok: true, findings, posted: false })
   } catch (e) {
-    // The monitor itself failing shouldn't be silent. Best-effort notify.
+    // The monitor itself failing shouldn't be silent — but only alert on REAL
+    // runs. A crash during a manual ?dryRun=1 poke is visible right there in
+    // the response; alerting #sv-automation about it would be noise.
     const msg = e instanceof Error ? e.message : String(e)
     console.error('[health-monitor] error:', e)
-    await notifyAutomation(
-      buildMessage([{
-        severity: 'critical',
-        code: true,
-        what: 'The Travel Hub health check itself crashed.',
-        how: `Automated run threw: ${msg}.`,
-        todo: `Open \`sv-travel-hub\` in Claude Code and check api/health-monitor.ts.`,
-      }]),
-    )
+    if (!dryRun) {
+      await notifyAutomation(
+        buildMessage([{
+          severity: 'critical',
+          code: true,
+          what: 'The Travel Hub health check itself crashed.',
+          how: `Automated run threw: ${msg}.`,
+          todo: `Open \`sv-travel-hub\` in Claude Code and check api/health-monitor.ts.`,
+        }]),
+      )
+    }
     return res.status(500).json({ error: msg })
   }
 }
@@ -110,7 +146,9 @@ async function runChecks(): Promise<Finding[]> {
   const findings: Finding[] = []
 
   // 1. Config the Monday recap can't run without.
-  if (!process.env.SLACK_BOT_TOKEN || !process.env.SLACK_CHANNEL_TRAVEL_SCHEDULE) {
+  const botToken = process.env.SLACK_BOT_TOKEN
+  const recapChannel = process.env.SLACK_CHANNEL_TRAVEL_SCHEDULE
+  if (!botToken || !recapChannel) {
     findings.push({
       severity: 'critical',
       code: false,
@@ -118,6 +156,11 @@ async function runChecks(): Promise<Finding[]> {
       how: 'SLACK_BOT_TOKEN and/or SLACK_CHANNEL_TRAVEL_SCHEDULE are not set on the deployment.',
       todo: `Set both in Vercel → Project Settings → Environment Variables, then redeploy: ${HUB_URL}`,
     })
+  } else {
+    // 1b. Env presence isn't enough — a revoked token, archived channel, or
+    // kicked bot passes the check above and Monday still fails. Actually
+    // exercise the credentials.
+    findings.push(...await probeSlackCredentials(botToken, recapChannel))
   }
 
   // 2. Data sources, probed in parallel. Each attributes a specific failure so
@@ -286,16 +329,89 @@ async function probeJson(url: string): Promise<ProbeResult> {
   }
 }
 
+/** Verify the recap's Slack credentials actually WORK: auth.test proves the
+ *  bot token is live, and conversations.info on the recap channel catches an
+ *  archived channel / kicked bot / wrong channel ID — all of which would make
+ *  Monday's post silently fail. Probe errors (network blips) come back as a
+ *  warning, not a critical. */
+async function probeSlackCredentials(botToken: string, channel: string): Promise<Finding[]> {
+  const findings: Finding[] = []
+  try {
+    const authRes = await fetch('https://slack.com/api/auth.test', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${botToken}` },
+      signal: AbortSignal.timeout(12_000),
+    })
+    const auth = await authRes.json() as { ok: boolean; error?: string }
+    if (!auth.ok) {
+      findings.push({
+        severity: 'critical',
+        code: false,
+        what: 'The recap’s Slack token no longer works — Monday’s post would silently fail.',
+        how: `Slack auth.test returned \`${auth.error ?? `HTTP ${authRes.status}`}\`.`,
+        todo: `Reinstall the “SV Travel Hub” Slack app (or regenerate its bot token) at https://api.slack.com/apps, then update SLACK_BOT_TOKEN in Vercel (https://vercel.com/stadium-ventures/sv-travel-hub/settings/environment-variables) and redeploy.`,
+      })
+      return findings // channel probe would just echo the same auth error
+    }
+
+    // conversations.info needs a channel ID; if the env var holds a "#name",
+    // skip this half rather than false-alarm.
+    if (/^[CG][A-Z0-9]+$/.test(channel)) {
+      const infoRes = await fetch(`https://slack.com/api/conversations.info?channel=${encodeURIComponent(channel)}`, {
+        headers: { Authorization: `Bearer ${botToken}` },
+        signal: AbortSignal.timeout(12_000),
+      })
+      const info = await infoRes.json() as { ok: boolean; error?: string; channel?: { is_archived?: boolean; is_member?: boolean } }
+      if (!info.ok) {
+        findings.push({
+          severity: 'critical',
+          code: false,
+          what: 'The recap can’t see its Slack channel — Monday’s post would fail.',
+          how: `Slack conversations.info on the configured channel returned \`${info.error ?? `HTTP ${infoRes.status}`}\`.`,
+          todo: `Check SLACK_CHANNEL_TRAVEL_SCHEDULE in Vercel (https://vercel.com/stadium-ventures/sv-travel-hub/settings/environment-variables) points at the right channel, and invite the bot in #travel-schedule: \`/invite @SV Travel Hub\`.`,
+        })
+      } else if (info.channel?.is_archived) {
+        findings.push({
+          severity: 'critical',
+          code: false,
+          what: 'The recap channel has been archived — Monday’s post would fail.',
+          how: 'Slack conversations.info reports the configured channel is archived.',
+          todo: 'Unarchive #travel-schedule, or point SLACK_CHANNEL_TRAVEL_SCHEDULE at the replacement channel in Vercel and redeploy.',
+        })
+      } else if (info.channel?.is_member === false) {
+        findings.push({
+          severity: 'critical',
+          code: false,
+          what: 'The recap bot is not in its channel — Monday’s post would fail with not_in_channel.',
+          how: 'Slack conversations.info reports the bot is not a member of the configured channel.',
+          todo: 'In #travel-schedule, run `/invite @SV Travel Hub`.',
+        })
+      }
+    }
+  } catch (e) {
+    findings.push({
+      severity: 'warning',
+      code: false,
+      what: 'Couldn’t verify the recap’s Slack credentials this run.',
+      how: `The Slack API probe failed: ${describeErr(e)}.`,
+      todo: 'Likely a transient Slack/network blip — recheck on the next daily run; if it repeats, investigate.',
+    })
+  }
+  return findings
+}
+
 interface DryRunResult { ok: boolean; reason?: string; body: Record<string, unknown> }
 
-/** Call the real recap endpoint in dry-run mode on this same deployment. */
+/** Call the real recap endpoint in dry-run mode on this same deployment.
+ *  Auth goes in the Authorization header (never the query string — it would
+ *  land in request logs). */
 async function fetchRecapDryRun(): Promise<DryRunResult> {
   const base = process.env.SELF_BASE_URL || HUB_URL
   const secret = process.env.CRON_SECRET ?? ''
-  const url = `${base.replace(/\/$/, '')}/api/slack-recap?dryRun=1&secret=${encodeURIComponent(secret)}`
+  const url = `${base.replace(/\/$/, '')}/api/slack-recap?dryRun=1`
   try {
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
+      headers: { 'User-Agent': 'SVTravelHub/HealthMonitor', Authorization: `Bearer ${secret}` },
       signal: AbortSignal.timeout(45_000),
     })
     if (!res.ok) {
