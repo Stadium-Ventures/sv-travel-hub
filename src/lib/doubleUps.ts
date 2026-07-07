@@ -20,17 +20,23 @@ export function findDoubleUps(
 ): DoubleUp[] {
   const playerMap = new Map(players.map((p) => [p.playerName, p]))
 
+  // A player counts toward a double-up if they pass the same rules used for
+  // game eligibility (visits remaining + active player/tier filters). Also
+  // used to restrict displayed playerNames so zero-visit/filtered players
+  // riding along on an eligible game aren't listed.
+  const isEligiblePlayer = (n: string): boolean => {
+    const p = playerMap.get(n)
+    if (!p || p.visitsRemaining <= 0) return false
+    if (filterPlayerNames && filterPlayerNames.length > 0 && !filterPlayerNames.includes(n)) return false
+    if (filterTiers && filterTiers.length > 0 && !filterTiers.includes(p.tier)) return false
+    return true
+  }
+
   // Filter games to date range and eligible players
   const eligible = allGames.filter((g) => {
     if (g.date < startDate || g.date > endDate) return false
     if (g.gameStatus === 'Cancelled' || g.gameStatus === 'Postponed') return false
-    return g.playerNames.some((n) => {
-      const p = playerMap.get(n)
-      if (!p || p.visitsRemaining <= 0) return false
-      if (filterPlayerNames && filterPlayerNames.length > 0 && !filterPlayerNames.includes(n)) return false
-      if (filterTiers && filterTiers.length > 0 && !filterTiers.includes(p.tier)) return false
-      return true
-    })
+    return g.playerNames.some(isEligiblePlayer)
   })
 
   // Group games by date
@@ -56,14 +62,14 @@ export function findDoubleUps(
         driveMinutesBetween: 0,
         timeFeasible: true,
         combinedValue: scoreGames([m.game], playerMap),
-        playerNames: m.playerNames,
+        playerNames: m.playerNames.filter(isEligiblePlayer),
       })
     }
 
     // Check for tournament clusters (3+ games within 5km)
     const clusters = findTournamentClusters(games)
     for (const cluster of clusters) {
-      const allPlayerNames = [...new Set(cluster.flatMap((g) => g.playerNames))]
+      const allPlayerNames = [...new Set(cluster.flatMap((g) => g.playerNames))].filter(isEligiblePlayer)
       doubleUps.push({
         date,
         games: cluster,
@@ -96,7 +102,7 @@ export function findDoubleUps(
         // Time feasibility: need at least 180min (game) + drive time gap
         const timeFeasible = checkTimeFeasibility(g1, g2, driveMin)
 
-        const allPlayerNames = [...new Set([...g1.playerNames, ...g2.playerNames])]
+        const allPlayerNames = [...new Set([...g1.playerNames, ...g2.playerNames])].filter(isEligiblePlayer)
         doubleUps.push({
           date,
           games: [g1, g2],

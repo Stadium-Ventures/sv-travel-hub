@@ -148,12 +148,15 @@ export function useBestWindows(
     let current = filterStart
 
     while (current <= filterEnd) {
-      const windowEnd = addDays(current, windowDays - 1)
-      if (windowEnd > filterEnd) break
+      // Clamp the final window to the range end instead of skipping it —
+      // breaking meant a range shorter than windowDays produced no windows
+      // at all, and the trailing days could never start one.
+      const rawEnd = addDays(current, windowDays - 1)
+      const windowEnd = rawEnd > filterEnd ? filterEnd : rawEnd
 
       // Skip windows that are entirely on Sunday
       const startDow = getDayOfWeek(current)
-      if (windowDays === 1 && startDow === 0) {
+      if (current === windowEnd && startDow === 0) {
         current = addDays(current, 1)
         continue
       }
@@ -161,11 +164,15 @@ export function useBestWindows(
       // Collect unique players across all days in the window
       const windowPlayers = new Map<string, number>() // name → tier
       let hasTuesday = false
+      let daysInWindow = 0
       let d = current
-      for (let i = 0; i < windowDays; i++) {
+      while (d <= windowEnd) {
+        daysInWindow++
         if (getDayOfWeek(d) === 0) { d = addDays(d, 1); continue } // skip Sunday
-        if (getDayOfWeek(d) === 2) hasTuesday = true
         const dayPlayers = datePlayerMap.get(d)
+        // Tuesday bonus only counts when there are actual players/games on
+        // that Tuesday — a bare Tuesday date in the window is worth nothing
+        if (getDayOfWeek(d) === 2 && dayPlayers && dayPlayers.size > 0) hasTuesday = true
         if (dayPlayers) {
           for (const [name, tier] of dayPlayers) {
             const existing = windowPlayers.get(name)
@@ -199,7 +206,7 @@ export function useBestWindows(
         // = 2 conflicts. You can only attend 1 of those 3.)
         let timeConflictCount = 0
         let dWalk = current
-        for (let i = 0; i < windowDays; i++) {
+        while (dWalk <= windowEnd) {
           const dayStarts = dateVenueStartHours.get(dWalk)
           if (dayStarts) {
             const venuesByHour = new Map<number, Set<string>>()
@@ -231,7 +238,7 @@ export function useBestWindows(
         results.push({
           startDate: current,
           endDate: windowEnd,
-          days: windowDays,
+          days: daysInWindow,
           players: players.sort((a, b) => a.tier - b.tier),
           uniquePlayerCount: windowPlayers.size,
           tierWeightedScore,

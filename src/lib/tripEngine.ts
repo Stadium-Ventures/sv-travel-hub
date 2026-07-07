@@ -7,7 +7,18 @@ import { resolveMLBTeamId, resolveNcaaName } from '../data/aliases'
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import { D1_BASEBALL_SLUGS } from '../data/d1baseballSlugs'
 import { resolveMaxPrepsSlug } from './maxpreps'
-import { VENUE_PROXIMITY } from '../data/venueProximity'
+import type { VenueEntry } from '../data/venueProximity'
+
+// VENUE_PROXIMITY is ~1.2MB minified and used only inside generateTrips()
+// (which normally runs in the worker). It is loaded lazily so the main-thread
+// modules that statically import tripEngine for small helpers (haversineKm,
+// generateNcaaEvents, …) don't pull the whole dataset into the main chunk —
+// it previously shipped twice (main chunk + worker chunk).
+let VENUE_PROXIMITY: Record<string, VenueEntry> | null = null
+async function loadVenueProximity(): Promise<void> {
+  if (VENUE_PROXIMITY) return
+  VENUE_PROXIMITY = (await import('../data/venueProximity')).VENUE_PROXIMITY
+}
 
 // Constants
 const DEFAULT_HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
@@ -164,70 +175,115 @@ export function scoreTripCandidate(
   return score
 }
 
-// Check if a player's position indicates they are a pitcher
+// Check if a player's position indicates they are a pitcher.
+// Exact-token match only — substring checks wrongly flagged e.g. "Shortstop" via 'P'.
+const PITCHER_POSITIONS = new Set(['P', 'SP', 'RP', 'LHP', 'RHP', 'PITCHER'])
 function isPitcher(player: RosterPlayer): boolean {
-  const pos = player.position.toUpperCase()
-  return pos.includes('P') || pos.includes('SP') || pos.includes('LHP') || pos.includes('RHP')
+  return player.position
+    .toUpperCase()
+    .split(/[^A-Z]+/)
+    .some((tok) => PITCHER_POSITIONS.has(tok))
 }
 
-// Compute detailed score breakdown for a trip
-function computeScoreBreakdown(
+// Match a probable-pitcher name against a roster player's surname using whole
+// tokens — substring matching let "Lee" match "Kleeman" and a "Jr" suffix
+// match anything. Suffixes are stripped before taking the surname.
+const NAME_SUFFIXES = new Set(['jr', 'sr', 'ii', 'iii', 'iv'])
+function pitcherNameMatches(probableName: string, playerName: string): boolean {
+  const tokens = playerName.trim().toLowerCase().split(/\s+/).map((t) => t.replace(/[.,]/g, ''))
+  while (tokens.length > 1 && NAME_SUFFIXES.has(tokens[tokens.length - 1]!)) tokens.pop()
+  const surname = tokens[tokens.length - 1]
+  if (!surname) return false
+  return probableName.toLowerCase().split(/[\s.,]+/).some((tok) => tok === surname)
+}
+
+// Minimal game shape needed for scoring — lets fly-in stops/entries be scored
+// with their real confidence without fabricating full GameEvents
+type ScoringGame = {
+  playerNames: string[]
+  confidence?: VisitConfidence
+  probablePitcherNames?: string[]
+}
+
+// Compute detailed score breakdown for a trip.
+// When coverageCounts is provided (greedy rescoring), each player's
+// visitsRemaining is reduced by visits already planned in selected trips —
+// while keeping the same Tuesday/pitcher/confidence multipliers as the
+// initial candidate scoring.
+export function computeScoreBreakdown(
   playerNames: string[],
   playerMap: Map<string, RosterPlayer>,
   tuesdayBonus: boolean,
   urgencyMap?: UrgencyMap,
-  games?: GameEvent[],
+  games?: ScoringGame[],
+  coverageCounts?: Map<string, number>,
 ): ScoreBreakdown {
   let tier1Count = 0, tier1Points = 0
   let tier2Count = 0, tier2Points = 0
   let tier3Count = 0, tier3Points = 0
   let pitcherMatchBonus = 0
+  let rawScore = 0
+  let tuesdayApplied = false
 
-  // Compute best confidence level across all games for this trip
-  const bestConfidence = games?.reduce<string>((best, g) => {
-    const conf = g.confidence ?? 'high' // MLB API games have no confidence field → treat as high
-    const rank = CONFIDENCE_MULTIPLIER[conf] ?? 0.5
-    const bestRank = CONFIDENCE_MULTIPLIER[best] ?? 0.5
-    return rank > bestRank ? conf : best
-  }, 'low') ?? 'high'
-  const confidenceMult = CONFIDENCE_MULTIPLIER[bestConfidence] ?? 1.0
+  // Per-player confidence: best confidence among the games this player
+  // actually appears in — one high-confidence game shouldn't inflate (or a
+  // stray low-confidence game deflate) every other player on the trip.
+  function confidenceMultFor(name: string): number {
+    if (!games || games.length === 0) return 1.0 // no game data → assume high
+    let best = 0
+    let found = false
+    for (const g of games) {
+      if (!g.playerNames.includes(name)) continue
+      found = true
+      const mult = CONFIDENCE_MULTIPLIER[g.confidence ?? 'high'] ?? 0.5 // no confidence field → high (MLB API)
+      if (mult > best) best = mult
+    }
+    return found ? best : 1.0
+  }
 
   for (const name of playerNames) {
     const player = playerMap.get(name)
     if (!player) continue
     const weight = TIER_WEIGHTS[player.tier] ?? 0
-    const base = weight * player.visitsRemaining
+    const planned = coverageCounts?.get(name) ?? 0
+    const remainingNeed = Math.max(0, player.visitsRemaining - planned)
+    // Coverage mode: always contribute at least 1 point (don't exclude completed players entirely)
+    const base = coverageCounts
+      ? (remainingNeed > 0 ? weight * remainingNeed : 1)
+      : weight * player.visitsRemaining
     const urgencyBoost = urgencyMap?.get(name) ?? 1.0
 
     // Pitcher match boost: if this player is a pitcher and appears as a probable starter
-    const isPitcherMatch = games && isPitcher(player) && games.some(g =>
-      g.probablePitcherNames?.some(pn =>
-        pn.toLowerCase().includes(player.playerName.split(' ').pop()!.toLowerCase())
-      )
+    const isPitcherMatch = !!games && isPitcher(player) && games.some(g =>
+      g.probablePitcherNames?.some(pn => pitcherNameMatches(pn, player.playerName))
     )
     const pitcherBoost = isPitcherMatch ? 1.5 : 1.0
-    const pts = Math.round(base * urgencyBoost * pitcherBoost * confidenceMult)
+    const confidenceMult = confidenceMultFor(name)
+    const basePts = Math.round(base * urgencyBoost * pitcherBoost * confidenceMult)
+
+    // Tuesday bonus is scoped to Pro-level position players (Kent's rule:
+    // "Tuesdays for MiLB position players") — pitchers get the probable-start
+    // boost instead, and NCAA/HS have their own game-day cadence.
+    const isTuesdayPlayer = tuesdayBonus && player.level === 'Pro' && !isPitcher(player)
+    const pts = isTuesdayPlayer ? Math.round(basePts * 1.2) : basePts
+    if (isTuesdayPlayer) tuesdayApplied = true
 
     if (isPitcherMatch) {
       pitcherMatchBonus += Math.round(base * urgencyBoost * 0.5) // track the bonus portion
     }
 
-    if (player.tier === 1) { tier1Count++; tier1Points += pts }
-    else if (player.tier === 2) { tier2Count++; tier2Points += pts }
-    else if (player.tier === 3) { tier3Count++; tier3Points += pts }
+    if (player.tier === 1) { tier1Count++; tier1Points += pts; rawScore += basePts }
+    else if (player.tier === 2) { tier2Count++; tier2Points += pts; rawScore += basePts }
+    else if (player.tier === 3) { tier3Count++; tier3Points += pts; rawScore += basePts }
   }
 
-  const rawScore = tier1Points + tier2Points + tier3Points
-  // Tuesday bonus should NOT stack on top of pitcher match bonus —
-  // if any tracked pitcher is a probable starter, the 1.5x pitcher boost takes priority
-  const hasPitcherMatch = pitcherMatchBonus > 0
-  const finalScore = (tuesdayBonus && !hasPitcherMatch) ? Math.round(rawScore * 1.2) : rawScore
+  const finalScore = tier1Points + tier2Points + tier3Points
 
   return {
     tier1Count, tier1Points,
     tier2Count, tier2Points,
     tier3Count, tier3Points,
-    tuesdayBonus,
+    tuesdayBonus: tuesdayApplied,
     pitcherMatchBonus,
     rawScore,
     finalScore,
@@ -471,7 +527,7 @@ function lookupHomeMinutes(coords: Coordinates, homeBase: Coordinates = DEFAULT_
   const isDefaultBase = Math.abs(homeBase.lat - DEFAULT_HOME_BASE.lat) < 0.01 && Math.abs(homeBase.lng - DEFAULT_HOME_BASE.lng) < 0.01
   if (isDefaultBase) {
     const key = coordKey(coords)
-    const entry = VENUE_PROXIMITY[key]
+    const entry = VENUE_PROXIMITY?.[key]
     if (entry) return entry.homeMinutes
   }
   return estimateDriveMinutes(homeBase, coords)
@@ -480,7 +536,7 @@ function lookupHomeMinutes(coords: Coordinates, homeBase: Coordinates = DEFAULT_
 // Check if two venues are within maxMinutes drive using pre-computed data
 function lookupDriveMinutes(a: Coordinates, b: Coordinates): number {
   const keyA = coordKey(a)
-  const entry = VENUE_PROXIMITY[keyA]
+  const entry = VENUE_PROXIMITY?.[keyA]
   if (entry) {
     const keyB = coordKey(b)
     const nearby = entry.nearby.find(n => n.key === keyB)
@@ -493,7 +549,7 @@ function lookupDriveMinutes(a: Coordinates, b: Coordinates): number {
 // Get set of nearby venue keys for fast filtering
 export function getNearbyVenueKeys(coords: Coordinates, maxMinutes: number): Set<string> | null {
   const key = coordKey(coords)
-  const entry = VENUE_PROXIMITY[key]
+  const entry = VENUE_PROXIMITY?.[key]
   if (!entry) return null
   return new Set(entry.nearby.filter(n => n.driveMinutes <= maxMinutes).map(n => n.key))
 }
@@ -514,6 +570,9 @@ export async function generateTrips(
   maxTripDays: number = 3,
 ): Promise<TripPlan> {
   onProgress?.('Preparing', 'Filtering eligible players...')
+
+  // Load the pre-computed venue proximity dataset (lazy chunk — see note at top)
+  await loadVenueProximity()
 
   // Build player lookup
   const playerMap = new Map<string, RosterPlayer>()
@@ -552,7 +611,7 @@ export async function generateTrips(
   const today = new Date().toISOString().slice(0, 10)
   const effectiveStart = startDate < today ? today : startDate
 
-  // Filter games: no Sundays, within date range, with eligible players, exclude cancelled
+  // Filter games: no Sundays, within date range, with eligible players, exclude cancelled/postponed
   const eligibleGames = games.filter(
     (g) =>
       isDateAllowed(g.date) &&
@@ -560,11 +619,13 @@ export async function generateTrips(
       g.date <= endDate &&
       g.playerNames.some((n) => eligiblePlayers.has(n)) &&
       g.gameStatus !== 'Cancelled' &&
-      g.gameStatus !== 'Canceled',
+      g.gameStatus !== 'Canceled' &&
+      g.gameStatus !== 'Postponed',
   )
 
   if (eligibleGames.length === 0) {
-    // Compute reasons for each unreachable player
+    // Compute reasons for each unreachable player — same discrimination
+    // (zero coords / Sunday blackout / today-clamp) as the main path below
     const unreachableWithReasons: UnvisitablePlayer[] = [...eligiblePlayers].map((name) => {
       const player = playerMap.get(name)
       if (!player) return { name, reason: 'Player not found in roster' }
@@ -572,6 +633,32 @@ export async function generateTrips(
       if (player.level === 'NCAA' && !resolveNcaaName(player.org)) return { name, reason: 'No recognized org — not in alias table' }
       if (player.level === 'Pro' && playerTeamAssignments && !playerTeamAssignments[name]) {
         return { name, reason: 'Not assigned to a team — run Auto-assign Affiliates on the Roster tab' }
+      }
+      const playerGames = games.filter((g) => g.playerNames.includes(name))
+      if (playerGames.length === 0) {
+        if (player.level === 'NCAA') return { name, reason: `Schedule fetch may have failed for ${player.org} — try reloading schedules` }
+        if (player.level === 'HS') return { name, reason: `No HS schedule found for "${player.org}" — may need MaxPreps mapping` }
+        return { name, reason: 'No games loaded — try reloading schedules' }
+      }
+      const allZeroCoords = playerGames.every((g) => g.venue.coords.lat === 0 && g.venue.coords.lng === 0)
+      if (allZeroCoords) {
+        return { name, reason: 'No venue coordinates — geocoding failed' }
+      }
+      const gamesInRange = playerGames.filter((g) => g.date >= startDate && g.date <= endDate)
+      if (gamesInRange.length === 0) {
+        if (player.level === 'NCAA') return { name, reason: `College season may be over — games found outside ${startDate} to ${endDate}` }
+        if (player.level === 'HS') return { name, reason: `HS season may be over — games found outside ${startDate} to ${endDate}` }
+        return { name, reason: 'No games in date range' }
+      }
+      // Games were in the user's range but the today-clamp removed them —
+      // don't blame the user's startDate for dates that are simply past
+      const gamesFromToday = gamesInRange.filter((g) => g.date >= effectiveStart)
+      if (gamesFromToday.length === 0) {
+        return { name, reason: 'All games in range are before today' }
+      }
+      const allSundays = gamesFromToday.every((g) => new Date(g.date + 'T12:00:00Z').getUTCDay() === 0)
+      if (allSundays) {
+        return { name, reason: 'All games on Sundays (blackout days)' }
       }
       return { name, reason: 'No games in date range' }
     })
@@ -619,17 +706,24 @@ export async function generateTrips(
   const nearMisses: NearMiss[] = []
   const nearMissSeen = new Set<string>() // dedupe by player+venue
 
-  // Cap candidates to prevent browser crash on wide date ranges
-  // 100 is plenty for greedy selection of 8 trips
-  const MAX_CANDIDATES = 100
+  // Cap candidates to prevent browser crash on wide date ranges.
+  // The budget is per-week rather than global: a global cap filled in date
+  // order meant long ranges only ever surfaced trips from the first few
+  // weeks. MAX_CANDIDATES remains as an absolute safety cap for the worker.
+  const MAX_CANDIDATES = 500
+  const MAX_CANDIDATES_PER_WEEK = 20
   let candidateCount = 0
+  const weekCandidateCounts = new Map<number, number>()
 
   for (const anchorDay of anchorDays) {
     if (candidateCount >= MAX_CANDIDATES) break
+    const weekNum = getWeekNumber(anchorDay)
+    if ((weekCandidateCounts.get(weekNum) ?? 0) >= MAX_CANDIDATES_PER_WEEK) continue
     const anchorGames = gamesByDate.get(anchorDay) ?? []
 
     for (const anchor of anchorGames) {
       if (candidateCount >= MAX_CANDIDATES) break
+      if ((weekCandidateCounts.get(weekNum) ?? 0) >= MAX_CANDIDATES_PER_WEEK) break
       if (anchor.venue.coords.lat === 0 && anchor.venue.coords.lng === 0) continue
 
       const anchorKey = coordKey(anchor.venue.coords)
@@ -656,7 +750,6 @@ export async function generateTrips(
 
       // Deduplicate: limit to 2 candidates per venue per week to reduce noise
       // while still allowing Tuesday vs non-Tuesday options at the same venue
-      const weekNum = getWeekNumber(anchorDay)
       const venueWeekKey = `${anchorKey}-w${weekNum}`
       const venueWeekCount = seenVenueWeeks.get(venueWeekKey) ?? 0
       if (venueWeekCount >= 2) continue
@@ -694,6 +787,7 @@ export async function generateTrips(
           scoreBreakdown: soloBreakdown,
         })
         candidateCount++
+        weekCandidateCounts.set(weekNum, (weekCandidateCounts.get(weekNum) ?? 0) + 1)
         continue
       }
 
@@ -800,6 +894,7 @@ export async function generateTrips(
         scoreBreakdown: breakdown,
       })
       candidateCount++
+      weekCandidateCounts.set(weekNum, (weekCandidateCounts.get(weekNum) ?? 0) + 1)
     }
 
     // Yield to browser periodically to prevent "Page Unresponsive"
@@ -838,20 +933,13 @@ export async function generateTrips(
     }
   }
 
-  // Score a trip accounting for visits already planned
-  function scoreWithCoverage(playerNames: string[]): number {
-    let score = 0
-    for (const name of playerNames) {
-      const player = playerMap.get(name)
-      if (!player) continue
-      const weight = TIER_WEIGHTS[player.tier] ?? 0
-      const remainingNeed = Math.max(0, player.visitsRemaining - (playerVisitCounts.get(name) ?? 0))
-      // Always contribute at least 1 point (don't exclude completed players entirely)
-      const base = remainingNeed > 0 ? weight * remainingNeed : 1
-      const urgencyBoost = urgencyMap?.get(name) ?? 1.0
-      score += Math.round(base * urgencyBoost)
-    }
-    return score
+  // Rescore a trip accounting for visits already planned. Reuses the full
+  // breakdown computation so the Tuesday/pitcher/confidence multipliers from
+  // initial candidate scoring survive greedy rescoring.
+  function scoreWithCoverage(trip: TripCandidate, playerNames: string[]): ScoreBreakdown {
+    const isTuesday = new Date(trip.anchorGame.date + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY
+    const tripGames = [trip.anchorGame, ...trip.nearbyGames]
+    return computeScoreBreakdown(playerNames, playerMap, isTuesday, urgencyMap, tripGames, playerVisitCounts)
   }
 
   // --- Priority player handling ---
@@ -981,19 +1069,21 @@ export async function generateTrips(
   )
   // Sort candidates by priority players first, then by score.
   // Don't filter out non-priority candidates — just boost priority ones to the top.
-  const remainingCandidates = [...candidates]
-    .sort((a, b) => {
-      // Priority-containing trips first
-      if (hasPriorityFilter && drivablePriority.size > 0) {
-        const aHasPriority = [...drivablePriority].some((n) =>
-          a.anchorGame.playerNames.includes(n) || a.nearbyGames.some((g) => g.playerNames.includes(n)))
-        const bHasPriority = [...drivablePriority].some((n) =>
-          b.anchorGame.playerNames.includes(n) || b.nearbyGames.some((g) => g.playerNames.includes(n)))
-        if (aHasPriority && !bHasPriority) return -1
-        if (!aHasPriority && bHasPriority) return 1
-      }
-      return b.visitValue - a.visitValue
-    })
+  // Extracted as a named comparator so the greedy loop's re-sort keeps the
+  // same priority-first ordering instead of falling back to pure score.
+  function comparePriorityThenValue(a: TripCandidate, b: TripCandidate): number {
+    // Priority-containing trips first
+    if (hasPriorityFilter && drivablePriority.size > 0) {
+      const aHasPriority = [...drivablePriority].some((n) =>
+        a.anchorGame.playerNames.includes(n) || a.nearbyGames.some((g) => g.playerNames.includes(n)))
+      const bHasPriority = [...drivablePriority].some((n) =>
+        b.anchorGame.playerNames.includes(n) || b.nearbyGames.some((g) => g.playerNames.includes(n)))
+      if (aHasPriority && !bHasPriority) return -1
+      if (!aHasPriority && bHasPriority) return 1
+    }
+    return b.visitValue - a.visitValue
+  }
+  const remainingCandidates = [...candidates].sort(comparePriorityThenValue)
 
   // Track selected trip date ranges for overlap detection
   function getTripDateRange(trip: TripCandidate): Set<string> {
@@ -1028,23 +1118,30 @@ export async function generateTrips(
       ].filter((n) => eligiblePlayers.has(n) && !isPlayerSaturated(n))
 
       const uniqueNames = [...new Set(tripPlayerNames)]
-      let rawCoverageScore = scoreWithCoverage(uniqueNames)
+      const coverageBreakdown = scoreWithCoverage(trip, uniqueNames)
 
       // Apply drive efficiency penalty during greedy selection too
       const driveHours = trip.totalDriveMinutes / 60
       const efficiencyFactor = driveHours > 0 ? Math.max(0.6, 1.0 - (driveHours - 3) * 0.05) : 1.0
-      rawCoverageScore = Math.round(rawCoverageScore * efficiencyFactor)
 
-      trip.visitValue = rawCoverageScore
+      trip.visitValue = Math.round(coverageBreakdown.finalScore * efficiencyFactor)
+      // Refresh the breakdown so the displayed explainer matches the score used for ranking
+      trip.scoreBreakdown = coverageBreakdown
       trip.totalPlayersVisited = uniqueNames.length
     }
 
-    // Re-sort and pick best
-    remainingCandidates.sort((a, b) => b.visitValue - a.visitValue)
+    // Drop candidates that no longer add any value (all players saturated) —
+    // checked before the priority-first sort so a zero-value priority trip
+    // can't mask remaining valuable candidates
+    for (let i = remainingCandidates.length - 1; i >= 0; i--) {
+      if (remainingCandidates[i]!.visitValue === 0) remainingCandidates.splice(i, 1)
+    }
+    if (remainingCandidates.length === 0) break
+
+    // Re-sort (priority-first, then value) and pick best
+    remainingCandidates.sort(comparePriorityThenValue)
 
     const best = remainingCandidates[0]!
-    if (best.visitValue === 0) break
-
     selectedTrips.push(best)
     recordTripPlayers(best)
 
@@ -1238,8 +1335,21 @@ export async function generateTrips(
 
       if (cluster.length < 2) continue // single-venue, handle as regular fly-in
 
-      // Build combo fly-in from this cluster (max stops = maxTripDays)
-      const clusterVenues = cluster.slice(0, maxTripDays).map((idx) => venues[idx]!)
+      // Build combo fly-in from this cluster. Stops are capped at
+      // maxTripDays - 1 game days — the last trip day is the flight home,
+      // which counts inside the cap just like road trips' return day.
+      const maxStops = Math.max(1, maxTripDays - 1)
+
+      // Sort cluster venues by tier-weighted value (T1/T2 venues first, not
+      // just player count) BEFORE truncating to maxStops, so the most
+      // valuable venues survive the cap — discovery order is arbitrary
+      const rankedVenues = cluster.map((idx) => venues[idx]!)
+      rankedVenues.sort((a, b) => {
+        const valueA = [...a.entry.players].reduce((s, n) => s + (TIER_WEIGHTS[playerMap.get(n)?.tier ?? 3] ?? 0), 0)
+        const valueB = [...b.entry.players].reduce((s, n) => s + (TIER_WEIGHTS[playerMap.get(n)?.tier ?? 3] ?? 0), 0)
+        return valueB - valueA
+      })
+      const clusterVenues = rankedVenues.slice(0, maxStops)
 
       // Find best anchor date across all cluster venues (prefer Tuesday)
       const allDates = new Set<string>()
@@ -1249,19 +1359,15 @@ export async function generateTrips(
       const sortedDates = [...allDates].sort()
       const bestDate = sortedDates.find(d => new Date(d + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY) ?? sortedDates[0]!
       const tripWindow = getTripWindow(bestDate, maxTripDays)
+      // Only the first maxStops window days may host game stops — the final
+      // day stays free for the flight home so the total trip fits maxTripDays
+      const stopWindow = tripWindow.slice(0, maxStops)
 
-      // Assign one venue per day within the trip window (dedup by venue coords)
+      // Assign one venue per day within the stop window (dedup by venue coords)
       const stops: import('../types/schedule').FlyInStop[] = []
       const usedDays = new Set<string>()
       const usedVenueCoords = new Set<string>()
       const allPlayerNames = new Set<string>()
-
-      // Sort cluster venues by tier-weighted value (T1/T2 venues first, not just player count)
-      clusterVenues.sort((a, b) => {
-        const valueA = [...a.entry.players].reduce((s, n) => s + (TIER_WEIGHTS[playerMap.get(n)?.tier ?? 3] ?? 0), 0)
-        const valueB = [...b.entry.players].reduce((s, n) => s + (TIER_WEIGHTS[playerMap.get(n)?.tier ?? 3] ?? 0), 0)
-        return valueB - valueA
-      })
 
       for (const v of clusterVenues) {
         // Skip if we've already added this venue (same coords within ~100m)
@@ -1280,10 +1386,10 @@ export async function generateTrips(
         })
         if (!hasHighTier && stops.length >= 1) continue
 
-        // Find best available day for this venue (prefer matching dates, then any trip day)
-        const venueDates = [...v.entry.dates].sort()
-        const matchingDay = tripWindow.find(d => venueDates.includes(d) && !usedDays.has(d))
-          ?? tripWindow.find(d => !usedDays.has(d))
+        // Find an unused stop day where this venue actually has a game —
+        // never fabricate a visit on a day with no game at the venue
+        const venueDates = [...v.entry.dates]
+        const matchingDay = stopWindow.find(d => venueDates.includes(d) && !usedDays.has(d))
         if (!matchingDay) continue
 
         usedDays.add(matchingDay)
@@ -1326,7 +1432,12 @@ export async function generateTrips(
       const totalInterDrive = stops.reduce((sum, s) => sum + s.driveMinutesFromPrev, 0)
       const comboPlayerNames = [...allPlayerNames]
       const isTuesday = new Date(bestDate + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY
-      const comboBreakdown = computeScoreBreakdown(comboPlayerNames, playerMap, isTuesday, urgencyMap, [])
+      // Score against each stop's real confidence — passing [] made every
+      // combo player read as low-confidence (0.5x)
+      const comboBreakdown = computeScoreBreakdown(
+        comboPlayerNames, playerMap, isTuesday, urgencyMap,
+        stops.map(s => ({ playerNames: s.playerNames, confidence: s.confidence })),
+      )
       // Combo bonus: 20% per additional stop
       const comboMultiplier = 1 + (0.2 * (stops.length - 1))
       comboBreakdown.finalScore = Math.round(comboBreakdown.finalScore * comboMultiplier)
@@ -1383,7 +1494,12 @@ export async function generateTrips(
 
     const isTuesday = new Date(bestDate + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY
     const flyInPlayerNames = [...entry.players]
-    const flyInBreakdown = computeScoreBreakdown(flyInPlayerNames, playerMap, isTuesday, urgencyMap, [])
+    // Score against the entry's real confidence — passing [] made every
+    // fly-in player read as low-confidence (0.5x)
+    const flyInBreakdown = computeScoreBreakdown(
+      flyInPlayerNames, playerMap, isTuesday, urgencyMap,
+      [{ playerNames: flyInPlayerNames, confidence: entry.confidence }],
+    )
     flyInVisits.push({
       playerNames: flyInPlayerNames,
       venue: entry.venue,
@@ -1661,6 +1777,7 @@ export function analyzeBestWeeks(
       g.playerNames.some((n) => eligiblePlayers.has(n)) &&
       g.gameStatus !== 'Cancelled' &&
       g.gameStatus !== 'Canceled' &&
+      g.gameStatus !== 'Postponed' &&
       g.venue.coords.lat !== 0 &&
       g.venue.coords.lng !== 0,
   )

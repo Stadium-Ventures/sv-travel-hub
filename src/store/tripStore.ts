@@ -308,8 +308,10 @@ export const useTripStore = create<TripState>()(
         // Only count if the planned visit falls inside (or within 14d of) the trip window
         const plannedISO = planned.length > 10 ? planned.slice(0, 10) : planned
         if (plannedISO < startDate) continue
-        const windowEnd = new Date(endDate)
-        windowEnd.setDate(windowEnd.getDate() + 14)
+        // Noon-UTC parse + UTC date math — new Date('YYYY-MM-DD') parses as
+        // UTC midnight, so local setDate/toISOString shifted a day in some TZs
+        const windowEnd = new Date(endDate + 'T12:00:00Z')
+        windowEnd.setUTCDate(windowEnd.getUTCDate() + 14)
         const windowEndISO = windowEnd.toISOString().split('T')[0]!
         if (plannedISO > windowEndISO) continue
         // Multiply existing urgency by 0.4 (or set to 0.4 if no entry yet).
@@ -439,7 +441,7 @@ export const useTripStore = create<TripState>()(
         return {
           ...current,
           ...(p ?? {}),
-          maxFlightHours: p?.maxFlightHours ?? 8,
+          maxFlightHours: p?.maxFlightHours ?? 4, // match initial state + migrate default
           priorityPlayers: p?.priorityPlayers ?? [],
           tripStatuses: p?.tripStatuses ?? {},
           starredTrips: p?.starredTrips ?? {},
