@@ -4,6 +4,7 @@ import { NCAA_VENUES } from '../data/ncaaVenues'
 import { resolveNcaaName } from '../data/aliases'
 import type { Coordinates } from '../types/roster'
 import { fetchWithTimeout } from './fetchWithTimeout'
+import { useDiagnosticsStore } from '../store/diagnosticsStore'
 
 // CORS proxies with fallback — if the primary goes down, try alternatives
 export interface CorsProxy {
@@ -220,27 +221,48 @@ export async function discoverD1Slug(schoolName: string): Promise<string | null>
   }
 }
 
+// Max age before the bundled snapshot stops being an acceptable fast-path
+// and becomes a last-resort fallback only.
+const BUNDLE_MAX_AGE = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+// Serve the stale bundled snapshot as a last resort (live fetch failed),
+// with a diagnostics notice so the staleness isn't masked.
+function staleBundledFallback(canonicalName: string): D1Schedule | null {
+  const bundled = BUNDLED_NCAA_SCHEDULES[canonicalName]
+  if (!bundled || bundled.games.length === 0) return null
+  useDiagnosticsStore.getState().addIssue({
+    level: 'warning',
+    source: 'ncaa',
+    message: `${canonicalName}: live D1Baseball fetch failed — serving bundled snapshot from ${new Date(bundled.fetchedAt).toISOString().split('T')[0]}`,
+  })
+  return bundled
+}
+
 // Fetch schedule for a single school
 export async function fetchD1Schedule(
   canonicalName: string,
   opts?: { forceRefresh?: boolean },
 ): Promise<D1Schedule | null> {
-  // Check bundled static data first (instant, no network)
-  if (!opts?.forceRefresh && BUNDLED_NCAA_SCHEDULES[canonicalName]) {
-    return BUNDLED_NCAA_SCHEDULES[canonicalName]!
+  // Bundled static data fast-path (instant, no network) — only while the
+  // bundle's own snapshot is fresh enough. An old bundle falls through to a
+  // live fetch and is used only as a last-resort fallback below.
+  const bundled = BUNDLED_NCAA_SCHEDULES[canonicalName]
+  const bundledFresh = bundled != null && Date.now() - bundled.fetchedAt < BUNDLE_MAX_AGE
+  if (!opts?.forceRefresh && bundled && bundledFresh) {
+    return bundled
   }
 
   let slug: string | undefined = D1_BASEBALL_SLUGS[canonicalName]
   if (!slug) {
     const discovered = await discoverD1Slug(canonicalName)
-    if (!discovered) return null
+    if (!discovered) return staleBundledFallback(canonicalName)
     slug = discovered
   }
 
-  // Check cache
+  // Check cache — an empty cached schedule is never trusted as a hit
   const cache = getCache()
   const cached = cache[canonicalName]
-  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
+  if (cached && cached.games.length > 0 && Date.now() - cached.fetchedAt < CACHE_TTL) {
     return cached
   }
 
@@ -249,6 +271,20 @@ export async function fetchD1Schedule(
   try {
     const html = await fetchWithCorsProxy(url)
     const games = parseScheduleHtml(html)
+
+    // Non-trivial HTML but 0 games parsed → treat as a failure. Do NOT cache
+    // the empty result over a previous non-empty schedule; let the school
+    // land in failedSchools (or fall back to the bundled snapshot).
+    if (games.length === 0) {
+      useDiagnosticsStore.getState().addIssue({
+        level: 'warning',
+        source: 'ncaa',
+        message: `${canonicalName}: D1Baseball returned a page but 0 games parsed — site structure may have changed`,
+      })
+      if (cached && cached.games.length > 0) return cached // stale-but-real beats empty
+      return staleBundledFallback(canonicalName)
+    }
+
     const schedule: D1Schedule = {
       school: canonicalName,
       slug,
@@ -263,7 +299,8 @@ export async function fetchD1Schedule(
     return schedule
   } catch (err) {
     console.warn(`Failed to fetch D1Baseball schedule for ${canonicalName}:`, err)
-    return null
+    if (cached && cached.games.length > 0) return cached // stale cache beats nothing
+    return staleBundledFallback(canonicalName)
   }
 }
 

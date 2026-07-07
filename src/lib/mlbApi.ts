@@ -128,9 +128,12 @@ export interface MLBRosterEntry {
 export async function fetchTeamRoster(teamId: number, sportId: number, season?: number, rosterType: string = 'fullRoster'): Promise<MLBRosterEntry[]> {
   const url = `${MLB_BASE}/teams/${teamId}/roster?rosterType=${rosterType}${season ? `&season=${season}` : ''}`
   const res = await fetchWithRetry(url, { timeoutMs: 10000 })
+  if (res.status === 404) {
+    // Some teams legitimately have no roster available — not a fetch failure
+    return []
+  }
   if (!res.ok) {
-    console.warn(`Roster fetch failed for team ${teamId}: HTTP ${res.status}`)
-    return [] // Some teams may not have rosters available
+    throw new Error(`Roster fetch failed for team ${teamId}: HTTP ${res.status}`)
   }
   const data = await res.json()
 
@@ -149,12 +152,19 @@ export async function fetchTeamRoster(teamId: number, sportId: number, season?: 
 }
 
 // Batch fetch rosters for multiple teams
+export interface RosterFetchResult {
+  entries: MLBRosterEntry[]
+  /** Teams whose roster fetch failed outright (network / HTTP error after retries). */
+  failedTeams: Array<{ teamId: number; sportId: number; teamName: string }>
+}
+
 export async function fetchAllRosters(
   teams: Array<{ teamId: number; sportId: number; teamName: string }>,
   onProgress?: (completed: number, total: number) => void,
   season?: number,
-): Promise<MLBRosterEntry[]> {
+): Promise<RosterFetchResult> {
   const all: MLBRosterEntry[] = []
+  const failedTeams: RosterFetchResult['failedTeams'] = []
   const concurrency = 5
   let completed = 0
 
@@ -164,19 +174,22 @@ export async function fetchAllRosters(
       batch.map(async (t) => {
         try {
           const roster = await fetchTeamRoster(t.teamId, t.sportId, season)
-          return roster.map((r) => ({ ...r, teamName: t.teamName }))
+          return { team: t, entries: roster.map((r) => ({ ...r, teamName: t.teamName })), failed: false }
         } catch (e) {
           console.warn(`Roster fetch failed for team ${t.teamId} after retries:`, e)
-          return [] as MLBRosterEntry[]
+          return { team: t, entries: [] as MLBRosterEntry[], failed: true }
         }
       }),
     )
-    for (const entries of results) all.push(...entries)
+    for (const r of results) {
+      all.push(...r.entries)
+      if (r.failed) failedTeams.push(r.team)
+    }
     completed += batch.length
     onProgress?.(completed, teams.length)
   }
 
-  return all
+  return { entries: all, failedTeams }
 }
 
 // Batch fetch all affiliates for multiple parent orgs
@@ -202,14 +215,22 @@ export async function fetchAllAffiliates(
   return all
 }
 
-// Batch fetch schedules for multiple teams
+// Batch fetch schedules for multiple teams.
+// Failed teams are NOT added to the map (no silently-empty schedules) —
+// they're reported in failedTeamIds, same pattern as fetchAllTransactions.
+export interface ScheduleFetchResult {
+  schedules: Map<number, MLBGameRaw[]>
+  failedTeamIds: number[]
+}
+
 export async function fetchAllSchedules(
   teams: Array<{ teamId: number; sportId: number }>,
   startDate: string,
   endDate: string,
   onProgress?: (completed: number, total: number) => void,
-): Promise<Map<number, MLBGameRaw[]>> {
+): Promise<ScheduleFetchResult> {
   const schedules = new Map<number, MLBGameRaw[]>()
+  const failedTeamIds: number[] = []
   const concurrency = 2
   let completed = 0
 
@@ -219,15 +240,16 @@ export async function fetchAllSchedules(
       batch.map(async (t) => {
         try {
           const games = await fetchSchedule(t.teamId, t.sportId, startDate, endDate)
-          return { teamId: t.teamId, games }
+          return { teamId: t.teamId, games, failed: false }
         } catch (e) {
           console.warn(`Schedule fetch failed for team ${t.teamId} after retries:`, e)
-          return { teamId: t.teamId, games: [] as MLBGameRaw[] }
+          return { teamId: t.teamId, games: [] as MLBGameRaw[], failed: true }
         }
       }),
     )
     for (const r of results) {
-      schedules.set(r.teamId, r.games)
+      if (r.failed) failedTeamIds.push(r.teamId)
+      else schedules.set(r.teamId, r.games)
     }
     completed += batch.length
     onProgress?.(completed, teams.length)
@@ -237,7 +259,7 @@ export async function fetchAllSchedules(
     }
   }
 
-  return schedules
+  return { schedules, failedTeamIds }
 }
 
 // --- Transactions API ---

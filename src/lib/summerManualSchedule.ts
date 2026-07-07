@@ -18,6 +18,19 @@ import { SUMMER_LEAGUES } from '../data/summerLeagues'
 
 const MANUAL_CSV_URL = import.meta.env.VITE_SUMMER_MANUAL_CSV_URL as string | undefined
 
+// Local-time → UTC hour offset per league during the summer season (DST).
+// Most covered leagues play in Eastern (UTC-4); Northwoods is Central (UTC-5).
+const LEAGUE_UTC_OFFSET_SUMMER: Record<SummerLeagueCode, number> = {
+  CCBL: 4,  // Cape Cod — Eastern
+  MLBD: 4,  // MLB Draft League — Eastern
+  APP: 4,   // Appalachian — Eastern
+  PGCBL: 4, // upstate NY — Eastern
+  NECBL: 4, // New England — Eastern
+  FCBL: 4,  // New England — Eastern
+  NWDS: 5,  // Northwoods (WI/MN/etc.) — Central
+  COPL: 4,  // Coastal Plain (NC/SC/VA) — Eastern
+}
+
 interface ManualRow {
   [k: string]: string
 }
@@ -132,8 +145,20 @@ export async function fetchManualSummerSchedule(): Promise<ManualScheduleResult>
       const ampm = (tm[3] ?? '').toUpperCase()
       if (ampm === 'PM' && h < 12) h += 12
       if (ampm === 'AM' && h === 12) h = 0
-      // Assume Eastern Time (treat as UTC-4 in summer)
-      isoTime = `${isoDate}T${String(h + 4).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`
+      // Per-league local-time → UTC offset (all summer games fall inside DST).
+      // Ideally this would live on SUMMER_LEAGUES in src/data/summerLeagues.ts;
+      // kept here so this file stays the sole owner of manual-sheet parsing.
+      const utcOffset = LEAGUE_UTC_OFFSET_SUMMER[g.league] ?? 4
+      let utcH = h + utcOffset
+      let gameDate = isoDate
+      if (utcH >= 24) {
+        // Late local start rolls past midnight UTC — bump the timestamp's date
+        utcH -= 24
+        const next = new Date(`${isoDate}T12:00:00Z`)
+        next.setUTCDate(next.getUTCDate() + 1)
+        gameDate = next.toISOString().split('T')[0]!
+      }
+      isoTime = `${gameDate}T${String(utcH).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`
     }
 
     games.push({

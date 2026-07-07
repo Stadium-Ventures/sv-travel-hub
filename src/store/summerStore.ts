@@ -118,9 +118,12 @@ export const useSummerStore = create<SummerState>()(
       },
 
       loadSchedules: async (startDate, endDate, opts) => {
+        // Reentrancy guard — mirrors loadAssignments
+        if (get().loading) return
         const state = get()
         if (state.assignments.length === 0) {
           await get().loadAssignments()
+          if (get().error) return // assignments fetch failed — error already surfaced
         }
         const refreshed = get()
         const active = refreshed.assignments.filter((a) => a.active)
@@ -129,137 +132,151 @@ export const useSummerStore = create<SummerState>()(
           return
         }
 
+        set({ loading: true, error: null })
         const diag = useDiagnosticsStore.getState()
 
-        // Group active assignments by league
-        const byLeague = new Map<SummerLeagueCode, SummerAssignment[]>()
-        for (const a of active) {
-          const arr = byLeague.get(a.league) ?? []
-          arr.push(a)
-          byLeague.set(a.league, arr)
-        }
-
-        const season = new Date(startDate).getUTCFullYear()
-        const summerGames: GameEvent[] = []
-        const unresolved: string[] = []
-
-        // Process MLB-API-backed leagues (CCBL + MLBD)
-        for (const [code, league] of Object.entries(SUMMER_LEAGUES) as [SummerLeagueCode, typeof SUMMER_LEAGUES[SummerLeagueCode]][]) {
-          const leagueAssignments = byLeague.get(code) ?? []
-          if (leagueAssignments.length === 0) continue
-
-          if (league.source !== 'mlb-api' || !league.mlbApiLeagueId) {
-            // PrestoSports / manual — not handled in this pass. Surface the
-            // assignment so it appears on player cards, but flag unresolved.
-            for (const a of leagueAssignments) unresolved.push(a.playerName)
-            diag.addIssue({
-              level: 'info',
-              source: 'summer',
-              message: `${code} schedule ingestion not yet built — ${leagueAssignments.length} player(s) have assignments but no game data.`,
-              details: leagueAssignments.map((a) => `${a.playerName} → ${a.summerTeam}`).join(', '),
-            })
-            continue
+        try {
+          // Group active assignments by league
+          const byLeague = new Map<SummerLeagueCode, SummerAssignment[]>()
+          for (const a of active) {
+            const arr = byLeague.get(a.league) ?? []
+            arr.push(a)
+            byLeague.set(a.league, arr)
           }
 
-          try {
-            const teams = await fetchPartnerLeagueTeams(league.mlbApiLeagueId, season)
-            const resolved: ResolvedSummerTeam[] = []
-            const unmatched: string[] = []
+          const season = new Date(startDate).getUTCFullYear()
+          const summerGames: GameEvent[] = []
+          const unresolved: string[] = []
 
-            // Match each assignment's summerTeam string to an MLB-API team
-            const teamToPlayers = new Map<number, { team: PartnerLeagueTeam; players: string[] }>()
-            for (const a of leagueAssignments) {
-              const match = matchTeamByName(a.summerTeam, teams)
-              if (!match) {
-                unmatched.push(`${a.playerName} → "${a.summerTeam}"`)
-                unresolved.push(a.playerName)
-                continue
-              }
-              const entry = teamToPlayers.get(match.teamId)
-              if (entry) entry.players.push(a.playerName)
-              else teamToPlayers.set(match.teamId, { team: match, players: [a.playerName] })
-            }
+          // Process MLB-API-backed leagues (CCBL + MLBD)
+          for (const [code, league] of Object.entries(SUMMER_LEAGUES) as [SummerLeagueCode, typeof SUMMER_LEAGUES[SummerLeagueCode]][]) {
+            const leagueAssignments = byLeague.get(code) ?? []
+            if (leagueAssignments.length === 0) continue
 
-            if (unmatched.length > 0) {
-              diag.addIssue({
-                level: 'warning',
-                source: 'summer',
-                message: `${code}: ${unmatched.length} team name(s) didn't match the league roster.`,
-                details: unmatched.join('; '),
-              })
-            }
-
-            for (const entry of teamToPlayers.values()) {
-              resolved.push({ team: entry.team, players: entry.players, league: code })
-            }
-
-            // Fetch schedules sequentially (gentle on MLB API; few teams)
-            for (const r of resolved) {
-              try {
-                const games = await fetchPartnerLeagueSchedule(r.team, startDate, endDate)
-                for (const g of games) {
-                  const event = gameToEvent(g, r.team, r.players, r.league)
-                  if (event) summerGames.push(event)
-                }
-              } catch (e) {
-                diag.addIssue({
-                  level: 'warning',
-                  source: 'summer',
-                  message: `${code}: failed to fetch schedule for ${r.team.teamName}`,
-                  details: e instanceof Error ? e.message : 'unknown',
-                })
-              }
-            }
-          } catch (e) {
-            diag.addIssue({
-              level: 'error',
-              source: 'summer',
-              message: `${code}: league fetch failed`,
-              details: e instanceof Error ? e.message : 'unknown',
-            })
-          }
-        }
-
-        // Layer in any games from the manual sheet (Northwoods, CPL, etc.).
-        // Manual entries clear "unresolved" status for the players they cover.
-        if (isManualCsvConfigured()) {
-          try {
-            const manual = await fetchManualSummerSchedule()
-            for (const w of manual.warnings) {
-              diag.addIssue({ level: 'warning', source: 'summer', message: `Manual sheet: ${w}` })
-            }
-            const manualPlayers = new Set(manual.games.flatMap((g) => g.playerNames))
-            for (const game of manual.games) summerGames.push(game)
-            const stillUnresolved = unresolved.filter((p) => !manualPlayers.has(p))
-            unresolved.length = 0
-            unresolved.push(...stillUnresolved)
-            if (manual.games.length > 0) {
+            if (league.source !== 'mlb-api' || !league.mlbApiLeagueId) {
+              // PrestoSports / manual — not handled in this pass. Surface the
+              // assignment so it appears on player cards, but flag unresolved.
+              for (const a of leagueAssignments) unresolved.push(a.playerName)
               diag.addIssue({
                 level: 'info',
                 source: 'summer',
-                message: `Manual sheet: ${manual.games.length} games loaded covering ${manualPlayers.size} player(s).`,
+                message: `${code} schedule ingestion not yet built — ${leagueAssignments.length} player(s) have assignments but no game data.`,
+                details: leagueAssignments.map((a) => `${a.playerName} → ${a.summerTeam}`).join(', '),
+              })
+              continue
+            }
+
+            try {
+              const teams = await fetchPartnerLeagueTeams(league.mlbApiLeagueId, season)
+              const resolved: ResolvedSummerTeam[] = []
+              const unmatched: string[] = []
+
+              // Match each assignment's summerTeam string to an MLB-API team
+              const teamToPlayers = new Map<number, { team: PartnerLeagueTeam; players: string[] }>()
+              for (const a of leagueAssignments) {
+                const match = matchTeamByName(a.summerTeam, teams)
+                if (!match) {
+                  unmatched.push(`${a.playerName} → "${a.summerTeam}"`)
+                  unresolved.push(a.playerName)
+                  continue
+                }
+                const entry = teamToPlayers.get(match.teamId)
+                if (entry) entry.players.push(a.playerName)
+                else teamToPlayers.set(match.teamId, { team: match, players: [a.playerName] })
+              }
+
+              if (unmatched.length > 0) {
+                diag.addIssue({
+                  level: 'warning',
+                  source: 'summer',
+                  message: `${code}: ${unmatched.length} team name(s) didn't match the league roster.`,
+                  details: unmatched.join('; '),
+                })
+              }
+
+              for (const entry of teamToPlayers.values()) {
+                resolved.push({ team: entry.team, players: entry.players, league: code })
+              }
+
+              // Fetch schedules sequentially (gentle on MLB API; few teams)
+              for (const r of resolved) {
+                try {
+                  const games = await fetchPartnerLeagueSchedule(r.team, startDate, endDate)
+                  for (const g of games) {
+                    const event = gameToEvent(g, r.team, r.players, r.league)
+                    if (event) summerGames.push(event)
+                  }
+                } catch (e) {
+                  diag.addIssue({
+                    level: 'warning',
+                    source: 'summer',
+                    message: `${code}: failed to fetch schedule for ${r.team.teamName}`,
+                    details: e instanceof Error ? e.message : 'unknown',
+                  })
+                }
+              }
+            } catch (e) {
+              diag.addIssue({
+                level: 'error',
+                source: 'summer',
+                message: `${code}: league fetch failed`,
+                details: e instanceof Error ? e.message : 'unknown',
               })
             }
-          } catch (e) {
-            diag.addIssue({
-              level: 'warning',
-              source: 'summer',
-              message: 'Manual summer schedule sheet fetch failed',
-              details: e instanceof Error ? e.message : 'unknown',
-            })
           }
+
+          // Layer in any games from the manual sheet (Northwoods, CPL, etc.).
+          // Manual entries clear "unresolved" status for the players they cover.
+          if (isManualCsvConfigured()) {
+            try {
+              const manual = await fetchManualSummerSchedule()
+              for (const w of manual.warnings) {
+                diag.addIssue({ level: 'warning', source: 'summer', message: `Manual sheet: ${w}` })
+              }
+              const manualPlayers = new Set(manual.games.flatMap((g) => g.playerNames))
+              for (const game of manual.games) summerGames.push(game)
+              const stillUnresolved = unresolved.filter((p) => !manualPlayers.has(p))
+              unresolved.length = 0
+              unresolved.push(...stillUnresolved)
+              if (manual.games.length > 0) {
+                diag.addIssue({
+                  level: 'info',
+                  source: 'summer',
+                  message: `Manual sheet: ${manual.games.length} games loaded covering ${manualPlayers.size} player(s).`,
+                })
+              }
+            } catch (e) {
+              diag.addIssue({
+                level: 'warning',
+                source: 'summer',
+                message: 'Manual summer schedule sheet fetch failed',
+                details: e instanceof Error ? e.message : 'unknown',
+              })
+            }
+          }
+
+          set({
+            summerGames,
+            unresolvedPlayers: [...new Set(unresolved)],
+            loading: false,
+            error: null,
+            fetchedAt: new Date().toISOString(), // only stamped on success
+          })
+
+          diag.addIssue({
+            level: 'info',
+            source: 'summer',
+            message: `Summer schedule: ${summerGames.length} games loaded for ${active.length - unresolved.length} of ${active.length} active players.`,
+          })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Failed to load summer schedules'
+          set({ loading: false, error: msg })
+          diag.addIssue({
+            level: 'error',
+            source: 'summer',
+            message: `Summer schedules failed to load: ${msg}`,
+          })
         }
-
-        set({
-          summerGames,
-          unresolvedPlayers: [...new Set(unresolved)],
-        })
-
-        diag.addIssue({
-          level: 'info',
-          source: 'summer',
-          message: `Summer schedule: ${summerGames.length} games loaded for ${active.length - unresolved.length} of ${active.length} active players.`,
-        })
 
         // Silence unused-var warning when opts is not supplied
         void opts

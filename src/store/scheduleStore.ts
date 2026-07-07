@@ -300,7 +300,8 @@ export const useScheduleStore = create<ScheduleState>()(
             return { teamId: orgId, sportId: 1, teamName }
           })
 
-          const mlbRosterEntries = await fetchAllRosters(mlbTeamsToQuery)
+          const mlbRosterResult = await fetchAllRosters(mlbTeamsToQuery)
+          const mlbRosterEntries = mlbRosterResult.entries
           const mlbPlayerIdToTeam = new Map<number, PlayerTeamAssignment>()
           for (const entry of mlbRosterEntries) {
             if (entry.playerId > 0) {
@@ -316,6 +317,7 @@ export const useScheduleStore = create<ScheduleState>()(
           // optioned to the minors and should use the MiLB team's schedule, not MLB.
           // Hoist milbRosterEntries so Phase 3 can also use them for name matching
           let milbRosterEntries: typeof mlbRosterEntries = []
+          let failedMilbRosterTeams: Array<{ teamId: number; sportId: number; teamName: string }> = []
 
           {
             const allOrgIds = new Set<number>()
@@ -330,8 +332,21 @@ export const useScheduleStore = create<ScheduleState>()(
               .map((a) => ({ teamId: a.teamId, sportId: a.sportId, teamName: a.teamName }))
 
             if (teamsToQuery.length > 0) {
-              milbRosterEntries = await fetchAllRosters(teamsToQuery)
+              const milbRosterResult = await fetchAllRosters(teamsToQuery)
+              milbRosterEntries = milbRosterResult.entries
+              failedMilbRosterTeams = milbRosterResult.failedTeams
             }
+          }
+
+          // Surface roster fetch failures — distinct from "player not on any roster"
+          const allFailedRosterTeams = [...mlbRosterResult.failedTeams, ...failedMilbRosterTeams]
+          if (allFailedRosterTeams.length > 0) {
+            useDiagnosticsStore.getState().addIssue({
+              level: 'warning',
+              source: 'pro',
+              message: `${allFailedRosterTeams.length} roster fetch(es) failed — some players may show as unassigned when they're actually rostered`,
+              details: allFailedRosterTeams.map((t) => t.teamName).join(', '),
+            })
           }
 
           // Build MiLB player lookup
@@ -351,11 +366,22 @@ export const useScheduleStore = create<ScheduleState>()(
           const now = new Date()
           const monthBasedST = now.getMonth() < 3 // Jan=0, Feb=1, Mar=2 → before April
 
-          // Check if current MiLB rosters cover our tracked players well
+          // Check if current MiLB rosters cover our tracked players well.
+          // Exclude players whose previously-assigned team's roster fetch
+          // FAILED — they'd read as "not covered" purely because of a flaky
+          // fetch, which could falsely flip the store into spring-training
+          // estimation mode.
           const trackedProWithId = proPlayers.filter((p) => p.mlbPlayerId)
-          const milbCoverage = trackedProWithId.length > 0
-            ? trackedProWithId.filter((p) => milbPlayerIdToTeam.has(p.mlbPlayerId!)).length / trackedProWithId.length
-            : 0
+          const failedMilbTeamIds = new Set(failedMilbRosterTeams.map((t) => t.teamId))
+          const coverageEligible = trackedProWithId.filter((p) => {
+            const prev = state.playerTeamAssignments[p.playerName]
+            return !(prev && failedMilbTeamIds.has(prev.teamId))
+          })
+          const milbCoverage = coverageEligible.length > 0
+            ? coverageEligible.filter((p) => milbPlayerIdToTeam.has(p.mlbPlayerId!)).length / coverageEligible.length
+            : trackedProWithId.length > 0 && failedMilbTeamIds.size > 0
+              ? 1 // every tracked player's team failed to fetch — coverage unknown, don't flip to estimation
+              : 0
 
           // Use spring training estimation if: before April OR if MiLB coverage is < 50%
           // (MiLB rosters aren't finalized yet even in early April)
@@ -380,7 +406,7 @@ export const useScheduleStore = create<ScheduleState>()(
               .map((a) => ({ teamId: a.teamId, sportId: a.sportId, teamName: a.teamName }))
 
             if (lastYearTeamsToQuery.length > 0) {
-              const lastYearEntries = await fetchAllRosters(lastYearTeamsToQuery, undefined, lastYear)
+              const { entries: lastYearEntries } = await fetchAllRosters(lastYearTeamsToQuery, undefined, lastYear)
               for (const entry of lastYearEntries) {
                 if (entry.playerId > 0) {
                   lastYearMilbLookup.set(entry.playerId, {
@@ -683,16 +709,31 @@ export const useScheduleStore = create<ScheduleState>()(
         set({ schedulesLoading: true, schedulesError: null, schedulesProgress: { completed: 0, total: teamsToFetch.length } })
 
         try {
-          const schedules = await fetchAllSchedules(teamsToFetch, startDate, endDate, (completed, total) => {
+          const { schedules, failedTeamIds } = await fetchAllSchedules(teamsToFetch, startDate, endDate, (completed, total) => {
             set({ schedulesProgress: { completed, total } })
           })
+
+          // Build the raw schedule map: fresh data for successful fetches;
+          // for FAILED teams, keep the previously cached non-empty schedule
+          // rather than silently wiping it with nothing.
+          const rawSchedules: Record<number, MLBGameRaw[]> = {}
+          for (const [teamId, games] of schedules.entries()) {
+            rawSchedules[teamId] = games
+          }
+          for (const teamId of failedTeamIds) {
+            const prevGames = state.proSchedules[teamId]
+            if (prevGames && prevGames.length > 0) {
+              rawSchedules[teamId] = prevGames
+            }
+          }
 
           // Convert to GameEvents — attach only players assigned to this specific team
           const allGames: GameEvent[] = []
           const seenIds = new Set<string>()
           let droppedGames = 0
 
-          for (const [teamId, games] of schedules.entries()) {
+          for (const [teamIdStr, games] of Object.entries(rawSchedules)) {
+            const teamId = parseInt(teamIdStr)
             const teamPlayers = playersByTeamId.get(teamId) ?? []
             if (teamPlayers.length === 0) continue
 
@@ -710,11 +751,6 @@ export const useScheduleStore = create<ScheduleState>()(
           // Sort by date
           allGames.sort((a, b) => a.date.localeCompare(b.date))
 
-          const rawSchedules: Record<number, MLBGameRaw[]> = {}
-          for (const [teamId, games] of schedules.entries()) {
-            rawSchedules[teamId] = games
-          }
-
           set({
             proSchedules: rawSchedules,
             proGames: allGames,
@@ -728,6 +764,19 @@ export const useScheduleStore = create<ScheduleState>()(
           // Diagnostics
           const diag = useDiagnosticsStore.getState()
           diag.clearSource('pro')
+          if (failedTeamIds.length > 0) {
+            // Map failed teamIds to affected player names for an actionable message
+            const affectedPlayers = failedTeamIds.flatMap((id) => playersByTeamId.get(id) ?? [])
+            const failedTeamNames = failedTeamIds.map((id) =>
+              allAffiliates.find((a) => a.teamId === id)?.teamName ?? `Team ${id}`,
+            )
+            diag.addIssue({
+              level: 'warning',
+              source: 'pro',
+              message: `${failedTeamIds.length} team schedule fetch(es) failed — ${affectedPlayers.length > 0 ? `affects ${affectedPlayers.join(', ')}` : 'no assigned players affected'}${failedTeamIds.some((id) => (state.proSchedules[id]?.length ?? 0) > 0) ? ' (kept previously cached games)' : ''}`,
+              details: failedTeamNames.join(', '),
+            })
+          }
           if (droppedGames > 0) {
             diag.addIssue({
               level: 'warning',
@@ -875,6 +924,11 @@ export const useScheduleStore = create<ScheduleState>()(
           ncaaFailedSchools: merge ? prevState.ncaaFailedSchools : [],
           ncaaDroppedAwayGames: merge ? prevState.ncaaDroppedAwayGames : 0,
         })
+
+        // Clear stale ncaa diagnostics BEFORE fetching — d1baseball.ts pushes
+        // issues (stale-bundle fallbacks, 0-game parses) during the fetch and
+        // they must survive.
+        useDiagnosticsStore.getState().clearSource('ncaa')
 
         try {
           const { schedules, failedSchools } = await fetchAllD1Schedules(
@@ -1038,20 +1092,41 @@ export const useScheduleStore = create<ScheduleState>()(
             ? [...new Set([...prevState.ncaaFailedSchools, ...failedSchools])]
             : failedSchools
 
+          // Derive ncaaFetchedAt from the underlying schedules' own fetchedAt
+          // (min across schools) so bundled/stale snapshots aren't masked by a
+          // Date.now() stamped at conversion time.
+          const scheduleTimestamps = Object.values(schedulesObj)
+            .map((s) => s.fetchedAt)
+            .filter((t): t is number => typeof t === 'number' && t > 0)
+          const derivedNcaaFetchedAt = scheduleTimestamps.length > 0
+            ? Math.min(...scheduleTimestamps)
+            : Date.now()
+
           set({
             ncaaSchedules: schedulesObj,
             ncaaGames: allGames,
             ncaaLoading: false,
             ncaaProgress: null,
-            ncaaFetchedAt: merge ? (prevState.ncaaFetchedAt ?? Date.now()) : Date.now(),
+            ncaaFetchedAt: derivedNcaaFetchedAt,
             ncaaFailedSchools: mergedFailed,
             ncaaDroppedAwayGames: droppedAwayGames,
             cachedNcaaSchools: [...new Set([...(merge ? prevState.cachedNcaaSchools ?? [] : []), ...schoolToPlayers.keys()])],
           })
 
-          // Diagnostics
+          // Diagnostics (source already cleared before the fetch)
           const diag = useDiagnosticsStore.getState()
-          diag.clearSource('ncaa')
+          const STALE_SNAPSHOT_AGE = 7 * 24 * 60 * 60 * 1000
+          const staleSchools = Object.values(schedulesObj)
+            .filter((s) => Date.now() - s.fetchedAt > STALE_SNAPSHOT_AGE)
+          if (staleSchools.length > 0) {
+            const oldest = Math.min(...staleSchools.map((s) => s.fetchedAt))
+            diag.addIssue({
+              level: 'info',
+              source: 'ncaa',
+              message: `Serving bundled/stale schedule snapshot for ${staleSchools.length} NCAA school(s) — oldest from ${new Date(oldest).toISOString().split('T')[0]}`,
+              details: staleSchools.map((s) => s.school).join(', '),
+            })
+          }
           if (mergedFailed.length > 0) {
             diag.addIssue({
               level: 'warning',
@@ -1081,16 +1156,31 @@ export const useScheduleStore = create<ScheduleState>()(
 
         // CSV is the SOLE source of truth for HS schedules. The previous
         // bundled fallback was a 2.5-month-old snapshot that could silently
-        // serve stale data. If the CSV fetch fails, we surface the error
-        // rather than fabricating coverage.
+        // serve stale data. If the CSV fetch fails — including HTML bodies,
+        // parse errors, or missing required headers (validated inside
+        // fetchScheduleCsv) — we surface the error rather than letting every
+        // school land in hsFailedSchools with a misleading "add to Google
+        // Sheet" message.
         let csvSchedules: Map<string, MaxPrepsSchedule>
+        let csvUnmappedTeams: string[] = []
+        let csvWarnings: string[] = []
         try {
           const result = await fetchScheduleCsv()
           csvSchedules = result.schedules
-          debugLog(`[HS] CSV fetch OK: ${csvSchedules.size} schools`)
+          csvUnmappedTeams = result.unmappedTeams
+          csvWarnings = result.warnings
+          debugLog(`[HS] CSV fetch OK: ${csvSchedules.size} schools, ${result.hsRowCount} HS/JUCO rows`)
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           console.error('[HS] CSV fetch failed:', msg)
+          const diagErr = useDiagnosticsStore.getState()
+          diagErr.clearSource('hs')
+          diagErr.addIssue({
+            level: 'error',
+            source: 'hs',
+            message: 'HS schedule CSV feed is broken — no HS games loaded',
+            details: msg,
+          })
           set({
             hsError: `HS schedule CSV could not be loaded — check VITE_SCHEDULE_CSV_URL. (${msg})`,
             hsGames: merge ? get().hsGames : [],
@@ -1138,12 +1228,38 @@ export const useScheduleStore = create<ScheduleState>()(
           hsFailedSchools: merge ? prevState.hsFailedSchools : [],
         })
 
+        // Clear stale hs diagnostics BEFORE pushing this run's issues (the
+        // conversion loop below also pushes venue warnings that must survive).
+        const diag = useDiagnosticsStore.getState()
+        diag.clearSource('hs')
+
+        // Parser-level warnings (unresolved columns, 0 HS/JUCO rows, …)
+        for (const w of csvWarnings) {
+          diag.addIssue({ level: 'warning', source: 'hs', message: w })
+        }
+
+        // Teams present in the sheet but missing a CSV_TEAM_INFO mapping —
+        // actionable and distinct from "school not in the sheet at all".
+        if (csvUnmappedTeams.length > 0) {
+          diag.addIssue({
+            level: 'warning',
+            source: 'hs',
+            message: `${csvUnmappedTeams.length} team(s) in the schedule sheet but not in CSV_TEAM_INFO — add mapping in src/lib/hsCsvShared.ts`,
+            details: csvUnmappedTeams.join(', '),
+          })
+        }
+
         try {
           // Resolve schedules from the CSV only. Schools not present in the
           // CSV are listed in `failedSchools` so the UI can prompt the user
           // to add them to the sheet rather than silently rendering stale data.
           const schedules = new Map<string, MaxPrepsSchedule>()
           const failedSchools: string[] = []
+          // Failed schools split by cause: rows exist in the sheet but the
+          // team name has no CSV_TEAM_INFO mapping vs. genuinely absent.
+          const failedUnmapped: string[] = []
+          const failedMissing: string[] = []
+          const unmappedLower = csvUnmappedTeams.map((t) => t.toLowerCase().trim())
 
           for (const schoolKey of schoolToPlayers.keys()) {
             const csvSched = csvSchedules.get(schoolKey)
@@ -1151,11 +1267,20 @@ export const useScheduleStore = create<ScheduleState>()(
               schedules.set(schoolKey, csvSched)
             } else {
               failedSchools.push(schoolKey)
+              const orgLower = (schoolKey.split('|')[0] ?? '').toLowerCase().trim()
+              const isUnmapped = unmappedLower.some(
+                (t) => t === orgLower || t.includes(orgLower) || orgLower.includes(t),
+              )
+              if (isUnmapped) failedUnmapped.push(schoolKey)
+              else failedMissing.push(schoolKey)
             }
           }
 
-          if (failedSchools.length > 0) {
-            console.warn('[HS] Schools missing from CSV (add to Google Sheet):', failedSchools)
+          if (failedMissing.length > 0) {
+            console.warn('[HS] Schools missing from CSV (add to Google Sheet):', failedMissing)
+          }
+          if (failedUnmapped.length > 0) {
+            console.warn('[HS] Schools in the sheet but unmapped (add to CSV_TEAM_INFO in src/lib/hsCsvShared.ts):', failedUnmapped)
           }
 
           // Convert MaxPreps games to GameEvents
@@ -1218,7 +1343,6 @@ export const useScheduleStore = create<ScheduleState>()(
 
             if (!homeVenue) {
               // Add diagnostic warning — these players will fall back to synthetic events
-              const diag = useDiagnosticsStore.getState()
               diag.addIssue({
                 level: 'warning',
                 source: 'hs',
@@ -1312,15 +1436,22 @@ export const useScheduleStore = create<ScheduleState>()(
             cachedHsSchools: [...new Set([...(merge ? prevState.cachedHsSchools ?? [] : []), ...schoolToPlayers.keys()])],
           })
 
-          // Diagnostics
-          const diag = useDiagnosticsStore.getState()
-          diag.clearSource('hs')
-          if (mergedFailed.length > 0) {
+          // Diagnostics (source already cleared before conversion) — split
+          // failure causes so "add to sheet" isn't shown for mapping gaps.
+          if (failedMissing.length > 0) {
             diag.addIssue({
               level: 'warning',
               source: 'hs',
-              message: `${mergedFailed.length} HS school(s) failed to fetch`,
-              details: mergedFailed.join(', '),
+              message: `${failedMissing.length} HS school(s) missing from the schedule sheet — add their games to the Google Sheet`,
+              details: failedMissing.join(', '),
+            })
+          }
+          if (failedUnmapped.length > 0) {
+            diag.addIssue({
+              level: 'warning',
+              source: 'hs',
+              message: `${failedUnmapped.length} HS school(s) have rows in the sheet but no team mapping — add to CSV_TEAM_INFO in src/lib/hsCsvShared.ts`,
+              details: failedUnmapped.join(', '),
             })
           }
         } catch (e) {
