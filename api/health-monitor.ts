@@ -363,13 +363,28 @@ async function probeSlackCredentials(botToken: string, channel: string): Promise
       })
       const info = await infoRes.json() as { ok: boolean; error?: string; channel?: { is_archived?: boolean; is_member?: boolean } }
       if (!info.ok) {
-        findings.push({
-          severity: 'critical',
-          code: false,
-          what: 'The recap can’t see its Slack channel — Monday’s post would fail.',
-          how: `Slack conversations.info on the configured channel returned \`${info.error ?? `HTTP ${infoRes.status}`}\`.`,
-          todo: `Check SLACK_CHANNEL_TRAVEL_SCHEDULE in Vercel (https://vercel.com/stadium-ventures/sv-travel-hub/settings/environment-variables) points at the right channel, and invite the bot in #travel-schedule: \`/invite @SV Travel Hub\`.`,
-        })
+        if (info.error === 'missing_scope') {
+          // The bot lacks channels:read / groups:read, so this probe can't
+          // introspect the channel — but that does NOT stop the recap from
+          // posting. chat.postMessage only needs chat:write plus the bot being
+          // in the channel; reading channel metadata is unrelated. So this is a
+          // monitoring blind spot, not a recap failure — don't cry critical.
+          findings.push({
+            severity: 'warning',
+            code: false,
+            what: 'Couldn’t auto-verify the recap’s Slack channel — but posting is unaffected.',
+            how: 'Slack conversations.info returned `missing_scope`: the bot lacks the channels:read/groups:read scope, so this check can’t confirm the channel isn’t archived / the bot is a member. Posting uses chat:write, which is separate — the recap still goes out (it posted fine this past Monday).',
+            todo: 'Optional, to make this check fully verify the channel: add channels:read + groups:read to the “SV Travel Hub” app at https://api.slack.com/apps → OAuth & Permissions → Bot Token Scopes, reinstall, then update SLACK_BOT_TOKEN in Vercel (https://vercel.com/stadium-ventures/sv-travel-hub/settings/environment-variables). Safe to ignore otherwise.',
+          })
+        } else {
+          findings.push({
+            severity: 'critical',
+            code: false,
+            what: 'The recap can’t see its Slack channel — Monday’s post would fail.',
+            how: `Slack conversations.info on the configured channel returned \`${info.error ?? `HTTP ${infoRes.status}`}\`.`,
+            todo: `Check SLACK_CHANNEL_TRAVEL_SCHEDULE in Vercel (https://vercel.com/stadium-ventures/sv-travel-hub/settings/environment-variables) points at the right channel, and invite the bot in #travel-schedule: \`/invite @SV Travel Hub\`.`,
+          })
+        }
       } else if (info.channel?.is_archived) {
         findings.push({
           severity: 'critical',
