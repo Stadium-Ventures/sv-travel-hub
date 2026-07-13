@@ -109,6 +109,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'SLACK_BOT_TOKEN and SLACK_CHANNEL_TRAVEL_SCHEDULE must both be configured' })
   }
 
+  // #sv-automation (C0BE0ELP92Q) is the org's bugs-only alert channel; the
+  // recap is a team-facing digest and must never post there. The env var got
+  // repointed at it once (Jul 2026) and every downstream check still passed —
+  // posting succeeded, credentials probed fine — so the mis-route was silent.
+  // Hold the recap and alert instead.
+  if (!dryRun && channel && SV_AUTOMATION_CHANNEL.test(channel)) {
+    if (isCron) {
+      await notifyAutomationOfRecapFailure(
+        `SLACK_CHANNEL_TRAVEL_SCHEDULE is pointed at #sv-automation (\`${channel}\`), so the recap was held — digests don't belong in the alerts channel. Set it to the #travel-schedule channel ID (C08CMDN82CT) and redeploy.`,
+        true,
+      )
+    }
+    return res.status(500).json({ error: 'SLACK_CHANNEL_TRAVEL_SCHEDULE points at #sv-automation — set it to the #travel-schedule channel ID (C08CMDN82CT) in Vercel and redeploy' })
+  }
+
   try {
     const today = new Date()
     const players = await loadRoster()
@@ -219,6 +234,11 @@ function sleep(ms: number): Promise<void> {
 function isSlackConfigError(err: string): boolean {
   return /invalid_auth|token_revoked|token_expired|account_inactive|not_authed|channel_not_found|not_in_channel|is_archived|missing_scope|ekm_access_denied/i.test(err)
 }
+
+/** The shared #sv-automation channel (ID or name) — bugs/alerts only, never
+ *  the recap. Matched against SLACK_CHANNEL_TRAVEL_SCHEDULE as a mis-config
+ *  guard; the health monitor carries the same check. */
+const SV_AUTOMATION_CHANNEL = /^C0BE0ELP92Q$|sv-automation/i
 
 /** Best-effort plain-text failure alert so a broken Monday cron is visible
  *  instead of a silent no-post. Plain text (no blocks) so it still lands even

@@ -43,6 +43,7 @@ export const config = { maxDuration: 60 }
 
 const PRODUCT = 'Travel Hub (sv-travel-hub)'
 const HUB_URL = 'https://sv-travel-hub.vercel.app'
+const VERCEL_ENV_URL = 'https://vercel.com/stadium-ventures/sv-travel-hub/settings/environment-variables'
 const EVENTS_CSV_DEFAULT =
   'https://docs.google.com/spreadsheets/d/e/2PACX-1vSWoPys4nn-twC2weVoG-DlOHu9JhzXZgYVMJXNmJwPFbNbsLPgzjMzHVK2nUNfLbp7h10itgnAlTPU/pub?output=csv'
 const MLB_PROBE_URL = 'https://statsapi.mlb.com/api/v1/teams/affiliates?teamIds=147&sportIds=1,11,12,13,14'
@@ -154,7 +155,18 @@ async function runChecks(): Promise<Finding[]> {
       code: false,
       what: 'The weekly recap has no way to post — its Slack credentials are missing.',
       how: 'SLACK_BOT_TOKEN and/or SLACK_CHANNEL_TRAVEL_SCHEDULE are not set on the deployment.',
-      todo: `Set both in Vercel → Project Settings → Environment Variables, then redeploy: ${HUB_URL}`,
+      todo: `Set both in Vercel (${VERCEL_ENV_URL}), then redeploy.`,
+    })
+  } else if (/^C0BE0ELP92Q$|sv-automation/i.test(recapChannel)) {
+    // Mis-route guard: posting to #sv-automation "works" (post succeeds, the
+    // credential probes pass), so without this check the digest lands in the
+    // bugs-only alerts channel every Monday with nothing flagging it.
+    findings.push({
+      severity: 'critical',
+      code: false,
+      what: 'The Monday recap is pointed at #sv-automation — the team digest lands in the alerts channel, not #travel-schedule.',
+      how: `SLACK_CHANNEL_TRAVEL_SCHEDULE is \`${recapChannel}\`, which is the shared #sv-automation channel. That channel is for bugs and health alerts only; the recap belongs in the product channel.`,
+      todo: `Set SLACK_CHANNEL_TRAVEL_SCHEDULE to the #travel-schedule channel ID (C08CMDN82CT) in Vercel (${VERCEL_ENV_URL}) and redeploy, then re-run the recap from the hub's admin button.`,
     })
   } else {
     // 1b. Env presence isn't enough — a revoked token, archived channel, or
@@ -185,7 +197,7 @@ async function runChecks(): Promise<Finding[]> {
       code: false,
       what: 'The recap has no roster — its player list source is not configured.',
       how: 'VITE_ROSTER_CSV_URL is not set on the deployment.',
-      todo: `Set VITE_ROSTER_CSV_URL to the published roster sheet CSV in Vercel: ${HUB_URL}`,
+      todo: `Set VITE_ROSTER_CSV_URL to the published roster sheet CSV in Vercel: ${VERCEL_ENV_URL}`,
     })
   } else if (!roster.ok) {
     rosterCritical = true
