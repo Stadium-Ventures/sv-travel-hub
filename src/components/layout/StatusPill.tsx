@@ -80,6 +80,9 @@ export default function StatusPill() {
 
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1 w-72 max-h-[480px] overflow-y-auto rounded-lg border border-border bg-surface shadow-xl">
+          {/* Pinned above the fold — buried at the bottom of this scrollable
+              dropdown, Tom couldn't find it (2026-07-13). */}
+          {isRecapAdmin() && <SlackRecapAdminSection />}
           <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-text-dim/60 border-b border-border/40">
             Data Freshness
           </div>
@@ -97,7 +100,6 @@ export default function StatusPill() {
             })}
           </div>
           <RecentActivitySection />
-          {isRecapAdmin() && <SlackRecapAdminSection />}
         </div>
       )}
     </div>
@@ -151,7 +153,7 @@ function SlackRecapAdminSection() {
     }
   }
   return (
-    <div className="border-t border-border/40">
+    <div className="border-b border-border/40">
       <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-text-dim/60">Slack recap</div>
       <div className="flex items-center gap-2 px-3 pb-2">
         <button
