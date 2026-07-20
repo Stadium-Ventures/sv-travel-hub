@@ -102,6 +102,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isCron = (req.headers['user-agent'] ?? '').toLowerCase().includes('vercel-cron')
 
   const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true'
+
+  // Paused per Kent (2026-07-20): schedule data is stale and the format is
+  // being reworked. Skips the Jul 27 and Aug 3 posts, auto-resumes Aug 10.
+  // Dry runs still execute so the daily health monitor keeps validating the
+  // pipeline while the recap is silent. Delete this block once the rework ships.
+  const RECAP_PAUSED_UNTIL = '2026-08-04' // resumes first Monday on/after this date
+  const todayUTC = new Date().toISOString().slice(0, 10)
+  if (!dryRun && todayUTC < RECAP_PAUSED_UNTIL) {
+    return res.status(200).json({ skipped: true, reason: `Recap paused until ${RECAP_PAUSED_UNTIL} (format rework)` })
+  }
+
   const botToken = process.env.SLACK_BOT_TOKEN
   const channel = process.env.SLACK_CHANNEL_TRAVEL_SCHEDULE
 
