@@ -15,7 +15,7 @@ import { injectMapStyles } from './mapStyles'
 import { buildVenuePopupHtml } from './VenuePopup'
 import { TIER_COLORS } from './hooks/useTierMarkers'
 import type { TierMarker } from './hooks/useTierMarkers'
-import type { TripCandidate } from '../../types/schedule'
+import type { TripCandidate, DoubleUp } from '../../types/schedule'
 import { heartbeatColorFor, type MapColorMode } from './MapFilters'
 import type { EventMarker } from './hooks/useEventMarkers'
 
@@ -92,9 +92,16 @@ interface MapContainerProps {
   /** When set, map auto-fits bounds to the visible tierMarkers (so picking
    *  a player jumps to wherever he is — "find him for me"). */
   fitToMarkersKey?: string
+  /** Double-up overlay — connector lines between paired venues (green ≤45min,
+   *  yellow 46–90min drive, dashed = overnight) and ×2 badges on head-to-head
+   *  venues. Populated only while the Suggestions panel's Double Ups tab is
+   *  active so the map stays clean otherwise. */
+  doubleUps?: DoubleUp[]
+  /** Index into doubleUps to zoom/highlight ("Show on map"). */
+  selectedDoubleUp?: number | null
 }
 
-export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey }: MapContainerProps) {
+export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey, doubleUps = [], selectedDoubleUp = null }: MapContainerProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<import('leaflet').Map | null>(null)
   const leafletRef = useRef<typeof import('leaflet') | null>(null)
@@ -103,6 +110,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   const homeMarkerRef = useRef<import('leaflet').Marker | null>(null)
   const radiusCircleRef = useRef<import('leaflet').Circle | null>(null)
   const tripHighlightRef = useRef<import('leaflet').LayerGroup | null>(null)
+  const doubleUpLayerRef = useRef<import('leaflet').LayerGroup | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [initError, setInitError] = useState<string | null>(null)
   const [initStatus, setInitStatus] = useState('Initializing map...')
@@ -218,6 +226,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       if (homeMarkerRef.current) homeMarkerRef.current = null
       if (radiusCircleRef.current) radiusCircleRef.current = null
       if (tripHighlightRef.current) tripHighlightRef.current = null
+      if (doubleUpLayerRef.current) doubleUpLayerRef.current = null
       setLoaded(false)
     }
   }, [])
@@ -309,12 +318,32 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     const makeCluster = ((L as any).markerClusterGroup ?? (L as any).default?.markerClusterGroup) as
       | ((opts?: Record<string, unknown>) => L.LayerGroup)
       | undefined
+    // Custom cluster bubbles — sized by venue count and colored by the best
+    // tier inside, so a zoomed-out view shows HOW populated each area is
+    // (Tom 2026-07-21: the default tiny numbers hid density).
     const layerGroup: L.LayerGroup = typeof makeCluster === 'function'
       ? makeCluster({
           chunkedLoading: true,
           maxClusterRadius: 50,
           showCoverageOnHover: false,
           spiderfyOnMaxZoom: true,
+          iconCreateFunction: (cluster: { getAllChildMarkers: () => L.Marker[] }) => {
+            const children = cluster.getAllChildMarkers()
+            const count = children.length
+            let bestTier = 4
+            for (const m of children) {
+              const t = (m as unknown as { svTier?: number }).svTier
+              if (t && t < bestTier) bestTier = t
+            }
+            const color = TIER_COLORS[bestTier] ?? TIER_COLORS[4]!
+            const size = count >= 10 ? 44 : count >= 5 ? 36 : 28
+            return L.divIcon({
+              className: '',
+              html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color}2e;border:2px solid ${color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:${count >= 10 ? 13 : 12}px;text-shadow:0 1px 2px rgba(0,0,0,0.8);box-shadow:0 0 10px ${color}55">${count}</div>`,
+              iconSize: [size, size],
+              iconAnchor: [size / 2, size / 2],
+            })
+          },
         })
       : L.layerGroup()
 
@@ -364,6 +393,9 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       })
 
       const marker = L.marker([tm.coords.lat, tm.coords.lng], { icon })
+      // Tag the marker with its tier so cluster bubbles can color by the
+      // best tier they contain (read in iconCreateFunction above).
+      ;(marker as unknown as { svTier?: number }).svTier = tm.bestTier
 
       marker.bindPopup(buildVenuePopupHtml(tm, { daysByPlayer, plannedByPlayer }), {
         maxWidth: 320,
@@ -443,6 +475,69 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       map.fitBounds(bounds, { padding: [60, 60], maxZoom: 9, animate: true })
     }
   }, [loaded, fitToMarkersKey, tierMarkers])
+
+  // Double-up overlay — active while the Suggestions panel's Double Ups tab
+  // is open. Same-day/stay-over pairs get a connector line (green ≤45min,
+  // yellow 46–90min; dashed = overnight). Head-to-heads/tournaments get a
+  // ×2 badge on the shared venue. Selecting a card zooms to that pair.
+  useEffect(() => {
+    if (!loaded || !mapInstance.current || !leafletRef.current) return
+    const L = leafletRef.current
+    const map = mapInstance.current
+
+    if (doubleUpLayerRef.current) {
+      map.removeLayer(doubleUpLayerRef.current)
+      doubleUpLayerRef.current = null
+    }
+    if (doubleUps.length === 0) return
+
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const layer = L.layerGroup()
+
+    doubleUps.forEach((du, i) => {
+      const isSelected = selectedDoubleUp === i
+      const tierColor = du.driveMinutesBetween <= 45 ? '#22c55e' : '#eab308'
+      const label = `${esc(du.playerNames.join(' + '))} · ${du.dates.length > 1 ? `${du.dates.length}-game series` : du.date}`
+
+      if (du.games.length >= 2 && du.driveMinutesBetween > 0) {
+        const [g1, g2] = [du.games[0]!, du.games[du.games.length - 1]!]
+        L.polyline(
+          [[g1.venue.coords.lat, g1.venue.coords.lng], [g2.venue.coords.lat, g2.venue.coords.lng]],
+          {
+            color: tierColor,
+            weight: isSelected ? 5 : 3,
+            opacity: isSelected ? 0.95 : 0.65,
+            dashArray: du.type === 'stay-over' ? '4,8' : undefined,
+          },
+        )
+          .bindTooltip(`${label} · ${Math.round(du.driveMinutesBetween)} min apart`, { sticky: true })
+          .addTo(layer)
+      } else {
+        // Shared venue (head-to-head / tournament) — ×2 badge
+        const v = du.games[0]!.venue
+        const badge = L.divIcon({
+          className: '',
+          html: `<div style="display:flex;align-items:center;justify-content:center;width:${isSelected ? 30 : 24}px;height:${isSelected ? 30 : 24}px;border-radius:50%;background:#a855f7;color:#fff;font-weight:800;font-size:11px;box-shadow:0 0 0 2px rgba(168,85,247,0.5),0 0 12px rgba(168,85,247,0.8)">×2</div>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        })
+        L.marker([v.coords.lat, v.coords.lng], { icon: badge, zIndexOffset: 800 })
+          .bindTooltip(label, { direction: 'top', offset: [0, -12] })
+          .addTo(layer)
+      }
+    })
+
+    map.addLayer(layer)
+    doubleUpLayerRef.current = layer
+
+    // Zoom to the selected pair
+    if (selectedDoubleUp != null && doubleUps[selectedDoubleUp]) {
+      const du = doubleUps[selectedDoubleUp]!
+      const pts = du.games.map((g) => L.latLng(g.venue.coords.lat, g.venue.coords.lng))
+      if (pts.length === 1) map.setView(pts[0]!, 9, { animate: true })
+      else map.fitBounds(L.latLngBounds(pts), { padding: [80, 80], maxZoom: 10, animate: true })
+    }
+  }, [loaded, doubleUps, selectedDoubleUp])
 
   // Highlight the currently selected trip — draws a yellow polyline through
   // its venues and zooms the map to fit them. Driven by tripStore.selectedTripIndex

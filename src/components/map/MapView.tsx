@@ -13,16 +13,17 @@ import { useDateFilteredVenues } from './hooks/useDateFilteredVenues'
 import { useMapDateRange } from './hooks/useMapDateRange'
 import { useTierMarkers } from './hooks/useTierMarkers'
 import { useBestWindows } from './hooks/useBestWindows'
-import type { WindowResult, BestWindowStrategy } from './hooks/useBestWindows'
+import type { BestWindowStrategy } from './hooks/useBestWindows'
 import { useDestinationPicks } from './hooks/useDestinationPicks'
-import WhereToGoPanel from './WhereToGoPanel'
-import { formatDate } from '../../lib/formatters'
+import SuggestionsPanel, { type SuggestTab } from './SuggestionsPanel'
 import MapFilters, { DEFAULT_MAP_FILTERS, applyMapFilters, type MapFilterState } from './MapFilters'
 import SummerCoverageNotice from './SummerCoverageNotice'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
+import { useSummerStore } from '../../store/summerStore'
+import { findDoubleUps } from '../../lib/doubleUps'
+import type { DoubleUp } from '../../types/schedule'
+import type { RosterPlayer } from '../../types/roster'
 import { useMemo } from 'react'
-
-const TIER_DOT_COLORS: Record<number, string> = { 1: 'bg-[#ef4444]', 2: 'bg-[#f97316]', 3: 'bg-gray-500' }
 
 export default function MapView() {
   const [schedulePanelPlayer, setSchedulePanelPlayer] = useState<string | null>(null)
@@ -82,6 +83,35 @@ export default function MapView() {
   // Destination picks — scans ALL tier markers (not drive-filtered) because
   // the whole point of "Where to go?" is to look beyond the current radius.
   const destinationPicks = useDestinationPicks(allTierMarkers, homeBase, 180, 360, 5)
+
+  // Double ups for the map's date window — roster-wide (origin-agnostic).
+  const summerGames = useSummerStore((s) => s.summerGames)
+  const doubleUps = useMemo(() => {
+    if (players.length === 0) return []
+    const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
+    if (all.length === 0) return []
+    return findDoubleUps(all, players, filterStart, filterEnd)
+  }, [proGames, ncaaGames, hsGames, summerGames, players, filterStart, filterEnd])
+  const playerMap = useMemo(() => {
+    const m = new Map<string, RosterPlayer>()
+    for (const p of players) m.set(p.playerName, p)
+    return m
+  }, [players])
+  const [suggestTab, setSuggestTab] = useState<SuggestTab>('when')
+  const [selectedDoubleUp, setSelectedDoubleUp] = useState<number | null>(null)
+
+  function handlePlanDoubleUp(du: DoubleUp) {
+    useTripStore.getState().setPriorityPlayers(du.playerNames.slice(0, 5))
+    const today = new Date().toISOString().split('T')[0]!
+    const first = du.dates[0] ?? du.date
+    const last = du.dates[du.dates.length - 1] ?? du.date
+    const start = first > today ? first : today
+    useTripStore.getState().setDateRange(start, last >= start ? last : start)
+    dispatchMapEvent('app:switch-tab', { tab: 'trips' })
+    setTimeout(() => {
+      useTripStore.getState().generateTrips().catch((e) => console.warn('[map] auto-generate after double-up failed:', e))
+    }, 100)
+  }
 
   // Are any schedules loaded?
   const hasSchedules = proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0
@@ -222,17 +252,18 @@ export default function MapView() {
             </div>
           )}
 
-          {/* Best window recommender — Use button sets the dates AND jumps
-              straight to the Trip Planner with Generate Trips queued. Kent's
-              mental flow is pick window → plan trip; chain them. */}
-          {hasSchedules && tierMarkers.length > 0 && (
-            <BestWindowsPanel
+          {/* Suggestions — one tabbed panel replacing the old stacked Best
+              Windows + Where to go? pair (Tom 2026-07-21: consolidate). Tabs:
+              When (dates from the star) · Where (cities, radius-agnostic) ·
+              Double Ups (2+ clients, one outing — also draws map connectors). */}
+          {hasSchedules && allTierMarkers.length > 0 && (
+            <SuggestionsPanel
               windows={bestWindows}
               windowDays={windowDays}
               setWindowDays={setWindowDays}
               strategy={bestWindowStrategy}
               setStrategy={setBestWindowStrategy}
-              onApply={(w) => {
+              onApplyWindow={(w) => {
                 setFilterStart(w.startDate)
                 setFilterEnd(w.endDate)
                 // Jump to Trip Planner; the planner picks up the new dates from
@@ -243,15 +274,15 @@ export default function MapView() {
                   useTripStore.getState().generateTrips().catch((e) => console.warn('[map] auto-generate after Use Window failed:', e))
                 }, 100)
               }}
+              picks={destinationPicks}
+              doubleUps={doubleUps}
+              playerMap={playerMap}
+              activeTab={suggestTab}
+              setActiveTab={setSuggestTab}
+              selectedDoubleUp={selectedDoubleUp}
+              setSelectedDoubleUp={setSelectedDoubleUp}
+              onPlanDoubleUp={handlePlanDoubleUp}
             />
-          )}
-
-          {/* Where to go? — destination-anchored recommender. Surfaces the top
-              cities to visit nationally, not just what's reachable from the
-              current From city. Especially valuable when the Best Windows panel
-              shows thin coverage from where you are. */}
-          {hasSchedules && allTierMarkers.length > 0 && (
-            <WhereToGoPanel picks={destinationPicks} />
           )}
         </div>
 
@@ -268,6 +299,8 @@ export default function MapView() {
               colorBy={filterState.colorBy}
               eventMarkers={eventMarkers}
               fitToMarkersKey={filterState.selectedPlayer || undefined}
+              doubleUps={suggestTab === 'doubleups' ? doubleUps.slice(0, 12) : []}
+              selectedDoubleUp={selectedDoubleUp}
             />
           </div>
         </div>
@@ -330,273 +363,3 @@ function MapHelp() {
     </div>
   )
 }
-
-/** Renders when the top "Best" window only reaches 1-2 players — that
- *  makes the BEST label misleading. Tells Kent what to change. */
-function ThinCoverageHint({ topPickPlayers }: { topPickPlayers: number }) {
-  return (
-    <p className="mt-1 text-[10px] text-accent-orange/80 leading-relaxed">
-      ⚠ Only {topPickPlayers} player{topPickPlayers === 1 ? '' : 's'} reachable here.
-      Try changing the date range, moving the <em>From</em> location, or widening the drive radius (top-right of the map).
-    </p>
-  )
-}
-
-function strategyFooter(strategy: BestWindowStrategy): string {
-  switch (strategy) {
-    case 't1-count':         return 'Ranked by must-see player count (windows that add new must-sees).'
-    case 'overdue-priority': return 'Ranked by overdue must-see/high-priority players (windows that catch new overdue players).'
-    case 'player-count':     return 'Ranked by unique player count.'
-    case 'tuesday':          return 'Tuesday-bearing windows only, ranked by overall impact.'
-    case 'impact':
-    default:                 return 'Ranked by tier-weighted player count.'
-  }
-}
-
-/** Build a short "what this strategy is yielding right now" sentence. Pulls
- *  from the live windows so the message updates as filters change. */
-function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult[]): string {
-  if (windows.length === 0) return ''
-  const top = windows[0]!
-  switch (strategy) {
-    case 'impact':
-      return `Top pick: ${top.uniquePlayerCount} players (${top.t1Count} must-see · ${top.t2Count} high-priority).`
-    case 't1-count': {
-      const totalT1 = windows.reduce((s, w) => s + w.t1Count, 0)
-      return `Top pick has ${top.t1Count} must-see player${top.t1Count === 1 ? '' : 's'}. ${totalT1} must-see visit${totalT1 === 1 ? '' : 's'} across all ${windows.length} window${windows.length === 1 ? '' : 's'}.`
-    }
-    case 'overdue-priority': {
-      const totalOverdue = windows.reduce((s, w) => s + w.overdueCount, 0)
-      return `Top pick catches ${top.overdueCount} overdue player${top.overdueCount === 1 ? '' : 's'}. ${totalOverdue} overdue visit${totalOverdue === 1 ? '' : 's'} across all windows.`
-    }
-    case 'player-count':
-      return `Top pick reaches ${top.uniquePlayerCount} players. ${windows.length} window${windows.length === 1 ? '' : 's'} surfaced.`
-    case 'tuesday': {
-      const tuesCount = windows.filter((w) => w.hasTuesday).length
-      if (tuesCount === 0) return 'No Tuesday-bearing windows in this date range.'
-      return `${tuesCount} of ${windows.length} window${windows.length === 1 ? '' : 's'} include a Tuesday.`
-    }
-    default:
-      return ''
-  }
-}
-
-const STRATEGY_OPTIONS: { value: BestWindowStrategy; label: string; hint: string }[] = [
-  { value: 'impact',            label: 'Highest overall impact',     hint: 'Tier-weighted score — best mix of must-see and high-priority coverage' },
-  { value: 't1-count',          label: 'Most must-see players in one trip', hint: 'Maximize must-see player count in the window' },
-  { value: 'overdue-priority',  label: 'Overdue high-priority players', hint: 'Catch must-see/high-priority players you haven\'t seen in 90+ days' },
-  { value: 'player-count',      label: 'Most players (any tier)',     hint: 'Maximize total unique players regardless of tier' },
-  { value: 'tuesday',           label: 'Includes a Tuesday',          hint: 'Best day for MiLB position-player visits' },
-]
-
-function BestWindowsPanel({
-  windows,
-  windowDays,
-  setWindowDays,
-  strategy,
-  setStrategy,
-  onApply,
-}: {
-  windows: WindowResult[]
-  windowDays: number
-  setWindowDays: (n: number) => void
-  strategy: BestWindowStrategy
-  setStrategy: (s: BestWindowStrategy) => void
-  onApply: (w: WindowResult) => void
-}) {
-  // Default open on desktop so Kent always sees a recommendation without
-  // clicking; collapsed on small screens so the map (rendered first there)
-  // isn't pushed around by a tall panel. Session state preserved locally.
-  const [open, setOpen] = useState(() => {
-    try { return window.matchMedia('(min-width: 1024px)').matches } catch { return true }
-  })
-  const homeBaseName = useTripStore((s) => s.homeBaseName)
-  const topPick = windows[0]
-  const currentStrategy = STRATEGY_OPTIONS.find((o) => o.value === strategy) ?? STRATEGY_OPTIONS[0]!
-
-  return (
-    <div className="rounded-lg bg-surface border border-border px-4 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <button
-            onClick={() => setOpen(!open)}
-            className="flex items-center gap-2 text-sm font-semibold text-text hover:text-accent-blue transition-colors"
-          >
-            <span className={`text-text-dim transition-transform text-xs ${open ? 'rotate-90' : ''}`}>&#9654;</span>
-            Best Windows
-            {topPick && (
-              <span className="text-xs font-normal text-text-dim ml-1">
-                — Top pick: {formatDate(topPick.startDate)}–{formatDate(topPick.endDate)}, {topPick.uniquePlayerCount} players
-              </span>
-            )}
-          </button>
-          {/* Inline "Use top pick" — no need to expand the panel to act on
-              the recommendation. Saves a click for the common case. */}
-          {topPick && !open && (
-            <button
-              onClick={() => onApply(topPick)}
-              className="ml-1 rounded-md bg-accent-blue/15 px-2 py-0.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
-              title={`Use ${formatDate(topPick.startDate)}–${formatDate(topPick.endDate)} as the date range`}
-            >
-              Use →
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-1.5">
-            <span className="text-[10px] uppercase tracking-wide text-text-dim/70">Prioritize by</span>
-            <select
-              value={strategy}
-              onChange={(e) => setStrategy(e.target.value as BestWindowStrategy)}
-              title={currentStrategy.hint}
-              className="rounded border border-border bg-gray-950/50 px-2 py-1 text-xs text-text focus:border-accent-blue focus:outline-none"
-            >
-              {STRATEGY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </label>
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-text-dim">Trip length:</span>
-            {([1, 2, 3] as const).map((d) => (
-              <button
-                key={d}
-                onClick={() => setWindowDays(d)}
-                className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                  windowDays === d ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
-                }`}
-              >
-                {d}-day
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* One-line "what is this panel" clarifier — distinguishes it from the
-          Where to go? panel, which answers WHERE (a city) rather than WHEN. */}
-      <p className="mt-1.5 text-[10px] text-text-dim/60 italic">
-        The best <strong className="text-text-dim/80">dates</strong> to travel from {homeBaseName}, within your drive radius. (Where to go? answers <em>where</em>; this answers <em>when</em>.)
-      </p>
-
-      {/* Strategy implication line — tells Kent what the current "Prioritize
-          by" choice is actually doing. Recomputed from the live window set so
-          it stays accurate as filters change. */}
-      {windows.length > 0 && (
-        <p className="mt-2 text-[10px] text-text-dim/70 leading-relaxed">
-          <span className="text-text-dim/50">{currentStrategy.hint}.</span>{' '}
-          {strategyImplication(strategy, windows)}
-        </p>
-      )}
-
-      {/* Thin-coverage hint — when the top window reaches only 1-2 players,
-          "BEST" overstates the result. Tell Kent why and what to try. */}
-      {topPick && topPick.uniquePlayerCount <= 2 && (
-        <ThinCoverageHint topPickPlayers={topPick.uniquePlayerCount} />
-      )}
-
-      {open && (
-        <div className="mt-3 space-y-2">
-          {windows.length === 0 ? (
-            <div className="rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-3 py-2.5 text-xs">
-              <p className="text-accent-orange/90 font-medium">No reachable games in this window</p>
-              <p className="mt-1 text-text-dim/80 leading-relaxed">
-                No SV player has a game inside the {Math.floor(useTripStore.getState().maxDriveMinutes / 60)}h drive radius from {homeBaseName} during {formatDate(useTripStore.getState().startDate)}–{formatDate(useTripStore.getState().endDate)}.
-              </p>
-              <p className="mt-1 text-text-dim/60">
-                Try: widen the drive radius (top-right of the map), change the <em>From</em> city, or pick a different date range.
-              </p>
-            </div>
-          ) : (
-            windows.map((w, i) => (
-              <div
-                key={w.startDate}
-                className={`flex items-center justify-between rounded-lg px-3 py-2.5 border transition-colors ${
-                  i === 0 ? 'border-accent-blue/30 bg-accent-blue/5' : 'border-border/30 bg-gray-950/30'
-                }`}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    {i === 0 && (
-                      <span className="rounded-full bg-accent-blue/20 px-2 py-0.5 text-[10px] font-bold text-accent-blue">
-                        BEST
-                      </span>
-                    )}
-                    <span className="text-sm font-medium text-text">
-                      {formatDate(w.startDate)} – {formatDate(w.endDate)}
-                    </span>
-                    {w.hasTuesday && (
-                      <span className="text-[10px] text-accent-blue/70">Tue</span>
-                    )}
-                  </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <span className="text-xs text-text-dim">
-                      {w.uniquePlayerCount} player{w.uniquePlayerCount !== 1 ? 's' : ''}
-                    </span>
-                    {w.t1Count > 0 && (
-                      <span className="flex items-center gap-0.5 text-[11px] text-text-dim">
-                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[1]}`} />
-                        {w.t1Count} must-see
-                      </span>
-                    )}
-                    {w.t2Count > 0 && (
-                      <span className="flex items-center gap-0.5 text-[11px] text-text-dim">
-                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[2]}`} />
-                        {w.t2Count} high-priority
-                      </span>
-                    )}
-                    {w.t3Count > 0 && (
-                      <span className="flex items-center gap-0.5 text-[11px] text-text-dim">
-                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[3]}`} />
-                        {w.t3Count} standard
-                      </span>
-                    )}
-                    {w.overdueCount > 0 && (
-                      <span className="rounded bg-accent-red/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-red"
-                        title={`${w.overdueCount} player(s) in this window are overdue (>90 days since visit) or never visited. Window score boosted.`}>
-                        {w.overdueCount} overdue
-                      </span>
-                    )}
-                    {w.timeConflictCount > 0 && (
-                      <span className="rounded bg-accent-orange/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-orange"
-                        title={`${w.timeConflictCount} game(s) overlap in start time across different venues — Kent can only attend one of each conflicting set. Window score discounted.`}>
-                        ⚠ {w.timeConflictCount} conflict{w.timeConflictCount !== 1 ? 's' : ''}
-                      </span>
-                    )}
-                    <span className="text-[10px] text-text-dim/40">
-                      drivable from {homeBaseName}
-                    </span>
-                  </div>
-                  {/* Player names */}
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {w.players.slice(0, 8).map((p) => (
-                      <span key={p.name} className="text-[10px] text-text-dim/70">
-                        <span className={`inline-block h-1 w-1 rounded-full ${TIER_DOT_COLORS[p.tier] ?? 'bg-gray-600'} mr-0.5`} />
-                        {p.name}
-                      </span>
-                    ))}
-                    {w.players.length > 8 && (
-                      <span className="text-[10px] text-text-dim/40">+{w.players.length - 8} more</span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={() => onApply(w)}
-                  className="ml-3 shrink-0 rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
-                >
-                  Use dates
-                </button>
-              </div>
-            ))
-          )}
-          {windows.length > 0 && (
-            <p className="text-[10px] text-text-dim/40 mt-1">
-              {strategyFooter(strategy)} Non-overlapping windows · drive radius {Math.floor(useTripStore.getState().maxDriveMinutes / 60)}h.
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
