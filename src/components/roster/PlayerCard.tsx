@@ -307,7 +307,7 @@ function ScheduleStatus({ playerName, level, affiliate }: {
           <p className="text-text-dim">
             Source: {sources.has('mlb-api') && <span className="text-accent-green">MLB API</span>}
             {sources.has('ncaa-lookup') && <span className="text-accent-green">D1Baseball</span>}
-            {sources.has('hs-lookup') && <span className="text-accent-green">MaxPreps</span>}
+            {sources.has('hs-lookup') && <span className="text-accent-green">Schedule Sheet</span>}
             {highConfidence.length > 0 && <span className="text-accent-green ml-1">({highConfidence.length} verified)</span>}
             {estimated.length > 0 && <span className="text-accent-orange ml-1">({estimated.length} estimated)</span>}
           </p>

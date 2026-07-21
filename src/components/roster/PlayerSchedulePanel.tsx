@@ -300,7 +300,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                 const estCount = upcomingGames.filter((g) => g.confidence && g.confidence !== 'high').length
                 if (mlbCount > 0) sourceParts.push(`confirmed MLB schedule`)
                 if (d1Count > 0) sourceParts.push(`D1Baseball (${d1Count} games)`)
-                if (mpCount > 0) sourceParts.push(`MaxPreps (${mpCount} games)`)
+                if (mpCount > 0) sourceParts.push(`Schedule sheet (${mpCount} games)`)
                 const summary = sourceParts.length > 0 ? `Data sources: ${sourceParts.join(', ')}.` : ''
                 const estNote = estCount > 0 ? ` ${estCount} event${estCount !== 1 ? 's are' : ' is'} estimated — verify before traveling.` : ''
                 return (summary || estNote) ? (
@@ -328,7 +328,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                       const isPostponed = g.gameStatus === 'Postponed' || g.gameStatus === 'Suspended'
                       const confidenceLabel = g.source === 'mlb-api' ? 'Confirmed'
                         : g.source === 'ncaa-lookup' && g.confidence === 'high' ? 'D1Baseball'
-                        : g.source === 'hs-lookup' && g.confidence === 'high' ? 'MaxPreps'
+                        : g.source === 'hs-lookup' && g.confidence === 'high' ? 'Schedule Sheet'
                         : g.confidence === 'medium' ? 'Likely'
                         : 'Estimated'
                       const confidenceBadgeStyle = confidenceLabel === 'Estimated' ? 'bg-gray-500/15 text-gray-400'

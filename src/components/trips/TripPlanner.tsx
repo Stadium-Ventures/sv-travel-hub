@@ -10,6 +10,9 @@ import PlayerCoverageCard from './PlayerCoverageCard'
 // ICS export removed from main UI — kept in individual trip cards
 // import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
+import DoubleUpSection from './DoubleUpSection'
+import { findDoubleUps } from '../../lib/doubleUps'
+import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 import { MAJOR_AIRPORTS, findNearestAirport } from '../../data/majorAirports'
@@ -173,6 +176,12 @@ function getDayName(dateStr: string): string {
   return DAY_NAMES[new Date(dateStr + 'T12:00:00Z').getUTCDay()]!
 }
 
+function addDaysISO(date: string, delta: number): string {
+  const d = new Date(date + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() + delta)
+  return d.toISOString().split('T')[0]!
+}
+
 // Progress bar helpers for trip generation
 function getProgressPercent(step: string): string {
   if (step.includes('Auto-assigning')) return '10%'
@@ -191,7 +200,7 @@ function getProgressNote(step: string): string {
   if (step.includes('Pro schedules')) return 'Fetching game schedules from MLB API (~15-30s)'
   if (step.includes('College')) return 'Scraping D1Baseball schedules (~30-60s)'
   if (step.includes('Mapping HS')) return 'Geocoding high school locations (~5s)'
-  if (step.includes('HS schedules')) return 'Fetching MaxPreps schedules (~15-30s)'
+  if (step.includes('HS schedules')) return 'Loading HS games from the schedule sheet'
   if (step.includes('Starting') || step.includes('Analyzing')) return 'Building trip candidates...'
   if (step.includes('Optimizing') || step.includes('Selecting')) return 'Almost done — selecting best trips...'
   return 'First run loads all schedule data. Subsequent runs are much faster.'
@@ -338,6 +347,33 @@ export default function TripPlanner() {
     for (const p of players) map.set(p.playerName, p)
     return map
   }, [players])
+
+  // Double ups — computed live from loaded schedules, so Kent sees them
+  // WITHOUT having to generate trips first. Real games only (no synthetic
+  // events), which keeps this signal high-trust. Fixed 30-day lookahead,
+  // independent of the trip date range — Kent wants these flagged well
+  // ahead of when he's actually planning the trip (2026-07-21).
+  const DOUBLE_UP_WINDOW_DAYS = 30
+  const summerGames = useSummerStore((s) => s.summerGames)
+  const upcomingDoubleUps = useMemo(() => {
+    if (players.length === 0) return []
+    const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
+    if (all.length === 0) return []
+    const today = new Date().toISOString().split('T')[0]!
+    return findDoubleUps(all, players, today, addDaysISO(today, DOUBLE_UP_WINDOW_DAYS))
+  }, [proGames, ncaaGames, hsGames, summerGames, players, DOUBLE_UP_WINDOW_DAYS])
+
+  // "Plan trip" from a double-up card: lock in the players involved as
+  // priorities, narrow dates to the series window, and generate.
+  function handlePlanDoubleUp(du: DoubleUp) {
+    setPriorityPlayers(du.playerNames.slice(0, PRIORITY_SLOTS))
+    const today = new Date().toISOString().split('T')[0]!
+    const first = du.dates[0] ?? du.date
+    const last = du.dates[du.dates.length - 1] ?? du.date
+    const start = addDaysISO(first, -1) < today ? today : addDaysISO(first, -1)
+    setDateRange(start, addDaysISO(last, 1))
+    generateTrips()
+  }
 
   // All players eligible for priority selection (don't filter by visits remaining)
   const eligibleForPriority = useMemo(
@@ -814,6 +850,30 @@ export default function TripPlanner() {
           </div>
         )}
       </div>
+
+      {/* Double up opportunities — head-to-heads and within-an-hour pairs
+          over the next 30 days. Lives above the results and works even
+          before trips are generated (Kent's double-up ask). */}
+      {!computing && upcomingDoubleUps.length > 0 && (
+        <DoubleUpSection
+          doubleUps={upcomingDoubleUps}
+          playerMap={playerMap}
+          priorityPlayers={priorityPlayers}
+          windowDays={DOUBLE_UP_WINDOW_DAYS}
+          onPlayerClick={(n) => setSelectedPlayer(n)}
+          onPlanTrip={handlePlanDoubleUp}
+        />
+      )}
+
+      {/* Empty state so the feature is discoverable even with zero hits */}
+      {!computing && upcomingDoubleUps.length === 0 && allSchedulesLoaded && (
+        <div className="rounded-xl border border-border/40 bg-surface/40 px-4 py-2.5">
+          <p className="text-xs text-text-dim">
+            <span className="font-medium text-accent-green">Double Ups:</span>{' '}
+            none found in the next 30 days. This scans the whole roster automatically — head-to-heads, same-day doubles within a 90-min drive, and back-to-back-day stay-overs.
+          </p>
+        </div>
+      )}
 
       {/* First-time welcome — dismissible */}
       {!tripPlan && !computing && <WelcomeHint />}
@@ -1504,7 +1564,7 @@ export default function TripPlanner() {
                 {confidenceCounts.mlb > 0 && (confidenceCounts.d1 + confidenceCounts.hsConfirmed + confidenceCounts.estimated > 0) && <span className="text-text-dim/30"> · </span>}
                 {confidenceCounts.d1 > 0 && <span className="text-accent-blue/70">{confidenceCounts.d1} likely <span className="text-text-dim/40">(D1Baseball)</span></span>}
                 {confidenceCounts.d1 > 0 && (confidenceCounts.hsConfirmed + confidenceCounts.estimated > 0) && <span className="text-text-dim/30"> · </span>}
-                {confidenceCounts.hsConfirmed > 0 && <span className="text-accent-blue/70">{confidenceCounts.hsConfirmed} confirmed <span className="text-text-dim/40">(MaxPreps)</span></span>}
+                {confidenceCounts.hsConfirmed > 0 && <span className="text-accent-blue/70">{confidenceCounts.hsConfirmed} confirmed <span className="text-text-dim/40">(schedule sheet)</span></span>}
                 {confidenceCounts.hsConfirmed > 0 && confidenceCounts.estimated > 0 && <span className="text-text-dim/30"> · </span>}
                 {confidenceCounts.estimated > 0 && <span className="text-accent-orange">{confidenceCounts.estimated} estimated <span className="text-text-dim/40">(location approximate)</span></span>}
               </p>
@@ -2016,7 +2076,7 @@ function FlyInCard({
   const sourceBadge = activeVisit.source === 'mlb-api'
     ? { label: activeVisit.isHome ? 'Home Game' : 'Away Game', color: activeVisit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400', tip: activeVisit.isHome ? 'Confirmed home game from the MLB/MiLB schedule.' : 'Away game — location is based on the opposing team\'s home venue.' }
     : (activeVisit.source === 'hs-lookup' && activeVisit.confidence === 'high')
-      ? { label: 'Home Game (MaxPreps)', color: 'bg-accent-green/15 text-accent-green', tip: 'Confirmed home game from MaxPreps schedule.' }
+      ? { label: 'Home Game (Schedule Sheet)', color: 'bg-accent-green/15 text-accent-green', tip: 'Confirmed home game from the client schedule sheet.' }
       : (activeVisit.source === 'ncaa-lookup' && activeVisit.confidence === 'high')
         ? { label: activeVisit.isHome ? 'School Visit (D1Baseball)' : 'Away Game (D1Baseball)', color: activeVisit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400', tip: activeVisit.isHome ? 'Confirmed home game from D1Baseball schedule.' : 'Away game — location is based on the opposing team\'s home venue.' }
         : { label: activeVisit.isHome ? 'School Visit (est.)' : 'Away Game (est.)', color: 'bg-accent-orange/15 text-accent-orange', tip: 'Location is estimated — we know the game exists but aren\'t sure of the exact venue. Click "Verify" to confirm.' }

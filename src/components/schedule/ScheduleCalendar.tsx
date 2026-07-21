@@ -189,7 +189,7 @@ export default function ScheduleCalendar({ games }: Props) {
                 const sourceLabel = SOURCE_LABELS[g.source] ?? 'Unknown'
                 const confirmLabel = g.source === 'mlb-api' ? 'Confirmed' :
                   g.source === 'ncaa-lookup' && g.confidence === 'high' ? 'D1Baseball' :
-                  g.source === 'hs-lookup' && g.confidence === 'high' ? 'MaxPreps' :
+                  g.source === 'hs-lookup' && g.confidence === 'high' ? 'Schedule Sheet' :
                   'Estimated'
                 const confirmColor = confirmLabel === 'Estimated'
                   ? 'text-accent-orange' : 'text-accent-green'

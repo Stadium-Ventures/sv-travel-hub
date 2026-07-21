@@ -116,6 +116,11 @@ function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[])
   const date = new Date(game.gameDate)
   const isHome = game.teams.home.team.id === teamId
 
+  // All players passed in are assigned to `teamId`, so they share one side
+  const side: 'home' | 'away' = isHome ? 'home' : 'away'
+  const playerSides: Record<string, 'home' | 'away'> = {}
+  for (const n of playerNames) playerSides[n] = side
+
   // Extract probable pitcher names
   const pitcherNames: string[] = []
   if (game.teams.home.probablePitcher?.fullName) {
@@ -139,10 +144,24 @@ function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[])
     },
     source: 'mlb-api',
     playerNames,
+    playerSides,
     sportId: undefined,
     sourceUrl: `https://www.mlb.com/gameday/${game.gamePk}`,
     gameStatus: game.status?.detailedState,
     probablePitcherNames: pitcherNames.length > 0 ? pitcherNames : undefined,
+  }
+}
+
+/** The same MLB game appears in BOTH teams' schedules when two tracked
+ *  clients' teams play each other. Merge the second team's players into the
+ *  existing event instead of dropping them — this is what makes
+ *  "SV matchup" double-up detection possible for Pro games. */
+function mergeEventPlayers(target: GameEvent, incoming: GameEvent): void {
+  for (const name of incoming.playerNames) {
+    if (!target.playerNames.includes(name)) target.playerNames.push(name)
+  }
+  if (incoming.playerSides) {
+    target.playerSides = { ...target.playerSides, ...incoming.playerSides }
   }
 }
 
@@ -649,8 +668,7 @@ export const useScheduleStore = create<ScheduleState>()(
         }
 
         // Re-process cached raw game data
-        const allGames: GameEvent[] = []
-        const seenIds = new Set<string>()
+        const eventsById = new Map<string, GameEvent>()
         for (const [teamIdStr, games] of Object.entries(rawSchedules)) {
           const teamId = parseInt(teamIdStr)
           const teamPlayers = playersByTeamId.get(teamId) ?? []
@@ -661,13 +679,14 @@ export const useScheduleStore = create<ScheduleState>()(
             const clipped = clipPlayersForGame(teamId, gameDate, teamPlayers)
             if (clipped.length === 0) continue
             const event = mlbGameToEvent(game, teamId, clipped)
-            if (event && !seenIds.has(event.id)) {
-              seenIds.add(event.id)
-              allGames.push(event)
-            }
+            if (!event) continue
+            const existing = eventsById.get(event.id)
+            if (existing) mergeEventPlayers(existing, event)
+            else eventsById.set(event.id, event)
           }
         }
 
+        const allGames = [...eventsById.values()]
         allGames.sort((a, b) => a.date.localeCompare(b.date))
         set({ proGames: allGames })
       },
@@ -728,9 +747,8 @@ export const useScheduleStore = create<ScheduleState>()(
           }
 
           // Convert to GameEvents — attach only players assigned to this specific team
-          const allGames: GameEvent[] = []
-          const seenIds = new Set<string>()
-          let droppedGames = 0
+          const eventsById = new Map<string, GameEvent>()
+          const droppedIds = new Set<string>()
 
           for (const [teamIdStr, games] of Object.entries(rawSchedules)) {
             const teamId = parseInt(teamIdStr)
@@ -739,16 +757,19 @@ export const useScheduleStore = create<ScheduleState>()(
 
             for (const game of games) {
               const event = mlbGameToEvent(game, teamId, teamPlayers)
-              if (event && !seenIds.has(event.id)) {
-                seenIds.add(event.id)
-                allGames.push(event)
-              } else if (!event) {
-                droppedGames++
+              if (!event) {
+                droppedIds.add(`mlb-${game.gamePk}`)
+                continue
               }
+              const existing = eventsById.get(event.id)
+              if (existing) mergeEventPlayers(existing, event)
+              else eventsById.set(event.id, event)
             }
           }
+          const droppedGames = droppedIds.size
 
           // Sort by date
+          const allGames = [...eventsById.values()]
           allGames.sort((a, b) => a.date.localeCompare(b.date))
 
           set({

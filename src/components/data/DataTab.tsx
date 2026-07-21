@@ -45,10 +45,13 @@ const LEVEL_COLORS: Record<string, string> = {
   Summer: 'text-yellow-400',
 }
 
+// NOTE: HS/JUCO games come SOLELY from the Client Game Schedule sheet
+// (manual). The old 'MaxPreps' label was a leftover from the scraping era —
+// the maxpreps.com sourceUrl on those rows is just a verification link.
 const SOURCE_LABELS: Record<GameEvent['source'], string> = {
   'mlb-api': 'MLB API',
   'ncaa-lookup': 'D1Baseball',
-  'hs-lookup': 'MaxPreps',
+  'hs-lookup': 'Schedule Sheet',
 }
 
 export default function DataTab() {
@@ -61,6 +64,9 @@ export default function DataTab() {
   const [search, setSearch] = useState('')
   const [levelFilter, setLevelFilter] = useState<Set<string>>(new Set(['Pro', 'NCAA', 'HS', 'Summer']))
   const [confidenceFilter, setConfidenceFilter] = useState<'all' | 'high' | 'low'>('all')
+  // Hide past games by default — cached spring schedules (e.g. a drafted
+  // player's old HS games) otherwise dominate page 1 and read as wrong data
+  const [showPast, setShowPast] = useState(false)
   const [sortField, setSortField] = useState<SortField>('date')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [page, setPage] = useState(0)
@@ -119,7 +125,9 @@ export default function DataTab() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
+    const today = new Date().toISOString().split('T')[0]!
     return allRows.filter((r) => {
+      if (!showPast && r.date < today) return false
       if (!levelFilter.has(r.level)) return false
       if (confidenceFilter === 'high' && r.confidence !== 'high') return false
       if (confidenceFilter === 'low' && r.confidence === 'high') return false
@@ -129,7 +137,7 @@ export default function DataTab() {
       }
       return true
     })
-  }, [allRows, levelFilter, confidenceFilter, search])
+  }, [allRows, levelFilter, confidenceFilter, search, showPast])
 
   const sorted = useMemo(() => {
     const mul = sortDir === 'asc' ? 1 : -1
@@ -214,6 +222,16 @@ export default function DataTab() {
               </button>
             ))}
           </div>
+
+          <button
+            onClick={() => { setShowPast(!showPast); setPage(0) }}
+            className={`rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+              showPast ? 'border-border bg-gray-800/60 text-text' : 'border-border/30 bg-transparent text-text-dim/60 hover:text-text'
+            }`}
+            title={showPast ? 'Showing all games including past dates' : 'Past games hidden — click to include them'}
+          >
+            {showPast ? 'Hide past games' : 'Show past games'}
+          </button>
 
           <div className="ml-auto flex items-center gap-2 text-[11px] text-text-dim">
             <span>

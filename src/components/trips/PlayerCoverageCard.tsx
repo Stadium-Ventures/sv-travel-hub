@@ -16,7 +16,7 @@ type DataStatus = 'mlb-api' | 'ncaa-real' | 'hs-real' | 'estimated' | 'no-data'
 const STATUS_CONFIG: Record<DataStatus, { label: string; color: string; icon: string }> = {
   'mlb-api': { label: 'MLB API', color: 'text-accent-green', icon: '●' },
   'ncaa-real': { label: 'D1Baseball', color: 'text-accent-green', icon: '●' },
-  'hs-real': { label: 'MaxPreps', color: 'text-accent-green', icon: '●' },
+  'hs-real': { label: 'Schedule Sheet', color: 'text-accent-green', icon: '●' },
   'estimated': { label: 'Estimated', color: 'text-accent-orange', icon: '◐' },
   'no-data': { label: 'No Data', color: 'text-accent-red', icon: '○' },
 }
@@ -83,7 +83,7 @@ export default function PlayerCoverageCard({ players, allGames, onPlayerClick, o
         </h3>
         <div className="flex items-center gap-2 text-[10px]">
           {realDataCount > 0 && (
-            <span className="rounded bg-accent-green/10 px-1.5 py-0.5 text-accent-green cursor-help" title={`${realDataCount} players have confirmed schedules from MLB, D1Baseball, or MaxPreps.`}>
+            <span className="rounded bg-accent-green/10 px-1.5 py-0.5 text-accent-green cursor-help" title={`${realDataCount} players have confirmed schedules from MLB, D1Baseball, or the schedule sheet.`}>
               {realDataCount} with schedules
             </span>
           )}

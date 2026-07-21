@@ -19,6 +19,11 @@ export interface GameEvent {
   }
   source: ScheduleSource
   playerNames: string[]
+  /** Which side of THIS game each tracked player is on. Present on Pro games
+   *  (from team assignments) so a game where two SV clients face each other
+   *  keeps both — NCAA/HS events are single-school, where isHome already
+   *  determines every listed player's side. */
+  playerSides?: Record<string, 'home' | 'away'>
   sportId?: number
   confidence?: VisitConfidence
   confidenceNote?: string // e.g. "Typical home game day" or "May be traveling for away series"
@@ -101,10 +106,13 @@ export interface UnvisitablePlayer {
   reason: string
 }
 
-export type DoubleUpType = 'nearby-venues' | 'same-venue-matchup' | 'tournament-cluster'
+export type DoubleUpType = 'nearby-venues' | 'same-venue-matchup' | 'tournament-cluster' | 'stay-over'
 
 export interface DoubleUp {
   date: string
+  /** All dates when this same double-up repeats back-to-back (a series).
+   *  Length 1 for one-off opportunities; date === dates[0]. */
+  dates: string[]
   games: GameEvent[]
   type: DoubleUpType
   driveMinutesBetween: number  // 0 for same-venue
