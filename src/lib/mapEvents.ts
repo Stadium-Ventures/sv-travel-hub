@@ -11,6 +11,9 @@ export type MapEventMap = {
    *  the global header player search. MapView listens and sets the
    *  filterState.selectedPlayer + zooms via fitToMarkersKey. */
   'map:select-player': { playerName: string }
+  /** Fit the map viewport to a set of points (e.g. a destination pick's
+   *  cluster venues after "Go here"). */
+  'map:fit-points': { points: Array<{ lat: number; lng: number }> }
 }
 
 export function dispatchMapEvent<K extends keyof MapEventMap>(

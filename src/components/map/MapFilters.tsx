@@ -155,35 +155,56 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
             "how it looks" controls vs the "what to show" controls. */}
         <span className="h-5 w-px bg-border/40" aria-hidden />
 
-        {/* Tier pills (filter; also act as the color legend — but only in
-            Tier color mode. In Heartbeat mode the dots disappear so exactly
-            ONE color key is on screen at a time.) */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wide text-text-dim/60">Tier</span>
-          {[1, 2, 3, 4].map((t) => {
-            const active = state.tiers.has(t)
-            return (
-              <button
-                key={t}
-                onClick={() => toggleTier(t)}
-                className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                  active
-                    ? 'border-border bg-gray-800/60 text-text'
-                    : 'border-border/30 bg-transparent text-text-dim/40 line-through'
-                }`}
-                title={TIER_LABEL[t]}
-              >
-                {state.colorBy === 'tier' && (
+        {/* One color key at a time (Tom 2026-07-21): in Tier mode the tier
+            pills ARE the legend; in Heartbeat mode the heartbeat legend
+            takes their place entirely. (Any tier filtering set beforehand
+            still applies — the "N venues of M" count + clear link show it.) */}
+        {state.colorBy === 'tier' ? (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wide text-text-dim/60">Tier</span>
+            {[1, 2, 3, 4].map((t) => {
+              const active = state.tiers.has(t)
+              return (
+                <button
+                  key={t}
+                  onClick={() => toggleTier(t)}
+                  className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    active
+                      ? 'border-border bg-gray-800/60 text-text'
+                      : 'border-border/30 bg-transparent text-text-dim/40 line-through'
+                  }`}
+                  title={TIER_LABEL[t]}
+                >
                   <span
                     className="inline-block h-2 w-2 rounded-full"
                     style={{ background: TIER_COLORS[t] ?? TIER_COLORS[4]! }}
                   />
-                )}
-                T{t}
-              </button>
-            )
-          })}
-        </div>
+                  T{t}
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-dim">
+            <span className="uppercase tracking-wide text-text-dim/60">Map dots</span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.overdue }} />
+              Overdue (&gt;90d)
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.stale }} />
+              Stale (45–90d)
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.fresh }} />
+              Fresh (&lt;45d)
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.unknown }} />
+              No visit on record
+            </span>
+          </div>
+        )}
 
         {/* Level filters */}
         <div className="flex items-center gap-1.5">
@@ -252,30 +273,6 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
         </div>
       </div>
 
-      {/* Heartbeat legend strip — only when color mode is heartbeat (the
-          Tier chips drop their dots in this mode, so this is the single
-          color key on screen). Plain colored dots, no emoji (Kent). */}
-      {state.colorBy === 'heartbeat' && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/30 pt-2 text-[10px] text-text-dim">
-          <span className="uppercase tracking-wide text-text-dim/60">Map dots</span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.overdue }} />
-            Overdue (&gt;90d)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.stale }} />
-            Stale (45–90d)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.fresh }} />
-            Fresh (&lt;45d)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.unknown }} />
-            No visit on record
-          </span>
-        </div>
-      )}
     </div>
   )
 }

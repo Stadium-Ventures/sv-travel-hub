@@ -75,7 +75,10 @@ interface Props {
   setWindowDays: (n: number) => void
   strategy: BestWindowStrategy
   setStrategy: (s: BestWindowStrategy) => void
+  /** Set the map's date range to this window and stay on the map. */
   onApplyWindow: (w: WindowResult) => void
+  /** Old chained behavior: set dates, jump to Trip Planner, generate. */
+  onPlanWindow: (w: WindowResult) => void
   // Where
   picks: DestinationPick[]
   // Double ups
@@ -144,7 +147,7 @@ export default function SuggestionsPanel(props: Props) {
 
 /* ────────────────────────── WHEN ────────────────────────── */
 
-function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onApplyWindow }: Props) {
+function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onApplyWindow, onPlanWindow }: Props) {
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const topPick = windows[0]
   const currentStrategy = STRATEGY_OPTIONS.find((o) => o.value === strategy) ?? STRATEGY_OPTIONS[0]!
@@ -266,12 +269,22 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
                 )}
               </div>
             </div>
-            <button
-              onClick={() => onApplyWindow(w)}
-              className="shrink-0 rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
-            >
-              Use dates
-            </button>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <button
+                onClick={() => onApplyWindow(w)}
+                className="rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
+                title="Set the map's date range to this window — the dots update to show what's playable, no trip generated yet"
+              >
+                Use dates
+              </button>
+              <button
+                onClick={() => onPlanWindow(w)}
+                className="text-[10px] text-text-dim hover:text-accent-blue transition-colors"
+                title="Set these dates and generate trips in the Trip Planner"
+              >
+                Plan trips →
+              </button>
+            </div>
           </div>
         ))
       )}
@@ -287,9 +300,14 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
 
   // "Go here" MOVES THE STAR and stays on the map (Tom 2026-07-21) — the
   // radius, Best Windows, and drive times all recompute from the new spot
-  // so Kent can explore before committing. "Plan trips" does the old jump.
+  // so Kent can explore before committing. The map fits to the WHOLE
+  // cluster (not the old keep-current-zoom recenter, which could land
+  // zoomed into an empty spot). "Plan trips" does the old jump.
   function goHere(p: DestinationPick) {
     setHomeBase(p.centroid, p.label)
+    if (p.venues.length > 0) {
+      dispatchMapEvent('map:fit-points', { points: p.venues.map((v) => v.coords) })
+    }
   }
   function planFrom(p: DestinationPick) {
     setHomeBase(p.centroid, p.label)
@@ -326,6 +344,11 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
                     from {homeBaseName}: {p.drivable ? `${driveLabel} drive` : flightLabel}
                   </span>
                 </div>
+                {/* What "near" means — the cluster is anchored on a real
+                    venue, and every listed player is within a 3h drive of it */}
+                <p className="mt-0.5 text-[10px] text-text-dim/50">
+                  {p.venueCount} venue{p.venueCount === 1 ? '' : 's'} within a 3h drive of {p.anchorVenue}
+                </p>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <span className="text-xs text-text-dim">{p.players.length} player{p.players.length === 1 ? '' : 's'}</span>
                   {p.t1Count > 0 && (
@@ -343,7 +366,6 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
                       <span className={`inline-block h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[3]}`} />{p.t3Count} T3
                     </span>
                   )}
-                  <span className="text-[10px] text-text-dim/40">· {p.venueCount} venue{p.venueCount === 1 ? '' : 's'}</span>
                 </div>
                 <div className="mt-1 flex flex-wrap gap-1">
                   {p.players.slice(0, 8).map((pl) => (

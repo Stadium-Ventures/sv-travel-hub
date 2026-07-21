@@ -267,6 +267,13 @@ export default function MapView() {
               strategy={bestWindowStrategy}
               setStrategy={setBestWindowStrategy}
               onApplyWindow={(w) => {
+                // Explore first (Tom 2026-07-21): narrow the map's dates to
+                // this window and STAY — the dots update to show what's
+                // playable. Planning is the separate "Plan trips" link.
+                setFilterStart(w.startDate)
+                setFilterEnd(w.endDate)
+              }}
+              onPlanWindow={(w) => {
                 setFilterStart(w.startDate)
                 setFilterEnd(w.endDate)
                 // Jump to Trip Planner; the planner picks up the new dates from
@@ -274,7 +281,7 @@ export default function MapView() {
                 // delay so the date state propagates before generateTrips reads it.
                 dispatchMapEvent('app:switch-tab', { tab: 'trips' })
                 setTimeout(() => {
-                  useTripStore.getState().generateTrips().catch((e) => console.warn('[map] auto-generate after Use Window failed:', e))
+                  useTripStore.getState().generateTrips().catch((e) => console.warn('[map] auto-generate after Plan trips failed:', e))
                 }, 100)
               }}
               picks={destinationPicks}

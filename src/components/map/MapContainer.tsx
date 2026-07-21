@@ -10,7 +10,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { useTripStore } from '../../store/tripStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
-import { dispatchMapEvent } from '../../lib/mapEvents'
+import { dispatchMapEvent, addMapEventListener } from '../../lib/mapEvents'
 import { injectMapStyles } from './mapStyles'
 import { buildVenuePopupHtml } from './VenuePopup'
 import { TIER_COLORS } from './hooks/useTierMarkers'
@@ -230,6 +230,25 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       setLoaded(false)
     }
   }, [])
+
+  // Fit the viewport to an explicit set of points — fired by "Go here" so
+  // the whole destination cluster is visible instead of a tight recenter
+  // at whatever zoom the user happened to be on.
+  useEffect(() => {
+    if (!loaded) return
+    return addMapEventListener('map:fit-points', ({ points }) => {
+      const L = leafletRef.current
+      const map = mapInstance.current
+      if (!L || !map || points.length === 0) return
+      dragOriginRef.current = true // suppress the homeBase-change recenter
+      if (points.length === 1) {
+        map.setView(L.latLng(points[0]!.lat, points[0]!.lng), 8, { animate: true })
+      } else {
+        const bounds = L.latLngBounds(points.map((p) => L.latLng(p.lat, p.lng)))
+        map.fitBounds(bounds, { padding: [70, 70], maxZoom: 9, animate: true })
+      }
+    })
+  }, [loaded])
 
   // Update home base marker + drive radius circle when homeBase changes
   useEffect(() => {

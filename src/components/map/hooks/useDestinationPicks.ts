@@ -22,6 +22,12 @@ export interface DestinationPick {
   t3Count: number
   /** Number of distinct venues bundled into this destination. */
   venueCount: number
+  /** Name of the seed venue the cluster is anchored on — tells the user
+   *  what "near" actually means (e.g. label "Near Cleveland, OH" anchored
+   *  at UPMC Park in Erie). */
+  anchorVenue: string
+  /** Every venue in the cluster, for map fit-bounds on "Go here". */
+  venues: Array<{ name: string; coords: Coordinates }>
   /** Estimated one-way drive minutes from the user's current home base. */
   driveFromHomeMin: number
   /** Estimated one-way flight time in hours from the user's current home
@@ -124,16 +130,16 @@ export function useDestinationPicks(
     type Seed = {
       seed: TierMarker
       players: Map<string, number> // name → tier (best/lowest)
-      venueCount: number
+      venues: Array<{ name: string; coords: Coordinates }>
     }
     const seeds: Seed[] = []
     for (const seed of tierMarkers) {
       const players = new Map<string, number>()
-      let venueCount = 0
+      const venues: Array<{ name: string; coords: Coordinates }> = []
       for (const other of tierMarkers) {
         const driveMin = estimateDriveMinutes(seed.coords, other.coords)
         if (driveMin > clusterRadiusMin) continue
-        venueCount++
+        venues.push({ name: other.venueName, coords: other.coords })
         for (const p of other.players) {
           const existing = players.get(p.name)
           if (existing === undefined || p.tier < existing) {
@@ -142,7 +148,7 @@ export function useDestinationPicks(
         }
       }
       if (players.size === 0) continue
-      seeds.push({ seed, players, venueCount })
+      seeds.push({ seed, players, venues })
     }
 
     // Score and rank.
@@ -166,7 +172,9 @@ export function useDestinationPicks(
         t1Count: t1,
         t2Count: t2,
         t3Count: t3,
-        venueCount: s.venueCount,
+        venueCount: s.venues.length,
+        anchorVenue: s.seed.venueName,
+        venues: s.venues,
         driveFromHomeMin,
         flightHoursFromHome: estimateFlightHours(homeBase, s.seed.coords),
         drivable: driveFromHomeMin <= driveCapMin,
