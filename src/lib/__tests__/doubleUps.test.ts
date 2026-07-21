@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findDoubleUps } from '../doubleUps'
+import { findDoubleUps, findClosestApproach } from '../doubleUps'
 import type { GameEvent } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 
@@ -156,6 +156,28 @@ describe('findDoubleUps — nearby venues', () => {
     expect(nearby).toHaveLength(1)
     expect(nearby[0]!.driveMinutesBetween).toBeGreaterThan(45)
     expect(nearby[0]!.driveMinutesBetween).toBeLessThanOrEqual(90)
+  })
+})
+
+describe('findClosestApproach', () => {
+  it('returns the minimum drive between two players\' same/adjacent-day games', () => {
+    const g1 = game({ id: 'c1', date: '2026-07-22', playerNames: ['A'] })
+    const far = game({
+      id: 'c2', date: '2026-07-22', playerNames: ['B'],
+      homeTeam: 'Peoria Chiefs', awayTeam: 'X',
+      venue: { name: 'Dozer Park', coords: PEORIA },
+    })
+    const result = findClosestApproach([g1, far], 'A', 'B', '2026-07-20', '2026-07-30')
+    expect(result).not.toBeNull()
+    expect(result!.driveMinutes).toBeGreaterThan(90) // Beloit↔Peoria ~2.5h
+    expect(result!.venueA).toBe('ABC Supply Stadium')
+    expect(result!.venueB).toBe('Dozer Park')
+  })
+
+  it('returns null when the players are never within a day of each other', () => {
+    const g1 = game({ id: 'c3', date: '2026-07-22', playerNames: ['A'] })
+    const g2 = game({ id: 'c4', date: '2026-07-28', playerNames: ['B'], venue: { name: 'Dozer Park', coords: PEORIA } })
+    expect(findClosestApproach([g1, g2], 'A', 'B', '2026-07-20', '2026-07-30')).toBeNull()
   })
 })
 

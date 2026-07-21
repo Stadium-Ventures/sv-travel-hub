@@ -78,13 +78,10 @@ export default function MapView() {
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const [windowDays, setWindowDays] = useState(3)
   const [bestWindowStrategy, setBestWindowStrategy] = useState<BestWindowStrategy>('impact')
-  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy)
-
-  // Destination picks — scans ALL tier markers (not drive-filtered) because
-  // the whole point of "Where to go?" is to look beyond the current radius.
-  const destinationPicks = useDestinationPicks(allTierMarkers, homeBase, 180, 360, 5)
 
   // Double ups for the map's date window — roster-wide (origin-agnostic).
+  // Computed before Best Windows so the "Contains double ups" strategy and
+  // per-window double-up chips can use them.
   const summerGames = useSummerStore((s) => s.summerGames)
   const doubleUps = useMemo(() => {
     if (players.length === 0) return []
@@ -92,6 +89,12 @@ export default function MapView() {
     if (all.length === 0) return []
     return findDoubleUps(all, players, filterStart, filterEnd)
   }, [proGames, ncaaGames, hsGames, summerGames, players, filterStart, filterEnd])
+
+  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, doubleUps)
+
+  // Destination picks — scans ALL tier markers (not drive-filtered) because
+  // the whole point of "Where to go?" is to look beyond the current radius.
+  const destinationPicks = useDestinationPicks(allTierMarkers, homeBase, 180, 360, 5)
   const playerMap = useMemo(() => {
     const m = new Map<string, RosterPlayer>()
     for (const p of players) m.set(p.playerName, p)
@@ -356,7 +359,7 @@ function MapHelp() {
             <li>For suggestions, open <em>Best Windows</em> below or jump to the <em>Trip Planner</em>.</li>
           </ol>
           <p className="mt-2 text-[11px] text-text-dim/60">
-            Switch <strong className="text-text">Color by</strong> to <em>Heartbeat</em> to see overdue players (🔥 magenta) — uses a different palette than Tier so they don't conflict visually.
+            Switch <strong className="text-text">Color by</strong> to <em>Heartbeat</em> to see overdue players (magenta) — uses a different palette than Tier so they don't conflict visually.
           </p>
         </div>
       )}

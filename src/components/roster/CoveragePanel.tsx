@@ -106,7 +106,7 @@ export default function CoveragePanel() {
                 {r.nextGame ? (
                   <>
                     <span className="text-[11px] text-text-dim">
-                      Next: {r.nextGame.isHome ? '🏠' : '✈️'} {formatDate(r.nextGame.date)} · {r.nextGame.venue.name}
+                      Next: {formatDate(r.nextGame.date)} · {r.nextGame.venue.name}
                     </span>
                     <button
                       onClick={() => planTripFor(r.player.playerName, r.nextGame!.date)}

@@ -433,7 +433,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     for (const e of eventMarkers) {
       const icon = L.divIcon({
         className: '',
-        html: `<div style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:#f59e0b;color:#1a1a1a;font-size:13px;box-shadow:0 0 0 2px rgba(245,158,11,0.4)">📌</div>`,
+        html: `<div style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:#f59e0b;color:#1a1a1a;font-size:13px;box-shadow:0 0 0 2px rgba(245,158,11,0.4)"></div>`,
         iconSize: [22, 22],
         iconAnchor: [11, 11],
       })
@@ -444,7 +444,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         : ''
       const staff = e.staff ? `<div style="margin-top:4px"><span style="color:#94a3b8">SV:</span> ${esc(e.staff)}</div>` : ''
       const html = `<div style="font-family:system-ui;font-size:12px;color:#f1f5f9;min-width:180px">`
-        + `<div style="font-weight:700;color:#f59e0b">📌 ${esc(e.event)}</div>`
+        + `<div style="font-weight:700;color:#f59e0b">${esc(e.event)}</div>`
         + `<div style="margin-top:2px">${dr}${loc ? ` · ${esc(loc)}` : ''}</div>`
         + staff + clients + `</div>`
       L.marker([e.coords.lat, e.coords.lng], { icon, zIndexOffset: 500 })

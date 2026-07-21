@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { TierMarker } from './useTierMarkers'
 import type { Coordinates } from '../../../types/roster'
+import type { DoubleUp } from '../../../types/schedule'
 import { useScheduleStore } from '../../../store/scheduleStore'
 import { useHeartbeatStore } from '../../../store/heartbeatStore'
 
@@ -24,6 +25,9 @@ export interface WindowResult {
   /** Players in this window who are >90 days overdue OR have no visit on
    *  record (per Heartbeat). Drives a small "N overdue" boost in scoring. */
   overdueCount: number
+  /** Double-up opportunities (reachable within the drive radius) with at
+   *  least one game date inside this window. */
+  doubleUpCount: number
 }
 
 function haversineKm(a: Coordinates, b: Coordinates): number {
@@ -59,8 +63,9 @@ function getDayOfWeek(dateStr: string): number {
  *  - overdue-priority: prioritize windows that catch overdue T1/T2 players
  *  - player-count: maximize unique player coverage regardless of tier
  *  - tuesday:    Tuesday-bearing windows first (Kent's MiLB position-player rule)
+ *  - double-ups: windows containing the most double-up opportunities
  */
-export type BestWindowStrategy = 'impact' | 't1-count' | 'overdue-priority' | 'player-count' | 'tuesday'
+export type BestWindowStrategy = 'impact' | 't1-count' | 'overdue-priority' | 'player-count' | 'tuesday' | 'double-ups'
 
 export function useBestWindows(
   tierMarkers: TierMarker[],
@@ -71,6 +76,7 @@ export function useBestWindows(
   windowDays = 3,
   topN = 5,
   strategy: BestWindowStrategy = 'impact',
+  doubleUps: DoubleUp[] = [],
 ): WindowResult[] {
   // Pull all games + heartbeat data so we can detect time conflicts and
   // weight overdue players. Subscribing here means Best Windows updates
@@ -113,6 +119,19 @@ export function useBestWindows(
       arr.push({ venueKey, hour })
       dateVenueStartHours.set(g.date, arr)
     }
+    // Double-ups reachable from the star — count per window below. A pair is
+    // "reachable" when at least one of its venues is inside the drive radius.
+    const reachableDoubleUps = doubleUps.filter((du) =>
+      du.games.some((g) => estimateDriveMinutes(homeBase, g.venue.coords) <= maxDriveMinutes),
+    )
+    function countDoubleUpsInWindow(start: string, end: string): number {
+      let n = 0
+      for (const du of reachableDoubleUps) {
+        if (du.dates.some((d) => d >= start && d <= end)) n++
+      }
+      return n
+    }
+
     // Heartbeat lookup
     const daysSinceByName = new Map<string, number | null>()
     for (const p of heartbeatPlayers) {
@@ -248,6 +267,7 @@ export function useBestWindows(
           hasTuesday,
           timeConflictCount,
           overdueCount,
+          doubleUpCount: countDoubleUpsInWindow(current, windowEnd),
         })
       }
 
@@ -280,6 +300,9 @@ export function useBestWindows(
         case 'tuesday':
           if (a.hasTuesday !== b.hasTuesday) return a.hasTuesday ? -1 : 1
           return b.tierWeightedScore - a.tierWeightedScore
+        case 'double-ups':
+          if (b.doubleUpCount !== a.doubleUpCount) return b.doubleUpCount - a.doubleUpCount
+          return b.tierWeightedScore - a.tierWeightedScore
         case 'impact':
         default:
           return b.tierWeightedScore - a.tierWeightedScore
@@ -311,9 +334,12 @@ export function useBestWindows(
 
     // For 'tuesday' strategy, drop non-Tuesday windows entirely before dedupe
     // so the secondary results don't fall through to non-Tuesday options.
+    // Same for 'double-ups': only windows that actually contain one.
     const candidates = strategy === 'tuesday'
       ? results.filter((r) => r.hasTuesday)
-      : results
+      : strategy === 'double-ups'
+        ? results.filter((r) => r.doubleUpCount > 0)
+        : results
 
     const picked: WindowResult[] = []
     const coveredPlayers = new Set<string>()
@@ -331,5 +357,5 @@ export function useBestWindows(
     }
 
     return picked
-  }, [tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, topN, strategy, proGames, ncaaGames, hsGames, heartbeatPlayers])
+  }, [tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, topN, strategy, doubleUps, proGames, ncaaGames, hsGames, heartbeatPlayers])
 }

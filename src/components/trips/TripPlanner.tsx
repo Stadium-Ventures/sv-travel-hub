@@ -10,8 +10,8 @@ import PlayerCoverageCard from './PlayerCoverageCard'
 // ICS export removed from main UI — kept in individual trip cards
 // import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
-import DoubleUpSection from './DoubleUpSection'
-import { findDoubleUps } from '../../lib/doubleUps'
+import DoubleUpSection, { PairVerdictBanner, type PairVerdict } from './DoubleUpSection'
+import { findDoubleUps, findClosestApproach } from '../../lib/doubleUps'
 import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
@@ -362,6 +362,31 @@ export default function TripPlanner() {
     const today = new Date().toISOString().split('T')[0]!
     return findDoubleUps(all, players, today, addDaysISO(today, DOUBLE_UP_WINDOW_DAYS))
   }, [proGames, ncaaGames, hsGames, summerGames, players, DOUBLE_UP_WINDOW_DAYS])
+
+  // "Does X double up with Y?" — Tom's 2026-07-21 read of the priority
+  // pickers as a player-combo double-up filter. For each pair of selected
+  // priority players, state the verdict explicitly: dates when they double
+  // up, or how close their schedules come (silence read as noise before).
+  const pairVerdicts = useMemo<PairVerdict[]>(() => {
+    if (priorityPlayers.length < 2) return []
+    const today = new Date().toISOString().split('T')[0]!
+    const end = addDaysISO(today, DOUBLE_UP_WINDOW_DAYS)
+    const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
+    const out: PairVerdict[] = []
+    for (let i = 0; i < priorityPlayers.length; i++) {
+      for (let j = i + 1; j < priorityPlayers.length; j++) {
+        const a = priorityPlayers[i]!
+        const b = priorityPlayers[j]!
+        const dus = upcomingDoubleUps.filter((du) => du.playerNames.includes(a) && du.playerNames.includes(b))
+        if (dus.length > 0) {
+          out.push({ a, b, doubleUpDates: [...new Set(dus.flatMap((d) => d.dates))].sort(), closest: null })
+        } else {
+          out.push({ a, b, doubleUpDates: null, closest: findClosestApproach(all, a, b, today, end) })
+        }
+      }
+    }
+    return out
+  }, [priorityPlayers, upcomingDoubleUps, proGames, ncaaGames, hsGames, summerGames, DOUBLE_UP_WINDOW_DAYS])
 
   // "Plan trip" from a double-up card: lock in the players involved as
   // priorities, narrow dates to the series window, and generate.
@@ -831,7 +856,7 @@ export default function TripPlanner() {
         {!computing && !tripPlan && (progressStep === 'Blocked' || progressStep === 'Error') && (
           <div className="mt-4 rounded-lg border border-accent-red/50 bg-accent-red/10 p-4">
             <div className="flex items-center gap-2">
-              <span className="text-lg">⛔</span>
+              
               <span className="text-sm font-semibold text-accent-red">{progressStep === 'Blocked' ? 'Trip Generation Blocked' : 'Trip Generation Failed'}</span>
             </div>
             {progressDetail && (
@@ -860,14 +885,17 @@ export default function TripPlanner() {
           playerMap={playerMap}
           priorityPlayers={priorityPlayers}
           windowDays={DOUBLE_UP_WINDOW_DAYS}
+          pairVerdicts={pairVerdicts}
           onPlayerClick={(n) => setSelectedPlayer(n)}
           onPlanTrip={handlePlanDoubleUp}
         />
       )}
 
-      {/* Empty state so the feature is discoverable even with zero hits */}
+      {/* Empty state so the feature is discoverable even with zero hits —
+          still answers "does X double up with Y?" for the selected pair */}
       {!computing && upcomingDoubleUps.length === 0 && allSchedulesLoaded && (
         <div className="rounded-xl border border-border/40 bg-surface/40 px-4 py-2.5">
+          <PairVerdictBanner verdicts={pairVerdicts} />
           <p className="text-xs text-text-dim">
             <span className="font-medium text-accent-green">Double Ups:</span>{' '}
             none found in the next 30 days. This scans the whole roster automatically — head-to-heads, same-day doubles within a 90-min drive, and back-to-back-day stay-overs.
@@ -962,9 +990,9 @@ export default function TripPlanner() {
               <div className="space-y-1.5">
                 {rows.map((r) => {
                   const modeBadge = r.mode === 'drive'
-                    ? { icon: '🚗', label: 'Drive', color: 'bg-accent-green/15 text-accent-green' }
+                    ? { icon: '', label: 'Drive', color: 'bg-accent-green/15 text-accent-green' }
                     : r.mode === 'flight'
-                    ? { icon: '✈', label: 'Flight', color: 'bg-accent-blue/15 text-accent-blue' }
+                    ? { icon: '', label: 'Flight', color: 'bg-accent-blue/15 text-accent-blue' }
                     : { icon: '—', label: 'No trip', color: 'bg-gray-700/40 text-text-dim' }
                   return (
                     <div key={r.name} className="flex flex-wrap items-center gap-2 rounded-md bg-surface/50 px-3 py-1.5 text-sm">
@@ -1155,10 +1183,10 @@ export default function TripPlanner() {
                 <span className="text-[11px] text-text-dim">Show:</span>
                 {([
                   { key: 'all', label: 'All', tip: 'Show all trip options — drives and flights.' },
-                  { key: 'drive', label: '🚗 Drives', tip: `Only show trips you can drive to from ${homeBaseName}.` },
-                  { key: 'fly', label: '✈️ Flights', tip: 'Only show trips that require a flight.' },
+                  { key: 'drive', label: 'Drives', tip: `Only show trips you can drive to from ${homeBaseName}.` },
+                  { key: 'fly', label: 'Flights', tip: 'Only show trips that require a flight.' },
                   { key: 'multi', label: '👥 2+ Players', tip: 'Only show trips where you can see 2 or more players.' },
-                  ...(anchorPlayerNames.length > 0 ? [{ key: 'anchor' as const, label: '📍 Near destination', tip: 'Only show trips near your selected destination.' }] : []),
+                  ...(anchorPlayerNames.length > 0 ? [{ key: 'anchor' as const, label: 'Near destination', tip: 'Only show trips near your selected destination.' }] : []),
                   { key: 'starred', label: '★ Starred', tip: 'Show only trips you\'ve saved as favorites.' },
                 ] as Array<{ key: typeof tripFilter; label: string; tip: string }>).map(({ key, label, tip }) => (
                   <button
@@ -2096,7 +2124,7 @@ function FlyInCard({
           <div className="flex items-center gap-2">
             <span className={`text-text-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
             <h3 className="text-base font-semibold text-text">
-              Trip #{index} <span className="text-sm">✈️</span>
+              Trip #{index}
               <span className="ml-1.5 text-sm font-medium text-purple-400">
                 Fly to {findNearestAirport(activeVisit.venue.coords).name}
               </span>
@@ -2230,7 +2258,7 @@ function FlyInCard({
                   </div>
                   {stop.source === 'hs-lookup' && !stop.isHome && (
                     <p className="text-[10px] text-accent-orange/60 mt-0.5">
-                      📍 Location approximate — away game venue estimated from home field area.{' '}
+                      Location approximate — away game venue estimated from home field area.{' '}
                       <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${stop.teamLabel || stop.venue.name} high school baseball field`)}`} target="_blank" rel="noopener noreferrer" className="text-accent-blue/70 hover:text-accent-blue underline">Confirm on Google Maps ↗</a>
                     </p>
                   )}
@@ -2350,7 +2378,7 @@ function FlyInCard({
                 </div>
                 {activeVisit.source === 'hs-lookup' && !activeVisit.isHome && (
                   <p className="text-[10px] text-accent-orange/60 mt-0.5">
-                    📍 Location approximate — away game venue estimated from home field area.{' '}
+                    Location approximate — away game venue estimated from home field area.{' '}
                     <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${activeVisit.teamLabel || activeVisit.venue.name} high school baseball field`)}`} target="_blank" rel="noopener noreferrer" className="text-accent-blue/70 hover:text-accent-blue underline">Confirm on Google Maps ↗</a>
                   </p>
                 )}

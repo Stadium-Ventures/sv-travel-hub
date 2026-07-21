@@ -27,6 +27,7 @@ const STRATEGY_OPTIONS: { value: BestWindowStrategy; label: string; hint: string
   { value: 'overdue-priority',  label: 'Overdue high-priority players', hint: 'Catch must-see/high-priority players you haven\'t seen in 90+ days' },
   { value: 'player-count',      label: 'Most players (any tier)',     hint: 'Maximize total unique players regardless of tier' },
   { value: 'tuesday',           label: 'Includes a Tuesday',          hint: 'Best day for MiLB position-player visits' },
+  { value: 'double-ups',        label: 'Contains double ups',         hint: 'Windows with the most double-up opportunities inside the drive radius' },
 ]
 
 function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult[]): string {
@@ -49,6 +50,11 @@ function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult
       const tuesCount = windows.filter((w) => w.hasTuesday).length
       if (tuesCount === 0) return 'No Tuesday-bearing windows in this date range.'
       return `${tuesCount} of ${windows.length} window${windows.length === 1 ? '' : 's'} include a Tuesday.`
+    }
+    case 'double-ups': {
+      const total = windows.reduce((s, w) => s + w.doubleUpCount, 0)
+      if (total === 0) return 'No windows with a reachable double up in this date range.'
+      return `Top pick contains ${top.doubleUpCount} double up${top.doubleUpCount === 1 ? '' : 's'}. ${total} across all ${windows.length} window${windows.length === 1 ? '' : 's'} — see the Double Ups tab for details.`
     }
     default:
       return ''
@@ -238,7 +244,13 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
                 {w.timeConflictCount > 0 && (
                   <span className="rounded bg-accent-orange/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-orange"
                     title={`${w.timeConflictCount} game(s) overlap in start time across different venues.`}>
-                    ⚠ {w.timeConflictCount} conflict{w.timeConflictCount !== 1 ? 's' : ''}
+                    {w.timeConflictCount} conflict{w.timeConflictCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {w.doubleUpCount > 0 && (
+                  <span className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-green"
+                    title={`${w.doubleUpCount} double-up opportunit${w.doubleUpCount === 1 ? 'y' : 'ies'} fall inside this window — see the Double Ups tab.`}>
+                    {w.doubleUpCount} double up{w.doubleUpCount !== 1 ? 's' : ''}
                   </span>
                 )}
               </div>
@@ -311,7 +323,7 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
                   )}
                   <span className="text-sm font-medium text-text">{p.label}</span>
                   <span className="text-[10px] text-text-dim/60">
-                    from {homeBaseName}: {p.drivable ? `🚗 ${driveLabel}` : `✈️ ${flightLabel}`}
+                    from {homeBaseName}: {p.drivable ? `${driveLabel} drive` : flightLabel}
                   </span>
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -420,7 +432,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
                 </span>
               )}
               <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-text-dim" title="Nearest major airport">
-                ✈ {airports.join(' / ')}
+                Fly: {airports.join(' / ')}
               </span>
             </div>
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">

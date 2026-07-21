@@ -205,6 +205,46 @@ export function findDoubleUps(
   return collapsed
 }
 
+/** How close two specific players' schedules come to a double up. Scans
+ *  same-day and back-to-back-day game pairs in the range and returns the
+ *  minimum venue-to-venue drive. Null = they're never within a day of each
+ *  other. Used for the "does X double up with Y?" verdict when a priority
+ *  pair has no actual double up. */
+export interface PairApproach {
+  dateA: string
+  dateB: string
+  driveMinutes: number
+  venueA: string
+  venueB: string
+}
+
+export function findClosestApproach(
+  allGames: GameEvent[],
+  nameA: string,
+  nameB: string,
+  startDate: string,
+  endDate: string,
+): PairApproach | null {
+  const inRange = (g: GameEvent) =>
+    g.date >= startDate && g.date <= endDate &&
+    g.gameStatus !== 'Cancelled' && g.gameStatus !== 'Postponed'
+  const gamesA = allGames.filter((g) => inRange(g) && g.playerNames.includes(nameA))
+  const gamesB = allGames.filter((g) => inRange(g) && g.playerNames.includes(nameB))
+
+  let best: PairApproach | null = null
+  for (const gA of gamesA) {
+    for (const gB of gamesB) {
+      if (Math.abs(daysBetween(gA.date, gB.date)) > 1) continue
+      const distKm = haversineKm(gA.venue.coords, gB.venue.coords)
+      const driveMin = distKm < 1 ? 0 : estimateDriveMinutes(gA.venue.coords, gB.venue.coords)
+      if (!best || driveMin < best.driveMinutes) {
+        best = { dateA: gA.date, dateB: gB.date, driveMinutes: driveMin, venueA: gA.venue.name, venueB: gB.venue.name }
+      }
+    }
+  }
+  return best
+}
+
 function normTeam(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '')
 }

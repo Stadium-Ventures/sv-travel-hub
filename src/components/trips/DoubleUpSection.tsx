@@ -1,14 +1,58 @@
 import React, { useState, useMemo } from 'react'
 import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
+import type { PairApproach } from '../../lib/doubleUps'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS } from '../../lib/formatters'
 import { findNearestAirport } from '../../data/majorAirports'
+
+/** "Does X double up with Y?" verdict for a pair of priority players —
+ *  Tom 2026-07-21: when two players are picked, an impossible combo must be
+ *  SAID, not implied by their absence from the list. */
+export interface PairVerdict {
+  a: string
+  b: string
+  /** Dates where the two actually double up; null = no double up in window */
+  doubleUpDates: string[] | null
+  /** When no double up: how close their schedules come (null = never within a day) */
+  closest: PairApproach | null
+}
+
+export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
+  if (verdicts.length === 0) return null
+  return (
+    <div className="mb-3 space-y-1">
+      {verdicts.map((v) => {
+        if (v.doubleUpDates) {
+          const first = v.doubleUpDates[0]!
+          const last = v.doubleUpDates[v.doubleUpDates.length - 1]!
+          const when = first === last
+            ? formatDate(first)
+            : `${formatDate(first)} – ${formatDate(last)}${v.doubleUpDates.length > 2 ? ` (${v.doubleUpDates.length} dates)` : ''}`
+          return (
+            <p key={`${v.a}|${v.b}`} className="rounded-lg border border-accent-green/30 bg-accent-green/10 px-3 py-1.5 text-xs text-accent-green">
+              <strong>{v.a} + {v.b}</strong> double up {when} — their cards are pinned first below.
+            </p>
+          )
+        }
+        return (
+          <p key={`${v.a}|${v.b}`} className="rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-3 py-1.5 text-xs text-accent-orange/90">
+            <strong>{v.a} + {v.b}:</strong> no double up in this window.{' '}
+            {v.closest
+              ? `Closest their schedules come: ${formatDate(v.closest.dateA)}${v.closest.dateB !== v.closest.dateA ? `/${formatDate(v.closest.dateB)}` : ''} — venues ${formatDriveTime(v.closest.driveMinutes)} apart (needs 90 min or less).`
+              : 'Their schedules are never within a day of each other in this window.'}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
 
 interface Props {
   doubleUps: DoubleUp[]
   playerMap: Map<string, RosterPlayer>
   priorityPlayers: string[]
   windowDays?: number
+  pairVerdicts?: PairVerdict[]
   onPlayerClick?: (name: string) => void
   onPlanTrip?: (du: DoubleUp) => void
 }
@@ -28,7 +72,7 @@ function driveTierClass(driveMin: number): string {
   return driveMin <= 45 ? 'text-accent-green' : 'text-yellow-400'
 }
 
-export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers, windowDays, onPlayerClick, onPlanTrip }: Props) {
+export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers, windowDays, pairVerdicts = [], onPlayerClick, onPlanTrip }: Props) {
   const [tierFilter, setTierFilter] = useState<number | null>(null)
   const [showAll, setShowAll] = useState(false)
 
@@ -41,11 +85,13 @@ export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers,
       )
     }
 
-    // Double ups involving priority players float to the top (not a hard
-    // filter — a great matchup is worth seeing even if it's other clients)
+    // Double ups involving priority players float to the top, ranked by HOW
+    // MANY priority players they include — a card with both picked players
+    // outranks one with either alone. (Not a hard filter — a great matchup
+    // is worth seeing even if it's other clients.)
     if (priorityPlayers.length > 0) {
-      const involves = (du: DoubleUp) => du.playerNames.some((n) => priorityPlayers.includes(n))
-      items = [...items].sort((a, b) => Number(involves(b)) - Number(involves(a)))
+      const rank = (du: DoubleUp) => priorityPlayers.filter((n) => du.playerNames.includes(n)).length
+      items = [...items].sort((a, b) => rank(b) - rank(a))
     }
 
     return items
@@ -94,6 +140,8 @@ export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers,
           </button>
         </div>
       </div>
+
+      <PairVerdictBanner verdicts={pairVerdicts} />
 
       {filtered.length === 0 ? (
         <p className="py-2 text-center text-xs text-text-dim">No double ups match the selected filter.</p>
@@ -154,7 +202,7 @@ function DoubleUpCard({
           {typeInfo.label}
         </span>
         <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-text-dim" title="Nearest major airport">
-          ✈ {airportCodes.join(' / ')}
+          Fly: {airportCodes.join(' / ')}
         </span>
         {du.timeFeasible === true && du.type === 'nearby-venues' && (
           <span className="text-[10px] text-accent-green" title="Enough time between first pitches to watch both games in full">&#10003; Both games in full</span>

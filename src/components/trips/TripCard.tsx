@@ -481,7 +481,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
           <div className="flex items-center gap-2">
             <span className={`text-text-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
             <h3 className="text-base font-semibold text-text">
-              Trip #{index} <span className="text-sm">🚗</span>
+              Trip #{index}
               <span className="ml-1.5 text-sm font-medium text-accent-green">
                 Drive to {stops[0]?.orgLabel || stops[0]?.venueName || 'venue'} area
               </span>
@@ -828,7 +828,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                             </div>
                             {stop.source === 'hs-lookup' && !stop.isHome && (
                               <p className="text-[10px] text-accent-orange/60 mt-0.5">
-                                📍 Location approximate — away game venue estimated from home field area.{' '}
+                                Location approximate — away game venue estimated from home field area.{' '}
                                 <a
                                   href={`https://www.google.com/maps/search/${encodeURIComponent(`${stop.awayTeam || stop.venueName} high school baseball field`)}`}
                                   target="_blank"

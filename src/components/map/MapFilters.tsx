@@ -57,15 +57,6 @@ export const HEARTBEAT_COLORS = {
   unknown: '#6b7280',   // no data    (gray — same gray works for both)
 } as const
 
-/** Emoji glyph that matches the bucket — used in chips/legends/tooltips so
- *  users can pattern-match visually even when colors are crowded. */
-export const HEARTBEAT_ICONS = {
-  overdue: '🔥',
-  stale:   '⏳',
-  fresh:   '🌱',
-  unknown: '❓',
-} as const
-
 export function heartbeatColorFor(days: number | null | undefined): string {
   if (days == null) return HEARTBEAT_COLORS.unknown
   if (days > 90) return HEARTBEAT_COLORS.overdue
@@ -164,7 +155,9 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
             "how it looks" controls vs the "what to show" controls. */}
         <span className="h-5 w-px bg-border/40" aria-hidden />
 
-        {/* Tier pills (act as legend + filter) */}
+        {/* Tier pills (filter; also act as the color legend — but only in
+            Tier color mode. In Heartbeat mode the dots disappear so exactly
+            ONE color key is on screen at a time.) */}
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] uppercase tracking-wide text-text-dim/60">Tier</span>
           {[1, 2, 3, 4].map((t) => {
@@ -180,10 +173,12 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
                 }`}
                 title={TIER_LABEL[t]}
               >
-                <span
-                  className="inline-block h-2 w-2 rounded-full"
-                  style={{ background: TIER_COLORS[t] ?? TIER_COLORS[4]! }}
-                />
+                {state.colorBy === 'tier' && (
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ background: TIER_COLORS[t] ?? TIER_COLORS[4]! }}
+                  />
+                )}
                 T{t}
               </button>
             )
@@ -257,33 +252,28 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
         </div>
       </div>
 
-      {/* Heartbeat legend strip — only when color mode is heartbeat. Uses
-          a distinct emoji + color combo per bucket so it doesn't read as
-          tier coloring (Tier 1 = red dot is a separate concept). */}
+      {/* Heartbeat legend strip — only when color mode is heartbeat (the
+          Tier chips drop their dots in this mode, so this is the single
+          color key on screen). Plain colored dots, no emoji (Kent). */}
       {state.colorBy === 'heartbeat' && (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/30 pt-2 text-[10px] text-text-dim">
           <span className="uppercase tracking-wide text-text-dim/60">Map dots</span>
           <span className="flex items-center gap-1">
-            <span aria-hidden>{HEARTBEAT_ICONS.overdue}</span>
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.overdue }} />
             Overdue (&gt;90d)
           </span>
           <span className="flex items-center gap-1">
-            <span aria-hidden>{HEARTBEAT_ICONS.stale}</span>
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.stale }} />
             Stale (45–90d)
           </span>
           <span className="flex items-center gap-1">
-            <span aria-hidden>{HEARTBEAT_ICONS.fresh}</span>
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.fresh }} />
             Fresh (&lt;45d)
           </span>
           <span className="flex items-center gap-1">
-            <span aria-hidden>{HEARTBEAT_ICONS.unknown}</span>
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: HEARTBEAT_COLORS.unknown }} />
             No visit on record
           </span>
-          <span className="text-text-dim/50">— colors are distinct from Tier red/orange so they don't conflict</span>
         </div>
       )}
     </div>
