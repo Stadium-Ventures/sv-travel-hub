@@ -415,15 +415,12 @@ export default function TripPlanner() {
   const canGenerate = players.length > 0 && !computing
 
 
-  function handlePriorityChange(slot: number, value: string) {
-    const next = [...priorityPlayers]
-    if (value === '') {
-      next.splice(slot, 1)
-    } else {
-      next[slot] = value
-    }
-    // Remove duplicates and empty slots
-    setPriorityPlayers([...new Set(next.filter(Boolean))])
+  function addPriorityPlayer(name: string) {
+    if (!name) return
+    setPriorityPlayers([...new Set([...priorityPlayers, name])].slice(0, PRIORITY_SLOTS))
+  }
+  function removePriorityPlayer(name: string) {
+    setPriorityPlayers(priorityPlayers.filter((n) => n !== name))
   }
 
   const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
@@ -546,12 +543,15 @@ export default function TripPlanner() {
         {/* Schedule status — minimal */}
         <div className="mb-4">
           <div className="flex flex-wrap items-center gap-3">
+            {/* Ghost button — schedules auto-load at app start; this is a
+                retry/refresh affordance, not the screen's primary action
+                (that's Generate Trips). */}
             {!allSchedulesLoaded && !anyScheduleLoading && (
               <button
                 onClick={handleLoadAllSchedules}
-                className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/80"
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text hover:bg-gray-800 transition-colors"
               >
-                Load Schedules
+                Load schedules
               </button>
             )}
             {anyScheduleLoading && !allSchedulesLoaded && (
@@ -803,22 +803,39 @@ export default function TripPlanner() {
           )}
         </div>
 
-        {/* Priority players */}
-        <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
+        {/* Priority players — selected names as chips + ONE add picker
+            (2026-07-21 apple-fy: five empty search boxes read as a form). */}
+        <div className="mt-4 rounded-xl bg-gray-900/30 p-3">
           <label className="mb-2 block text-xs font-medium text-text-dim">
-            Priority Players <span className="text-text-dim/50">(optional — guarantees these players appear in your trip results, even if they require a flight)</span>
+            Priority players <span className="text-text-dim/50">(optional — guaranteed to appear in your trip results, even if they require a flight)</span>
           </label>
-          <div className="flex flex-wrap items-center gap-3">
-            {Array.from({ length: PRIORITY_SLOTS }, (_, i) => (
+          <div className="flex flex-wrap items-center gap-2">
+            {priorityPlayers.map((name) => {
+              const p = playerMap.get(name)
+              return (
+                <span key={name} className="flex items-center gap-1.5 rounded-lg bg-gray-800/60 px-2.5 py-1.5 text-sm text-text">
+                  <span className={`h-2 w-2 rounded-full ${TIER_DOT_COLORS[p?.tier ?? 4] ?? 'bg-gray-500'}`} />
+                  {name}
+                  {p && <span className="text-[10px] text-text-dim">{p.level}</span>}
+                  <button
+                    onClick={() => removePriorityPlayer(name)}
+                    className="ml-0.5 text-text-dim hover:text-text text-xs"
+                    title={`Remove ${name}`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              )
+            })}
+            {priorityPlayers.length < PRIORITY_SLOTS && (
               <PlayerSearchPicker
-                key={i}
-                value={priorityPlayers[i] ?? ''}
+                value=""
                 players={eligibleForPriority}
-                excludeNames={priorityPlayers.filter((_, j) => j !== i)}
-                placeholder={`Type to search player ${i + 1}...`}
-                onChange={(name) => handlePriorityChange(i, name)}
+                excludeNames={priorityPlayers}
+                placeholder={priorityPlayers.length === 0 ? 'Add a priority player...' : '+ Add another...'}
+                onChange={addPriorityPlayer}
               />
-            ))}
+            )}
             {priorityPlayers.length > 0 && (
               <button
                 onClick={() => setPriorityPlayers([])}

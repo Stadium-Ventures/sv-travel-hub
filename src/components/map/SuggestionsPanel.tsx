@@ -61,11 +61,12 @@ function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult
   }
 }
 
-const DU_TYPE_LABELS: Record<string, { label: string; color: string; hint: string }> = {
-  'nearby-venues': { label: 'Same-Day Double', color: 'bg-accent-blue/15 text-accent-blue', hint: 'Two games a reasonable drive apart on the same day' },
-  'same-venue-matchup': { label: 'Head-to-Head', color: 'bg-purple-500/15 text-purple-400', hint: 'Clients on opposing teams — one game covers both visits' },
-  'tournament-cluster': { label: 'Tournament', color: 'bg-accent-green/15 text-accent-green', hint: '3+ games at the same complex on the same day' },
-  'stay-over': { label: 'Stay-Over', color: 'bg-accent-orange/15 text-accent-orange', hint: 'Back-to-back days a short drive apart — one hotel covers both' },
+// Plain gray type labels — color is reserved for the drive tier (green/yellow)
+const DU_TYPE_LABELS: Record<string, { label: string; hint: string }> = {
+  'nearby-venues': { label: 'Same-Day Double', hint: 'Two games a reasonable drive apart on the same day' },
+  'same-venue-matchup': { label: 'Head-to-Head', hint: 'Clients on opposing teams — one game covers both visits' },
+  'tournament-cluster': { label: 'Tournament', hint: '3+ games at the same complex on the same day' },
+  'stay-over': { label: 'Stay-Over', hint: 'Back-to-back days a short drive apart — one hotel covers both' },
 }
 
 interface Props {
@@ -106,7 +107,7 @@ export default function SuggestionsPanel(props: Props) {
   ]
 
   return (
-    <div className="rounded-lg bg-surface border border-border px-4 py-3">
+    <div className="rounded-xl bg-surface border border-border/50 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={() => setOpen(!open)}
@@ -120,10 +121,10 @@ export default function SuggestionsPanel(props: Props) {
             <button
               key={t.key}
               onClick={() => { setActiveTab(t.key); setOpen(true); if (t.key !== 'doubleups') props.setSelectedDoubleUp(null) }}
-              className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
                 activeTab === t.key
-                  ? t.key === 'doubleups' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-blue/20 text-accent-blue'
-                  : 'bg-gray-800/50 text-text-dim hover:text-text'
+                  ? 'bg-accent-blue/20 text-accent-blue'
+                  : 'text-text-dim hover:text-text hover:bg-gray-800/50'
               }`}
             >
               {t.label}
@@ -206,8 +207,8 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
         windows.map((w, i) => (
           <div
             key={w.startDate}
-            className={`flex items-start justify-between gap-3 rounded-lg px-3 py-2.5 border transition-colors ${
-              i === 0 ? 'border-accent-blue/30 bg-accent-blue/5' : 'border-border/30 bg-gray-950/30'
+            className={`flex items-start justify-between gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+              i === 0 ? 'bg-accent-blue/10' : 'bg-gray-900/40 hover:bg-gray-900/60'
             }`}
           >
             <div className="min-w-0 flex-1">
@@ -330,8 +331,8 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
           return (
             <div
               key={`${p.centroid.lat},${p.centroid.lng}`}
-              className={`flex items-start justify-between gap-3 rounded-lg px-3 py-2.5 border ${
-                i === 0 ? 'border-accent-blue/30 bg-accent-blue/5' : 'border-border/30 bg-gray-950/30'
+              className={`flex items-start justify-between gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+                i === 0 ? 'bg-accent-blue/10' : 'bg-gray-900/40 hover:bg-gray-900/60'
               }`}
             >
               <div className="min-w-0 flex-1">
@@ -421,7 +422,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
   return (
     <div className="space-y-2">
       {visible.map((du, i) => {
-        const typeInfo = DU_TYPE_LABELS[du.type] ?? { label: du.type, color: 'bg-gray-700 text-text-dim', hint: '' }
+        const typeInfo = DU_TYPE_LABELS[du.type] ?? { label: du.type, hint: '' }
         const isSeries = du.dates.length > 1
         const dateLabel = isSeries
           ? `${formatDate(du.dates[0]!)} – ${formatDate(du.dates[du.dates.length - 1]!)}`
@@ -431,70 +432,63 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
         return (
           <div
             key={`${du.date}-${i}`}
-            className={`rounded-lg px-3 py-2.5 border transition-colors ${
-              selected ? 'border-accent-green/50 bg-accent-green/10' : 'border-border/30 bg-gray-950/30'
+            className={`rounded-xl px-3 py-2.5 transition-colors ${
+              selected ? 'bg-accent-blue/10' : 'bg-gray-900/40 hover:bg-gray-900/60'
             }`}
           >
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold text-text">{dateLabel}</span>
-              {isSeries && (
-                <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-text-dim" title={du.dates.join(', ')}>
-                  {du.dates.length}-game series
-                </span>
-              )}
-              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${typeInfo.color}`} title={typeInfo.hint}>
-                {typeInfo.label}
-              </span>
+            {/* Title: the players */}
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] font-semibold text-text">
+              {du.playerNames.map((name) => {
+                const tier = playerMap.get(name)?.tier ?? 4
+                return (
+                  <span key={name} className="inline-flex items-center gap-1.5">
+                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[tier] ?? 'bg-gray-500'}`} />
+                    {name}
+                  </span>
+                )
+              })}
+            </div>
+            {/* Detail: when · kind · drive · fly */}
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-text-dim">
+              <span className="font-medium">{dateLabel}</span>
+              {isSeries && <span title={du.dates.join(', ')}>· {du.dates.length}-game series</span>}
+              <span title={typeInfo.hint}>· {typeInfo.label}</span>
               {du.driveMinutesBetween > 0 && (
                 <span
-                  className={`text-[10px] font-medium ${du.driveMinutesBetween <= 45 ? 'text-accent-green' : 'text-yellow-400'}`}
+                  className={`font-medium ${du.driveMinutesBetween <= 45 ? 'text-accent-green' : 'text-yellow-400'}`}
                   title={du.driveMinutesBetween <= 45 ? 'Green: within 45 min' : 'Yellow: 46–90 min'}
                 >
-                  {formatDriveTime(du.driveMinutesBetween)} apart
+                  · {formatDriveTime(du.driveMinutesBetween)} apart
                 </span>
               )}
-              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-text-dim" title="Nearest major airport">
-                Fly: {airports.join(' / ')}
-              </span>
-            </div>
-            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-              {du.games.map((g) => (
-                <span key={g.id} className="text-[10px] text-text-dim/70 truncate max-w-full">
+              <span title="Nearest major airport">· fly {airports.join(' / ')}</span>
+            </p>
+            {/* Venues */}
+            <p className="mt-0.5 truncate text-[10px] text-text-dim/60" title={du.games.map((g) => `${g.venue.name} (${g.homeTeam} vs ${g.awayTeam})`).join('  →  ')}>
+              {du.games.map((g, gi) => (
+                <span key={g.id}>
+                  {gi > 0 && <span className="text-text-dim/40"> → </span>}
                   {g.venue.name}
-                  <span className="text-text-dim/40"> · {g.homeTeam} vs {g.awayTeam}</span>
                 </span>
               ))}
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <span className="flex flex-wrap gap-1">
-                {du.playerNames.map((name) => {
-                  const tier = playerMap.get(name)?.tier ?? 4
-                  return (
-                    <span key={name} className="text-[10px] font-medium text-text">
-                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${TIER_DOT_COLORS[tier] ?? 'bg-gray-500'} mr-0.5`} />
-                      {name}
-                    </span>
-                  )
-                })}
-              </span>
-              <span className="ml-auto flex items-center gap-2">
-                <button
-                  onClick={() => setSelectedDoubleUp(selected ? null : i)}
-                  className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                    selected ? 'bg-accent-green/25 text-accent-green' : 'bg-gray-800/60 text-text-dim hover:text-text'
-                  }`}
-                  title="Zoom the map to this pair"
-                >
-                  {selected ? '✓ On map' : 'Show on map'}
-                </button>
-                <button
-                  onClick={() => onPlanDoubleUp(du)}
-                  className="rounded-lg bg-accent-green/15 px-2.5 py-1 text-[11px] font-medium text-accent-green hover:bg-accent-green/25 transition-colors"
-                  title="Set these players as priority and generate trips for these dates"
-                >
-                  Plan trip →
-                </button>
-              </span>
+            </p>
+            <div className="mt-1.5 flex items-center gap-2">
+              <button
+                onClick={() => setSelectedDoubleUp(selected ? null : i)}
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  selected ? 'bg-accent-blue/20 text-accent-blue' : 'text-text-dim hover:text-text hover:bg-gray-800/50'
+                }`}
+                title="Zoom the map to this pair"
+              >
+                {selected ? 'On map' : 'Show on map'}
+              </button>
+              <button
+                onClick={() => onPlanDoubleUp(du)}
+                className="rounded-lg bg-accent-blue/15 px-2.5 py-1 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
+                title="Set these players as priority and generate trips for these dates"
+              >
+                Plan trip →
+              </button>
             </div>
           </div>
         )

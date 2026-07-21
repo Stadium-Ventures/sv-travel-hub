@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import type { PairApproach } from '../../lib/doubleUps'
@@ -59,12 +59,13 @@ interface Props {
 
 // Categories are named for what Kent physically does, not the data shape:
 // Head-to-Head = one seat sees two clients; Same-Day Double = two parks,
-// short drive between; Tournament = camp out at one complex.
-const TYPE_LABELS: Record<string, { label: string; color: string; hint: string }> = {
-  'nearby-venues': { label: 'Same-Day Double', color: 'bg-accent-blue/15 text-accent-blue', hint: 'Two games a reasonable drive apart on the same day — even with overlapping times, double with a game + a meal' },
-  'same-venue-matchup': { label: 'Head-to-Head', color: 'bg-purple-500/15 text-purple-400', hint: 'Clients on opposing teams — one game covers both visits' },
-  'tournament-cluster': { label: 'Tournament', color: 'bg-accent-green/15 text-accent-green', hint: '3+ games at the same complex on the same day' },
-  'stay-over': { label: 'Stay-Over Double', color: 'bg-accent-orange/15 text-accent-orange', hint: 'Games on back-to-back days a short drive apart — one hotel covers both visits' },
+// short drive between; Tournament = camp out at one complex. Plain gray
+// labels (2026-07-21 polish pass) — color is reserved for the drive tier.
+const TYPE_LABELS: Record<string, { label: string; hint: string }> = {
+  'nearby-venues': { label: 'Same-Day Double', hint: 'Two games a reasonable drive apart on the same day — even with overlapping times, double with a game + a meal' },
+  'same-venue-matchup': { label: 'Head-to-Head', hint: 'Clients on opposing teams — one game covers both visits' },
+  'tournament-cluster': { label: 'Tournament', hint: '3+ games at the same complex on the same day' },
+  'stay-over': { label: 'Stay-Over Double', hint: 'Games on back-to-back days a short drive apart — one hotel covers both visits' },
 }
 
 /** Kent's proximity tiers (2026-07-21): green within 45 min, yellow 46–90. */
@@ -103,7 +104,7 @@ export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers,
   if (doubleUps.length === 0) return null
 
   return (
-    <div id="section-double-ups" className="rounded-xl border border-accent-green/30 bg-accent-green/5 p-5">
+    <div id="section-double-ups" className="rounded-xl border border-border/50 bg-surface p-5">
       <div className="mb-3 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-accent-green">
@@ -176,7 +177,7 @@ function DoubleUpCard({
   onPlanTrip?: (du: DoubleUp) => void
 }) {
   const du = doubleUp
-  const typeInfo = TYPE_LABELS[du.type] ?? { label: du.type, color: 'bg-gray-700 text-text-dim', hint: '' }
+  const typeInfo = TYPE_LABELS[du.type] ?? { label: du.type, hint: '' }
 
   // Series (consecutive dates at the same venue) collapse to one card
   const isSeries = du.dates.length > 1
@@ -187,36 +188,32 @@ function DoubleUpCard({
   // Nearest major airport(s) for fly-in planning
   const airportCodes = [...new Set(du.games.map((g) => findNearestAirport(g.venue.coords).code))]
 
+  // Detail-line fragments: date · series · type · drive tier · fly. Only
+  // the drive time carries color (Kent's green ≤45 / yellow 46–90).
   return (
-    <div className="rounded-lg border border-border/30 bg-gray-950/30 px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2 mb-2">
-        <span className="text-xs font-semibold text-text">
-          {dateLabel}
+    <div className="rounded-xl bg-gray-900/40 px-4 py-3 transition-colors hover:bg-gray-900/60">
+      {/* Title: the players — that's what Kent scans for */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm font-semibold text-text">
+          {du.playerNames.map((name) => {
+            const tier = playerMap.get(name)?.tier ?? 4
+            const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+            return (
+              <span
+                key={name}
+                className={`inline-flex items-center gap-1.5 ${onPlayerClick ? 'cursor-pointer hover:text-accent-blue' : ''}`}
+                onClick={onPlayerClick ? () => onPlayerClick(name) : undefined}
+              >
+                <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} />
+                {name}
+              </span>
+            )
+          })}
         </span>
-        {isSeries && (
-          <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-text-dim" title={du.dates.join(', ')}>
-            {du.dates.length}-game series
-          </span>
-        )}
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${typeInfo.color}`} title={typeInfo.hint}>
-          {typeInfo.label}
-        </span>
-        <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-text-dim" title="Nearest major airport">
-          Fly: {airportCodes.join(' / ')}
-        </span>
-        {du.timeFeasible === true && du.type === 'nearby-venues' && (
-          <span className="text-[10px] text-accent-green" title="Enough time between first pitches to watch both games in full">&#10003; Both games in full</span>
-        )}
-        {du.timeFeasible === false && (
-          <span className="text-[10px] text-text-dim" title="Games overlap — split innings between parks, or watch one game and do a meal with the other client">Overlap — split innings or game + meal</span>
-        )}
-        {du.timeFeasible === null && du.type === 'nearby-venues' && (
-          <span className="text-[10px] text-text-dim" title="Game times not confirmed yet — check closer to the date">? Times TBD</span>
-        )}
         {onPlanTrip && (
           <button
             onClick={() => onPlanTrip(du)}
-            className="ml-auto rounded-lg bg-accent-green/15 px-2.5 py-1 text-[11px] font-medium text-accent-green hover:bg-accent-green/25 transition-colors"
+            className="ml-auto shrink-0 rounded-lg bg-accent-blue/15 px-2.5 py-1 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
             title="Set these players as priority and generate trips for these dates"
           >
             Plan trip →
@@ -224,47 +221,41 @@ function DoubleUpCard({
         )}
       </div>
 
-      <div className="flex items-center gap-2">
-        {du.games.map((game, gi) => (
-          <React.Fragment key={game.id}>
-            {gi > 0 && du.driveMinutesBetween > 0 && (
-              <div className="flex flex-col items-center px-1" title={du.driveMinutesBetween <= 45 ? 'Green: within 45 min' : 'Yellow: 46–90 min'}>
-                <span className={`text-[10px] font-medium ${driveTierClass(du.driveMinutesBetween)}`}>{formatDriveTime(du.driveMinutesBetween)}</span>
-                <span className="text-text-dim/40">→</span>
-              </div>
-            )}
-            {gi > 0 && du.driveMinutesBetween === 0 && (
-              <span className="text-text-dim/30 text-xs">·</span>
-            )}
-            <div className="min-w-0 flex-1 rounded-lg bg-surface/50 px-3 py-2">
-              {du.type === 'stay-over' && (
-                <p className="text-[10px] font-semibold text-accent-orange">{formatDate(game.date)}</p>
-              )}
-              <p className="text-[11px] font-medium text-text truncate">{game.venue.name}</p>
-              <p className="text-[10px] text-text-dim/60 truncate">
-                {game.homeTeam} vs {game.awayTeam}
-              </p>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {game.playerNames.filter((n) => du.playerNames.includes(n)).map((name) => {
-                  const p = playerMap.get(name)
-                  const tier = p?.tier ?? 4
-                  const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                  return (
-                    <span
-                      key={name}
-                      className={`inline-flex items-center gap-1 text-[10px] font-medium text-text ${onPlayerClick ? 'cursor-pointer hover:text-accent-blue' : ''}`}
-                      onClick={onPlayerClick ? () => onPlayerClick(name) : undefined}
-                    >
-                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
-                      {name}
-                    </span>
-                  )
-                })}
-              </div>
-            </div>
-          </React.Fragment>
+      {/* Detail line: when · what kind · how far · where to fly */}
+      <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-text-dim">
+        <span className="font-medium text-text-dim">{dateLabel}</span>
+        {isSeries && <span title={du.dates.join(', ')}>· {du.dates.length}-game series</span>}
+        <span title={typeInfo.hint}>· {typeInfo.label}</span>
+        {du.driveMinutesBetween > 0 && (
+          <span
+            className={`font-medium ${driveTierClass(du.driveMinutesBetween)}`}
+            title={du.driveMinutesBetween <= 45 ? 'Green: within 45 min' : 'Yellow: 46–90 min'}
+          >
+            · {formatDriveTime(du.driveMinutesBetween)} apart
+          </span>
+        )}
+        <span title="Nearest major airport">· fly {airportCodes.join(' / ')}</span>
+      </p>
+
+      {/* Venues line */}
+      <p className="mt-0.5 truncate text-[11px] text-text-dim/60" title={du.games.map((g) => `${g.venue.name} (${g.homeTeam} vs ${g.awayTeam})`).join('  →  ')}>
+        {du.games.map((g, gi) => (
+          <span key={g.id}>
+            {gi > 0 && <span className="text-text-dim/40"> → </span>}
+            {du.type === 'stay-over' && <span className="text-text-dim">{formatDate(g.date)}: </span>}
+            {g.venue.name}
+            <span className="text-text-dim/40"> ({g.homeTeam} vs {g.awayTeam})</span>
+          </span>
         ))}
-      </div>
+      </p>
+
+      {/* Timing note — quiet, informational only */}
+      {du.timeFeasible === true && du.type === 'nearby-venues' && (
+        <p className="mt-0.5 text-[10px] text-accent-green/80" title="Enough time between first pitches to watch both games in full">Both games in full</p>
+      )}
+      {du.timeFeasible === false && (
+        <p className="mt-0.5 text-[10px] text-text-dim/60" title="Games overlap — split innings between parks, or watch one game and do a meal with the other client">Overlap — split innings or game + meal</p>
+      )}
     </div>
   )
 }

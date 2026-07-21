@@ -12,3 +12,9 @@
   --color-accent-red: #f87171;
   --color-accent-purple: #a78bfa;
 }
+
+/* Tabular numerals app-wide — times, counts, and dates align instead of
+   wiggling as values change (part of the 2026-07-21 polish pass). */
+body {
+  font-variant-numeric: tabular-nums;
+}

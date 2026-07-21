@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout'
 
@@ -34,6 +34,9 @@ interface DateRangeBarProps {
   onNext30Days: () => void
   /** @deprecated date range is unified with Trip Planner now; retained for API compat */
   onUseTripDates?: () => void
+  /** Right-aligned toolbar slot — MapView injects the Filters popover and
+   *  help button here so the map has ONE toolbar (2026-07-21 apple-fy). */
+  children?: ReactNode
 }
 
 export default function DateRangeBar({
@@ -43,6 +46,7 @@ export default function DateRangeBar({
   setFilterEnd,
   onNext7Days,
   onNext30Days,
+  children,
 }: DateRangeBarProps) {
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const setHomeBase = useTripStore((s) => s.setHomeBase)
@@ -180,7 +184,7 @@ export default function DateRangeBar({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-surface border border-border px-3 py-2">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-surface border border-border/50 px-3 py-2">
       {/* Date range — neither end may start in the past. The end picker is
           also clamped to start so the range stays non-empty. */}
       {(() => {
@@ -357,10 +361,10 @@ export default function DateRangeBar({
         />
       </div>
 
-      {/* Venue count intentionally omitted here — the filter strip below shows
-          it with richer context ("X of Y" + clear-filters), so showing it twice
-          within ~100px was redundant. */}
+      {/* Right-aligned slot: Filters popover + help, injected by MapView so
+          the map has a single toolbar. */}
       <span className="ml-auto flex items-center gap-2 text-[11px] text-text-dim whitespace-nowrap">
+        {children}
         <span className="text-text-dim/50" title="Date range, drive radius, and starting city are shared between Map and Trip Planner. Change in either, both update.">
           synced w/ Trip Planner
         </span>

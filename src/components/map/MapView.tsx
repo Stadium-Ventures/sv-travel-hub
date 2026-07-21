@@ -16,7 +16,7 @@ import { useBestWindows } from './hooks/useBestWindows'
 import type { BestWindowStrategy } from './hooks/useBestWindows'
 import { useDestinationPicks } from './hooks/useDestinationPicks'
 import SuggestionsPanel, { type SuggestTab } from './SuggestionsPanel'
-import MapFilters, { DEFAULT_MAP_FILTERS, applyMapFilters, type MapFilterState } from './MapFilters'
+import MapFilters, { DEFAULT_MAP_FILTERS, applyMapFilters, HeartbeatLegend, type MapFilterState } from './MapFilters'
 import SummerCoverageNotice from './SummerCoverageNotice'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { useSummerStore } from '../../store/summerStore'
@@ -195,16 +195,16 @@ export default function MapView() {
           and a sticky, always-visible map on the right. The map used to live
           ~1,250px down the page (below both recommenders); pinning it keeps
           the namesake feature in view while Kent reads the picks. */}
-      <MapHelp />
-
       {/* Schedule banner */}
       {!hasSchedules && (
-        <div className="rounded-lg bg-surface border border-border px-4 py-3 text-sm text-text-dim">
+        <div className="rounded-xl bg-surface border border-border/50 px-4 py-3 text-sm text-text-dim">
           Load schedules from the <span className="font-medium text-text">Trip Planner</span> tab to see game venues on the map.
         </div>
       )}
 
-      {/* Date range bar */}
+      {/* THE toolbar — dates + origin + radius, with Filters and help
+          tucked into popovers on the right (2026-07-21 apple-fy pass:
+          replaces the old help bar + date bar + full-width filter strip). */}
       <DateRangeBar
         filterStart={filterStart}
         filterEnd={filterEnd}
@@ -213,17 +213,25 @@ export default function MapView() {
         onNext7Days={setNext7Days}
         onNext30Days={setNext30Days}
         onUseTripDates={syncFromTrip}
-      />
+      >
+        {hasSchedules && (
+          <MapFilters
+            state={filterState}
+            setState={setFilterState}
+            markerCount={tierMarkers.length}
+            totalCount={allTierMarkers.length}
+            daysByPlayerKey={daysByPlayerKey}
+          />
+        )}
+        <MapHelp />
+      </DateRangeBar>
 
-      {/* Filter strip — tier / level / search / overdue (acts as legend too) */}
-      {hasSchedules && (
-        <MapFilters
-          state={filterState}
-          setState={setFilterState}
-          markerCount={tierMarkers.length}
-          totalCount={allTierMarkers.length}
-          daysByPlayerKey={daysByPlayerKey}
-        />
+      {/* Heartbeat color key — the only time a legend needs to be visible
+          outside the Filters popover is when the dots aren't tier-colored. */}
+      {filterState.colorBy === 'heartbeat' && (
+        <div className="px-1">
+          <HeartbeatLegend />
+        </div>
       )}
 
       {/* Two-pane: recommendations rail (left) · sticky map (right).
@@ -327,46 +335,40 @@ export default function MapView() {
   )
 }
 
-/** Collapsible help disclosure — replaces the old always-visible welcome
- *  banner + rotating tip line. Click to expand; remembers dismiss state in
- *  localStorage so repeat users don't see it every load. */
+/** Quick-guide popover — a "?" button in the toolbar (2026-07-21 apple-fy:
+ *  replaced the old full-width help bar that greeted every page load). */
 function MapHelp() {
-  // Default collapsed — Kent uses this view weekly and doesn't need the
-  // tutorial open on every load. Expanding is remembered so it can be pinned.
-  const [open, setOpen] = useState(() => {
-    try { return localStorage.getItem('sv-map-help-open') === '1' } catch { return false }
-  })
-  function toggle() {
-    const next = !open
-    setOpen(next)
-    try {
-      if (next) localStorage.setItem('sv-map-help-open', '1')
-      else localStorage.removeItem('sv-map-help-open')
-    } catch {}
-  }
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (!wrapRef.current) return
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    if (open) document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [open])
+
   return (
-    <div className="rounded-lg border border-border bg-surface">
+    <div ref={wrapRef} className="relative">
       <button
-        onClick={toggle}
-        className="flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-900/30 transition-colors"
+        onClick={() => setOpen(!open)}
+        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border text-[11px] font-bold text-text-dim hover:text-accent-blue hover:border-accent-blue/50 transition-colors"
+        title="How to use this map"
       >
-        <span className="flex items-center gap-2 text-xs text-text-dim">
-          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-border text-[10px] font-bold text-accent-blue">?</span>
-          <span className="font-medium text-text">{open ? 'How to use this map' : 'How to use this map'}</span>
-          {!open && <span className="text-text-dim/60 text-[11px]">— click for the quick guide</span>}
-        </span>
-        <span className={`text-text-dim text-xs transition-transform ${open ? 'rotate-90' : ''}`}>&#9654;</span>
+        ?
       </button>
       {open && (
-        <div className="border-t border-border/30 px-5 py-3 text-xs text-text-dim leading-relaxed">
+        <div className="absolute right-0 top-full z-40 mt-1 w-[320px] rounded-xl border border-border bg-surface px-4 py-3 text-xs text-text-dim leading-relaxed shadow-xl">
+          <p className="mb-1.5 font-semibold text-text">How to use this map</p>
           <ol className="space-y-1 list-decimal list-inside">
-            <li><strong className="text-text">Pick a date range</strong> in the bar below (or click <em>Next 7 days</em>).</li>
-            <li><strong className="text-text">Pick where you'll be</strong> via the <em>From</em> dropdown — preset cities or type any city.</li>
+            <li><strong className="text-text">Pick a date range</strong> (or click <em>Next 7 days</em>).</li>
+            <li><strong className="text-text">Pick where you'll be</strong> via the <em>Trip origin</em> dropdown, or drag the star.</li>
             <li>Each dot = a venue with at least one of your players. Click for who, when, and recency.</li>
-            <li>For suggestions, open <em>Best Windows</em> below or jump to the <em>Trip Planner</em>.</li>
+            <li>Open <em>Suggestions</em> for when to go, where to go, and double ups.</li>
           </ol>
           <p className="mt-2 text-[11px] text-text-dim/60">
-            Switch <strong className="text-text">Color by</strong> to <em>Heartbeat</em> to see overdue players (magenta) — uses a different palette than Tier so they don't conflict visually.
+            In Filters, switch <strong className="text-text">Color by</strong> to <em>Heartbeat</em> to see overdue players (magenta).
           </p>
         </div>
       )}
