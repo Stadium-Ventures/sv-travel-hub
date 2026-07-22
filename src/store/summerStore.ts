@@ -67,7 +67,7 @@ function gameToEvent(
     // Reuse 'mlb-api' as the source — CCBL/MLBD schedules genuinely come
     // from MLB Stats API. The id prefix tells us it's a summer game.
     source: 'mlb-api',
-    playerNames,
+    playerNames: [...playerNames],
     confidence: 'high',
     confidenceNote: `${SUMMER_LEAGUES[league].name} (${league})`,
     sourceUrl: `https://www.mlb.com/gameday/${game.gamePk}`,

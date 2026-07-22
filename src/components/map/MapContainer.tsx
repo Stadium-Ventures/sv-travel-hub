@@ -20,6 +20,70 @@ import { heartbeatColorFor, type MapColorMode } from './MapFilters'
 import type { EventMarker } from './hooks/useEventMarkers'
 
 
+// Nearest preset city name for a dragged custom location
+const STARTING_LOCATIONS = [
+  { name: 'Orlando, FL', lat: 28.5383, lng: -81.3792 },
+  { name: 'Denver, CO', lat: 39.7392, lng: -104.9903 },
+  { name: 'Phoenix, AZ', lat: 33.4484, lng: -112.0740 },
+  { name: 'Dallas, TX', lat: 32.7767, lng: -96.7970 },
+  { name: 'Atlanta, GA', lat: 33.7490, lng: -84.3880 },
+  { name: 'Nashville, TN', lat: 36.1627, lng: -86.7816 },
+  { name: 'Charlotte, NC', lat: 35.2271, lng: -80.8431 },
+  { name: 'Miami, FL', lat: 25.7617, lng: -80.1918 },
+  { name: 'Los Angeles, CA', lat: 34.0522, lng: -118.2437 },
+  { name: 'Chicago, IL', lat: 41.8781, lng: -87.6298 },
+  { name: 'New York, NY', lat: 40.7128, lng: -74.0060 },
+  { name: 'Houston, TX', lat: 29.7604, lng: -95.3698 },
+]
+
+function nearestCityLabel(lat: number, lng: number): string {
+  let best = STARTING_LOCATIONS[0]!
+  let bestDist = Infinity
+  for (const loc of STARTING_LOCATIONS) {
+    const d = (loc.lat - lat) ** 2 + (loc.lng - lng) ** 2
+    if (d < bestDist) { bestDist = d; best = loc }
+  }
+  // If within ~50 miles (~0.7 deg) of a preset, use its name
+  if (bestDist < 0.5) return best.name
+  return `Custom (near ${best.name})`
+}
+
+/** Reverse geocode lat/lng → "City, ST" via Nominatim. Returns null on any
+ *  error so the caller can keep the optimistic preset-proximity label. */
+async function reverseGeocodeLabel(lat: number, lng: number): Promise<string | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=10`
+    const res = await fetch(url, { headers: { 'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures)' } })
+    if (!res.ok) return null
+    const data = await res.json() as { address?: { city?: string; town?: string; village?: string; municipality?: string; county?: string; state?: string } }
+    const a = data.address ?? {}
+    const city = a.city ?? a.town ?? a.village ?? a.municipality ?? a.county
+    const state = a.state
+    if (!city) return null
+    // US state names → 2-letter abbreviation for compactness.
+    const ab = US_STATE_ABBR[(state ?? '').toLowerCase()] ?? state ?? ''
+    return ab ? `${city}, ${ab}` : city
+  } catch {
+    return null
+  }
+}
+
+const US_STATE_ABBR: Record<string, string> = {
+  'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
+  'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
+  'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID',
+  'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS',
+  'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+  'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS',
+  'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV',
+  'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+  'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK',
+  'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
+  'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
+  'wisconsin': 'WI', 'wyoming': 'WY', 'district of columbia': 'DC',
+}
+
 interface MapContainerProps {
   tierMarkers: TierMarker[]
   colorBy: MapColorMode
@@ -44,6 +108,8 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   const leafletRef = useRef<typeof import('leaflet') | null>(null)
   const clusterGroupRef = useRef<import('leaflet').LayerGroup | null>(null)
   const eventLayerRef = useRef<import('leaflet').LayerGroup | null>(null)
+  const homeMarkerRef = useRef<import('leaflet').Marker | null>(null)
+  const radiusCircleRef = useRef<import('leaflet').Circle | null>(null)
   const tripHighlightRef = useRef<import('leaflet').LayerGroup | null>(null)
   const doubleUpLayerRef = useRef<import('leaflet').LayerGroup | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -51,6 +117,8 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   const [initStatus, setInitStatus] = useState('Initializing map...')
 
   const homeBase = useTripStore((s) => s.homeBase)
+  const homeBaseName = useTripStore((s) => s.homeBaseName)
+  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const selectedTripIndex = useTripStore((s) => s.selectedTripIndex)
   const tripPlan = useTripStore((s) => s.tripPlan)
   // Heartbeat-driven coloring requires looking up each marker's players'
@@ -164,6 +232,8 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       }
       if (clusterGroupRef.current) clusterGroupRef.current = null
       if (eventLayerRef.current) eventLayerRef.current = null
+      if (homeMarkerRef.current) homeMarkerRef.current = null
+      if (radiusCircleRef.current) radiusCircleRef.current = null
       if (tripHighlightRef.current) tripHighlightRef.current = null
       if (doubleUpLayerRef.current) doubleUpLayerRef.current = null
       setLoaded(false)
@@ -191,9 +261,75 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     })
   }, [loaded])
 
-  // Origin scrapped (Tom 2026-07-22: "assume the user is in the area") —
-  // no star marker, no drive-radius circle. Instead, fit the viewport to
-  // the visible venues ONCE when they first arrive.
+  // Update home base marker + drive radius circle when homeBase changes
+  useEffect(() => {
+    if (!loaded || !mapInstance.current || !leafletRef.current) return
+    const L = leafletRef.current
+    const map = mapInstance.current
+
+    // Remove old
+    if (homeMarkerRef.current) { map.removeLayer(homeMarkerRef.current); homeMarkerRef.current = null }
+    if (radiusCircleRef.current) { map.removeLayer(radiusCircleRef.current); radiusCircleRef.current = null }
+
+    // Home base star marker — draggable
+    const starIcon = L.divIcon({
+      className: '',
+      html: `<div style="font-size:22px;text-shadow:0 0 6px rgba(0,0,0,0.7);line-height:1;color:#fbbf24;cursor:grab" title="Drag to move home base">&#9733;</div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    })
+    homeMarkerRef.current = L.marker([homeBase.lat, homeBase.lng], {
+      icon: starIcon,
+      zIndexOffset: 1000,
+      draggable: true,
+    })
+      .addTo(map)
+      .bindPopup(`<div style="font-family:system-ui;font-size:12px;color:#f1f5f9"><strong>${homeBaseName}</strong><br/>Home Base · Drag to move</div>`)
+
+    // Update store when marker is dragged to a new position. Set an
+    // optimistic label immediately (preset proximity), then upgrade it via
+    // Nominatim reverse geocode so "Custom (near Atlanta, GA)" becomes the
+    // actual nearest city like "Columbus, GA" once the lookup returns.
+    homeMarkerRef.current.on('dragend', () => {
+      const pos = homeMarkerRef.current?.getLatLng()
+      if (!pos) return
+      dragOriginRef.current = true // prevent map re-center
+      const optimistic = nearestCityLabel(pos.lat, pos.lng)
+      useTripStore.getState().setHomeBase({ lat: pos.lat, lng: pos.lng }, optimistic)
+      void reverseGeocodeLabel(pos.lat, pos.lng).then((label) => {
+        if (!label) return
+        const cur = useTripStore.getState()
+        // Only upgrade if user hasn't moved again or set a preset since.
+        const dlat = Math.abs(cur.homeBase.lat - pos.lat)
+        const dlng = Math.abs(cur.homeBase.lng - pos.lng)
+        if (dlat < 0.001 && dlng < 0.001) {
+          cur.setHomeBase({ lat: pos.lat, lng: pos.lng }, label)
+        }
+      })
+    })
+
+    // Drive radius circle
+    const radiusKm = (maxDriveMinutes / 60) * 95 / 1.2
+    const radiusMeters = radiusKm * 1000
+    radiusCircleRef.current = L.circle([homeBase.lat, homeBase.lng], {
+      radius: radiusMeters,
+      color: '#3b82f6',
+      weight: 2,
+      dashArray: '8,6',
+      fillColor: '#3b82f6',
+      fillOpacity: 0.03,
+    }).addTo(map)
+
+    // Center map on new home base (skip if change came from dragging the marker)
+    if (dragOriginRef.current) {
+      dragOriginRef.current = false
+    } else {
+      map.setView([homeBase.lat, homeBase.lng], map.getZoom())
+    }
+  }, [loaded, homeBase, homeBaseName, maxDriveMinutes])
+
+  // First-load fit: frame the roster's venues once (the star effect above
+  // recenters on origin changes after that).
   const didInitialFit = useRef(false)
   useEffect(() => {
     if (!loaded || !mapInstance.current || !leafletRef.current) return
@@ -515,6 +651,9 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     <div className="relative h-full w-full rounded-lg border border-border" style={{ minHeight: '500px' }}>
       <div ref={mapRef} className="absolute inset-0 rounded-lg" />
 
+      {/* Drive-radius chip — adjusts the dashed circle around the star */}
+      <DriveRadiusChip />
+
 
       {(initStatus || initError) && (
         <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-surface/80 z-[1000]">
@@ -525,6 +664,70 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
               <p className="text-sm text-text-dim">{initStatus}</p>
             )}
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Compact chip + popover for the drive radius slider. Sits at top-right of
+ * the map so visual cause-and-effect (slider → dashed circle) happens in
+ * the same place. Click to expand the slider, click outside to close.
+ */
+function DriveRadiusChip() {
+  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
+  const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (!wrapRef.current) return
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    if (open) document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [open])
+
+  const hours = Math.floor(maxDriveMinutes / 60)
+  const mins = maxDriveMinutes % 60
+  const display = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
+
+  return (
+    <div ref={wrapRef} className="absolute right-3 top-3 z-[400]">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 rounded-md border border-border/80 bg-surface/95 backdrop-blur px-2.5 py-1.5 text-[11px] font-medium text-text shadow-md hover:border-accent-blue/50 transition-colors"
+        title="Adjust the dashed drive-radius circle around your starting city"
+      >
+        <span className="inline-block h-1.5 w-3 rounded-full border border-dashed border-accent-blue" />
+        Drive: {display}
+        <span className={`text-text-dim/60 text-[9px] transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border border-border bg-surface p-3 shadow-xl">
+          <label className="block text-[10px] uppercase tracking-wide text-text-dim/60 mb-1.5">
+            Drive radius — {display}
+          </label>
+          <input
+            type="range"
+            min={120}
+            max={480}
+            step={30}
+            value={maxDriveMinutes}
+            onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
+            className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
+          />
+          <div className="mt-1 flex justify-between text-[9px] text-text-dim/50">
+            <span>2h</span>
+            <span>4h</span>
+            <span>6h</span>
+            <span>8h</span>
+          </div>
+          <p className="mt-2 text-[10px] text-text-dim/60 leading-relaxed">
+            Sets the dashed circle around your starting city. Estimates only — actual drive times depend on traffic + route.
+          </p>
         </div>
       )}
     </div>
