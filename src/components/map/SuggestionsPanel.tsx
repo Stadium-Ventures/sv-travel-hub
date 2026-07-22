@@ -290,18 +290,25 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
 /* ────────────────────────── WHERE ────────────────────────── */
 
 function WhereTab({ picks }: { picks: DestinationPick[] }) {
+  // Lit-up selection so it's clear which area the map is showing
+  const [selectedPick, setSelectedPick] = useState<number | null>(null)
   // Origin scrapped (Tom 2026-07-22) — picks are just the best AREAS.
   // "Show on map" fits the viewport to the cluster; "Plan trips" anchors
   // the engine at the area (assume-the-user-is-there) and generates.
   // Engaging an area MOVES THE STAR there (Tom 2026-07-22): the radius
   // circle follows, and "When to go" now answers dates for THIS area.
-  function showArea(p: DestinationPick) {
+  function showArea(p: DestinationPick, i: number) {
+    setSelectedPick(i)
     useTripStore.getState().setHomeBase(p.centroid, p.label)
     if (p.venues.length > 0) {
       dispatchMapEvent('map:fit-points', { points: p.venues.map((v) => v.coords) })
     }
   }
   function planArea(p: DestinationPick) {
+    // Planning THIS area means planning for ITS players — otherwise stale
+    // priority players from a previous plan hijack the results and the
+    // area's own trips get hidden (Tom 2026-07-22, the Chicago click).
+    useTripStore.getState().setPriorityPlayers(p.players.slice(0, 5).map((pl) => pl.name))
     useTripStore.getState().setHomeBase(p.centroid, p.label)
     dispatchMapEvent('app:switch-tab', { tab: 'trips' })
     window.scrollTo({ top: 0 })
@@ -319,9 +326,11 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
           return (
             <div
               key={`${p.centroid.lat},${p.centroid.lng}`}
-              onClick={() => showArea(p)}
-              className={`flex cursor-pointer items-start justify-between gap-3 rounded-xl px-3 py-2.5 transition-colors ${
-                i === 0 ? 'bg-accent-blue/10' : 'bg-gray-900/40 hover:bg-gray-900/60'
+              onClick={() => showArea(p, i)}
+              className={`flex cursor-pointer items-start justify-between gap-3 rounded-xl px-3 py-2.5 transition-all ${
+                selectedPick === i
+                  ? 'bg-accent-blue/15 ring-1 ring-accent-blue/50'
+                  : i === 0 ? 'bg-accent-blue/10 hover:bg-accent-blue/15' : 'bg-gray-900/40 hover:bg-gray-900/60'
               }`}
               title="Move the star here and show the area on the map"
             >
@@ -376,7 +385,7 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
                   Plan trips →
                 </button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); showArea(p) }}
+                  onClick={(e) => { e.stopPropagation(); showArea(p, i) }}
                   className="text-[10px] text-text-dim hover:text-accent-blue transition-colors"
                   title="Zoom the map to this area's venues"
                 >
