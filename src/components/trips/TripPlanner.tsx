@@ -266,8 +266,6 @@ export default function TripPlanner() {
   const progressDetail = useTripStore((s) => s.progressDetail)
   const setDateRange = useTripStore((s) => s.setDateRange)
   const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
-  const maxFlightHours = useTripStore((s) => s.maxFlightHours)
-  const setMaxFlightHours = useTripStore((s) => s.setMaxFlightHours)
   const useHeartbeatBoost = useTripStore((s) => s.useHeartbeatBoost)
   const setUseHeartbeatBoost = useTripStore((s) => s.setUseHeartbeatBoost)
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
@@ -684,7 +682,8 @@ export default function TripPlanner() {
           </span>
         </div>
 
-        {/* Trip options — the drive/flight/length caps. Tucked behind a
+        {/* Trip options — drive + length caps (drive-based app; flights
+            are the user's own business). Tucked behind a
             disclosure so results stay close to the Generate button. */}
         <div className="mt-3">
           <button
@@ -712,28 +711,7 @@ export default function TripPlanner() {
                   className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
                 />
                 <p className="mt-0.5 text-[11px] text-text-dim/50" title="Drive times are rough estimates — actual times depend on traffic and route">
-                  {homeBaseName === 'Orlando, FL'
-                    ? (maxDriveMinutes <= 150 ? 'Covers central FL' : maxDriveMinutes <= 210 ? 'Reaches Tampa, Jacksonville, Port St. Lucie' : maxDriveMinutes <= 270 ? 'Reaches Tallahassee, South FL' : maxDriveMinutes <= 360 ? 'Reaches most of FL + southern GA' : 'Reaches FL, GA, and into the Carolinas')
-                    : `~${Math.round(maxDriveMinutes / 60)}h radius from ${homeBaseName}`}
-                  {' · estimates only'}
-                </p>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-text-dim">
-                  Max Flight: {maxFlightHours}h
-                </label>
-                <input
-                  type="range"
-                  min={1}
-                  max={8}
-                  step={0.5}
-                  value={maxFlightHours}
-                  onChange={(e) => setMaxFlightHours(parseFloat(e.target.value))}
-                  className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
-                />
-                <p className="mt-0.5 text-[11px] text-text-dim/50" title="Pure flight (air) time only — does not include airport / rental car overhead. Add ~3h for door-to-door.">
-                  {maxFlightHours <= 1.5 ? 'Short hops only (NY→BOS, ATL→CLT)' : maxFlightHours <= 2.5 ? 'Reaches NE corridor / Midwest' : maxFlightHours <= 4 ? 'Most domestic (coast-to-coast tight)' : maxFlightHours <= 5.5 ? 'Coast-to-coast comfortable' : 'All domestic + Hawaii'}
-                  {' · pure flight, not door-to-door'}
+                  How far you'll drive within the trip's area · estimates only
                 </p>
               </div>
               <div>
@@ -777,7 +755,7 @@ export default function TripPlanner() {
             (2026-07-21 apple-fy: five empty search boxes read as a form). */}
         <div className="mt-4 rounded-xl bg-gray-900/30 p-3">
           <label className="mb-2 block text-xs font-medium text-text-dim">
-            Priority players <span className="text-text-dim/50">(optional — guaranteed to appear in your trip results, even if they require a flight)</span>
+            Priority players <span className="text-text-dim/50">(optional — guaranteed to appear in your trip results)</span>
           </label>
           <div className="flex flex-wrap items-center gap-2">
             {priorityPlayers.map((name) => {
@@ -925,7 +903,7 @@ export default function TripPlanner() {
             <div className="rounded-xl border border-border/50 bg-surface/50 px-5 py-6 text-center space-y-2">
               <p className="text-sm font-medium text-text">No trip options found for this date range.</p>
               <p className="text-xs text-text-dim">
-                Try extending your end date, increasing the drive or flight time sliders, or checking that schedules are loaded for your players.
+                Try extending your end date, increasing the max drive, or checking that schedules are loaded for your players.
               </p>
             </div>
           )}
@@ -1047,7 +1025,7 @@ export default function TripPlanner() {
                 {prioritySet.size > 0 && filtered.length > 0 && relevantToFilters.length === 0 && (
                   <p className="py-4 text-center text-sm text-accent-orange">
                     None of the generated trips include your priority player{prioritySet.size !== 1 ? 's' : ''}.
-                    {' '}Try widening the date range, raising the drive/flight caps, or removing a priority filter.
+                    {' '}Try widening the date range, raising the max drive, or removing a priority filter.
                   </p>
                 )}
                 {hasMore && (
@@ -1194,10 +1172,10 @@ export default function TripPlanner() {
                 {beyondFlight.length > 0 && (
                   <div id="section-beyond-flight" className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-5">
                     <h3 className="mb-2 text-sm font-semibold text-accent-orange">
-                      Beyond Max Flight ({beyondFlight.length})
+                      Too far from this trip's area ({beyondFlight.length})
                     </h3>
                     <p className="mb-3 text-xs text-text-dim">
-                      These players have games but they're beyond the {maxFlightHours}h max flight setting. Increase the Max Flight slider to include them.
+                      These players have games, but nowhere near this trip's area. Plan a separate trip around them (set them as priority players and regenerate).
                     </p>
                     <div className="space-y-1.5">
                       {beyondFlight.map((entry) => {
@@ -1860,7 +1838,7 @@ function NotCoveredExplainer({
           {beyondFlight.length > 0 && (
             <div>
               <p className="text-[11px] font-medium text-accent-orange mb-1">Too far to reach ({beyondFlight.length})</p>
-              <p className="text-[10px] text-text-dim/60 mb-1.5">These players are beyond your max flight time setting. Increase the flight slider to include them.</p>
+              <p className="text-[10px] text-text-dim/60 mb-1.5">These players' games are nowhere near this trip's area — plan a separate trip around them.</p>
               <div className="flex flex-wrap gap-1">
                 {beyondFlight.map((p) => (
                   <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
@@ -2033,7 +2011,7 @@ function WelcomeHint() {
       {open && (
         <div className="border-t border-border/30 px-5 py-3 text-xs text-text-dim leading-relaxed">
           <ol className="space-y-1 list-decimal list-inside">
-            <li>Pick your <span className="text-text">date range</span> and adjust drive/flight sliders if needed.</li>
+            <li>Pick your <span className="text-text">date range</span> and adjust the max drive if needed.</li>
             <li>Hit <span className="font-medium text-accent-blue">Generate Trips</span> to build trip options.</li>
             <li>Review your trips — expand any card for the full day-by-day itinerary.</li>
           </ol>
