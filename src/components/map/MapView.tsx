@@ -214,15 +214,18 @@ export default function MapView() {
               <button
                 onClick={() => {
                   void (async () => {
+                    // Refresh the roster FIRST — a stale/garbled cached roster
+                    // makes every downstream step fail quietly ("No recognized
+                    // NCAA schools", zero assignments). Tom's personal Chrome,
+                    // 2026-07-22.
+                    await useRosterStore.getState().fetchRoster()
                     const sched = useScheduleStore.getState()
-                    if (Object.keys(sched.playerTeamAssignments).length === 0) {
-                      await sched.autoAssignPlayers()
-                    }
+                    await sched.autoAssignPlayers()
                     if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length > 0) {
                       const y = new Date().getFullYear()
                       sched.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
                     }
-                    const roster = useRosterStore.getState().players
+                    const roster = useRosterStore.getState().players // fresh — fetched above
                     const ncaaOrgs = roster.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))
                     if (ncaaOrgs.length > 0) sched.fetchNcaaSchedules(ncaaOrgs)
                     const hsOrgs = roster.filter((p) => p.level === 'HS' && p.state).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
