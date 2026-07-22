@@ -12,6 +12,15 @@ export function formatDriveTime(minutes: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`
 }
 
+/** Game start time as Eastern, e.g. "6:40 PM ET". Empty string when the
+ *  time isn't a real timestamp (synthetic noon placeholders return ''). */
+export function formatGameTime(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }) + ' ET'
+}
+
 export function formatTimeAgo(ts: number): string {
   const diff = Date.now() - ts
   const mins = Math.floor(diff / 60000)

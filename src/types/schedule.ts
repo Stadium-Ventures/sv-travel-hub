@@ -113,6 +113,10 @@ export interface DoubleUp {
   /** All dates when this same double-up repeats back-to-back (a series).
    *  Length 1 for one-off opportunities; date === dates[0]. */
   dates: string[]
+  /** Per-date detail for the expandable "Dates & times" view — each date in
+   *  the series with THAT date's games (start times differ night to night)
+   *  and its own feasibility verdict. */
+  occurrences?: Array<{ date: string; games: GameEvent[]; timeFeasible: boolean | null }>
   games: GameEvent[]
   type: DoubleUpType
   driveMinutesBetween: number  // 0 for same-venue

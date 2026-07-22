@@ -276,14 +276,6 @@ export default function MapView() {
               setWindowDays={setWindowDays}
               strategy={bestWindowStrategy}
               setStrategy={setBestWindowStrategy}
-              onApplyWindow={(w) => {
-                // Explore first (Tom 2026-07-21): narrow the map's dates to
-                // this window and STAY — the dots update to show what's
-                // playable. Planning is the separate "Plan trips" link.
-                setFilterStart(w.startDate)
-                setFilterEnd(w.endDate)
-              }}
-              currentRange={{ start: filterStart, end: filterEnd }}
               onPlanWindow={(w) => {
                 setFilterStart(w.startDate)
                 setFilterEnd(w.endDate)

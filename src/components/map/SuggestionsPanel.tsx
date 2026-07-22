@@ -7,6 +7,7 @@ import { useTripStore } from '../../store/tripStore'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 import { formatDate, formatDriveTime } from '../../lib/formatters'
 import { findNearestAirport } from '../../data/majorAirports'
+import { DatesAndTimes } from '../trips/DoubleUpSection'
 
 // One panel, three questions: WHEN should I travel, WHERE should I go,
 // and WHO can I double up on. Replaces the old stacked Best Windows +
@@ -76,13 +77,8 @@ interface Props {
   setWindowDays: (n: number) => void
   strategy: BestWindowStrategy
   setStrategy: (s: BestWindowStrategy) => void
-  /** Set the map's date range to this window and stay on the map. */
-  onApplyWindow: (w: WindowResult) => void
-  /** Old chained behavior: set dates, jump to Trip Planner, generate. */
+  /** Set the window's dates, jump to Trip Planner, and generate. */
   onPlanWindow: (w: WindowResult) => void
-  /** The map's current date filter — used to hide "Use dates" when a
-   *  window already IS the selected range (the button would be a no-op). */
-  currentRange: { start: string; end: string }
   // Where
   picks: DestinationPick[]
   // Double ups
@@ -151,7 +147,7 @@ export default function SuggestionsPanel(props: Props) {
 
 /* ────────────────────────── WHEN ────────────────────────── */
 
-function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onApplyWindow, onPlanWindow, currentRange }: Props) {
+function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onPlanWindow }: Props) {
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const topPick = windows[0]
   const currentStrategy = STRATEGY_OPTIONS.find((o) => o.value === strategy) ?? STRATEGY_OPTIONS[0]!
@@ -273,26 +269,15 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
                 )}
               </div>
             </div>
-            <div className="flex shrink-0 flex-col items-end gap-1">
-              {w.startDate === currentRange.start && w.endDate === currentRange.end ? (
-                <span className="rounded-lg px-3 py-1.5 text-[11px] text-text-dim" title="The map is already showing exactly this date range">Current dates</span>
-              ) : (
-                <button
-                  onClick={() => onApplyWindow(w)}
-                  className="rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
-                  title="Narrow the map's date range to this window — the dots update to show exactly what's playable then, no trip generated yet"
-                >
-                  Use dates
-                </button>
-              )}
-              <button
-                onClick={() => onPlanWindow(w)}
-                className="text-[10px] text-text-dim hover:text-accent-blue transition-colors"
-                title="Set these dates and generate trips in the Trip Planner"
-              >
-                Plan trips →
-              </button>
-            </div>
+            {/* One action — the card already SAYS its dates, so a "narrow the
+                map to these dates" button was a no-op in practice (Tom). */}
+            <button
+              onClick={() => onPlanWindow(w)}
+              className="shrink-0 rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
+              title="Set these dates and generate trips in the Trip Planner"
+            >
+              Plan trips →
+            </button>
           </div>
         ))
       )}
@@ -492,6 +477,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
                 )
               })}
             </div>
+            <DatesAndTimes du={du} compact />
             <div className="mt-1.5 flex items-center gap-2">
               <button
                 onClick={() => setSelectedDoubleUp(selected ? null : i)}

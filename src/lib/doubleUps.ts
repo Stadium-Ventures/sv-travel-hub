@@ -318,13 +318,17 @@ function collapseSeries(doubleUps: DoubleUp[]): DoubleUp[] {
     let run: DoubleUp[] = []
     const flush = () => {
       if (run.length === 0) return
+      // Per-date detail survives collapsing so the UI can show each night's
+      // start times and feasibility ("which night of the series is best?")
+      const occurrences = run.map((r) => ({ date: r.date, games: r.games, timeFeasible: r.timeFeasible }))
       if (run.length === 1) {
-        out.push(run[0]!)
+        out.push({ ...run[0]!, occurrences })
       } else {
         const first = run[0]!
         out.push({
           ...first,
           dates: run.map((r) => r.date),
+          occurrences,
           combinedValue: Math.max(...run.map((r) => r.combinedValue)),
           timeFeasible: run.some((r) => r.timeFeasible === true)
             ? true

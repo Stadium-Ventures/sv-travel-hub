@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import type { PairApproach } from '../../lib/doubleUps'
-import { formatDate, formatDriveTime, TIER_DOT_COLORS } from '../../lib/formatters'
+import { formatDate, formatDriveTime, formatGameTime, TIER_DOT_COLORS } from '../../lib/formatters'
 import { findNearestAirport } from '../../data/majorAirports'
 
 /** "Does X double up with Y?" verdict for a pair of priority players —
@@ -282,6 +282,48 @@ function DoubleUpCard({
       )}
       {du.timeFeasible === false && (
         <p className="mt-0.5 text-[10px] text-text-dim/60" title="Games overlap — split innings between parks, or watch one game and do a meal with the other client">Overlap — split innings or game + meal</p>
+      )}
+
+      <DatesAndTimes du={du} />
+    </div>
+  )
+}
+
+/** Expandable per-date detail — which night of the series is best. Shows
+ *  each date's start times per venue and its own feasibility verdict. */
+export function DatesAndTimes({ du, compact = false }: { du: DoubleUp; compact?: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+  const occurrences = du.occurrences ?? []
+  if (occurrences.length === 0) return null
+
+  return (
+    <div className={compact ? 'mt-1' : 'mt-1.5'}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="text-[11px] font-medium text-accent-blue/80 hover:text-accent-blue transition-colors"
+      >
+        {expanded ? '▾' : '▸'} Dates & times
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-1 rounded-lg bg-gray-950/50 px-3 py-2">
+          {occurrences.map((occ) => (
+            <p key={occ.date} className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-text-dim">
+              <span className="w-24 shrink-0 font-medium text-text">{formatDate(occ.date)}</span>
+              {occ.games.map((g, gi) => {
+                const t = g.source === 'mlb-api' ? formatGameTime(g.time) : ''
+                return (
+                  <span key={g.id} className="whitespace-nowrap">
+                    {gi > 0 && <span className="text-text-dim/40">→ </span>}
+                    {g.venue.name}
+                    <span className="text-text-dim/60">{t ? ` ${t}` : ' time TBD'}</span>
+                  </span>
+                )
+              })}
+              {occ.timeFeasible === true && <span className="text-accent-green/80">✓ both in full</span>}
+              {occ.timeFeasible === false && <span className="text-text-dim/50">overlap</span>}
+            </p>
+          ))}
+        </div>
       )}
     </div>
   )
