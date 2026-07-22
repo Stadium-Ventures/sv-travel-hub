@@ -65,17 +65,10 @@ export default function MapView() {
     }
     return m
   }, [heartbeatPlayers])
-  const homeBaseForFilter = useTripStore((s) => s.homeBase)
-  const maxDriveForFilter = useTripStore((s) => s.maxDriveMinutes)
-  const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey, {
-    homeBase: homeBaseForFilter,
-    maxDriveMinutes: maxDriveForFilter,
-  })
+  const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey)
 
   // Best window recommender (uses filtered markers — Kent's filters should
   // drive the recommendations too)
-  const homeBase = useTripStore((s) => s.homeBase)
-  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const [windowDays, setWindowDays] = useState(3)
   const [bestWindowStrategy, setBestWindowStrategy] = useState<BestWindowStrategy>('impact')
 
@@ -90,11 +83,11 @@ export default function MapView() {
     return findDoubleUps(all, players, filterStart, filterEnd)
   }, [proGames, ncaaGames, hsGames, summerGames, players, filterStart, filterEnd])
 
-  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, doubleUps)
+  const bestWindows = useBestWindows(tierMarkers, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, doubleUps)
 
   // Destination picks — scans ALL tier markers (not drive-filtered) because
   // the whole point of "Where to go?" is to look beyond the current radius.
-  const destinationPicks = useDestinationPicks(allTierMarkers, homeBase, 180, 360, 5)
+  const destinationPicks = useDestinationPicks(allTierMarkers, 180, 5)
   const playerMap = useMemo(() => {
     const m = new Map<string, RosterPlayer>()
     for (const p of players) m.set(p.playerName, p)
@@ -110,6 +103,9 @@ export default function MapView() {
     const last = du.dates[du.dates.length - 1] ?? du.date
     const start = first > today ? first : today
     useTripStore.getState().setDateRange(start, last >= start ? last : start)
+    // Anchor the engine at the opportunity's area (origin scrapped 2026-07-22)
+    const anchor = du.games[0]!
+    useTripStore.getState().setHomeBase(anchor.venue.coords, anchor.venue.name)
     dispatchMapEvent('app:switch-tab', { tab: 'trips' })
     window.scrollTo({ top: 0 })
     setTimeout(() => {
@@ -120,6 +116,7 @@ export default function MapView() {
   // Are any schedules loaded?
   const hasSchedules = proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0
   const anyScheduleLoading = useScheduleStore((s) => s.schedulesLoading || s.ncaaLoading || s.hsLoading || s.autoAssignLoading)
+  const schedulesProgress = useScheduleStore((s) => s.schedulesProgress)
 
   // Load venues once
   const venuesLoaded = useRef(false)
@@ -197,10 +194,19 @@ export default function MapView() {
           and a sticky, always-visible map on the right. The map used to live
           ~1,250px down the page (below both recommenders); pinning it keeps
           the namesake feature in view while Kent reads the picks. */}
-      {/* Schedule banner */}
+      {/* Schedule banner — honest about the auto-load in progress. The old
+          "Load schedules from the Trip Planner tab" text made a working
+          background fetch look like a required manual step (Tom 2026-07-22). */}
       {!hasSchedules && (
         <div className="rounded-xl bg-surface border border-border/50 px-4 py-3 text-sm text-text-dim">
-          Load schedules from the <span className="font-medium text-text">Trip Planner</span> tab to see game venues on the map.
+          {anyScheduleLoading ? (
+            <span className="flex items-center gap-2">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-accent-blue border-t-transparent" />
+              Loading game data{schedulesProgress ? ` — Pro schedules ${schedulesProgress.completed}/${schedulesProgress.total} teams` : ''}... the first load takes a minute or two.
+            </span>
+          ) : (
+            <>Game data hasn't loaded yet. It loads automatically — if this persists, retry from the <span className="font-medium text-text">Trip Planner</span> tab.</>
+          )}
         </div>
       )}
 

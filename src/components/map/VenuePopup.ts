@@ -21,10 +21,27 @@ function heartbeatBadgeColor(days: number | null): string {
 export function buildVenuePopupHtml(marker: TierMarker, enrich?: PopupEnrichment): string {
   const sorted = [...marker.players].sort((a, b) => a.tier - b.tier)
 
+  const formatDate = (d: string) => {
+    const date = new Date(d + 'T12:00:00Z')
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    return `${months[date.getUTCMonth()]} ${date.getUTCDate()}`
+  }
+
   let html = `<div style="font-family:system-ui,sans-serif;min-width:180px;max-width:320px">`
 
   // Venue name
-  html += `<div style="font-weight:700;font-size:13px;margin-bottom:6px;color:#f1f5f9">${marker.venueName}</div>`
+  html += `<div style="font-weight:700;font-size:13px;color:#f1f5f9">${marker.venueName}</div>`
+
+  // WHEN, right under the name — the question a scout asks first
+  // (Tom 2026-07-22: dates were buried at the bottom)
+  if (marker.gameDates.length > 0) {
+    const first = formatDate(marker.gameDates[0]!)
+    const last = formatDate(marker.gameDates[marker.gameDates.length - 1]!)
+    const range = marker.gameDates.length === 1 ? first : `${first} &ndash; ${last}`
+    html += `<div style="font-size:11px;color:#94a3b8;margin-bottom:6px">${marker.gameDates.length} game${marker.gameDates.length === 1 ? '' : 's'} &middot; ${range}</div>`
+  } else {
+    html += `<div style="margin-bottom:6px"></div>`
+  }
 
   // Players sorted by tier
   for (const p of sorted) {
@@ -56,20 +73,14 @@ export function buildVenuePopupHtml(marker: TierMarker, enrich?: PopupEnrichment
 
   // Action row — plan a trip around these players
   html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(148,163,184,0.15)">`
-  html += `<button data-action="plan-trip" data-players="${sorted.map(p => p.name).join('||')}" `
+  html += `<button data-action="plan-trip" data-players="${sorted.map(p => p.name).join('||')}" data-lat="${marker.coords.lat}" data-lng="${marker.coords.lng}" data-venue="${marker.venueName}" `
   html += `style="width:100%;background:#3b82f6;color:white;border:none;border-radius:4px;padding:5px 8px;font-size:11px;font-weight:600;cursor:pointer">`
   html += `Plan trip with ${sorted.length === 1 ? 'this player' : `these ${sorted.length} players`} &rarr;`
   html += `</button>`
   html += `</div>`
 
-  // Game dates in window — expandable
+  // Full game-date list — expandable
   if (marker.gameDates.length > 0) {
-    const formatDate = (d: string) => {
-      const date = new Date(d + 'T12:00:00Z')
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-      return `${months[date.getUTCMonth()]} ${date.getUTCDate()}`
-    }
-
     const visibleCount = 5
     const visible = marker.gameDates.slice(0, visibleCount).map(formatDate)
     const hidden = marker.gameDates.slice(visibleCount).map(formatDate)

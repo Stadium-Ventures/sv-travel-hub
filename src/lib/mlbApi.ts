@@ -232,7 +232,7 @@ export async function fetchAllSchedules(
 ): Promise<ScheduleFetchResult> {
   const schedules = new Map<number, MLBGameRaw[]>()
   const failedTeamIds: number[] = []
-  const concurrency = 2
+  const concurrency = 5
   let completed = 0
 
   for (let i = 0; i < teams.length; i += concurrency) {

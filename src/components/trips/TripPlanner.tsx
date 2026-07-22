@@ -3,7 +3,6 @@ import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { useSummerStore } from '../../store/summerStore'
-import CityPicker from '../ui/CityPicker'
 import TripCard from './TripCard'
 import CompareStarredTrips from './CompareStarredTrips'
 import PlayerCoverageCard from './PlayerCoverageCard'
@@ -30,21 +29,6 @@ function flightHoursLabel(estimatedTravelHours: number): string {
   const h = Math.max(0.5, Math.round((estimatedTravelHours - 3) * 10) / 10)
   return h % 1 === 0 ? String(h) : h.toFixed(1)
 }
-
-const STARTING_LOCATIONS = [
-  { name: 'Orlando, FL', coords: { lat: 28.5383, lng: -81.3792 } },
-  { name: 'Denver, CO', coords: { lat: 39.7392, lng: -104.9903 } },
-  { name: 'Phoenix, AZ', coords: { lat: 33.4484, lng: -112.0740 } },
-  { name: 'Dallas, TX', coords: { lat: 32.7767, lng: -96.7970 } },
-  { name: 'Atlanta, GA', coords: { lat: 33.7490, lng: -84.3880 } },
-  { name: 'Nashville, TN', coords: { lat: 36.1627, lng: -86.7816 } },
-  { name: 'Charlotte, NC', coords: { lat: 35.2271, lng: -80.8431 } },
-  { name: 'Miami, FL', coords: { lat: 25.7617, lng: -80.1918 } },
-  { name: 'Los Angeles, CA', coords: { lat: 34.0522, lng: -118.2437 } },
-  { name: 'Chicago, IL', coords: { lat: 41.8781, lng: -87.6298 } },
-  { name: 'New York, NY', coords: { lat: 40.7128, lng: -74.0060 } },
-  { name: 'Houston, TX', coords: { lat: 29.7604, lng: -95.3698 } },
-] as const
 
 const LEVEL_ORDER: Record<string, number> = { Pro: 0, NCAA: 1, HS: 2 }
 const LEVEL_LABELS: Record<string, string> = { Pro: 'Pro', NCAA: 'College', HS: 'High School' }
@@ -294,7 +278,6 @@ export default function TripPlanner() {
   const setUseHeartbeatBoost = useTripStore((s) => s.setUseHeartbeatBoost)
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
-  const setHomeBase = useTripStore((s) => s.setHomeBase)
   const maxNights = useTripStore((s) => s.maxNights)
   const setMaxNights = useTripStore((s) => s.setMaxNights)
   const generateTrips = useTripStore((s) => s.generateTrips)
@@ -330,7 +313,7 @@ export default function TripPlanner() {
   const [sharedControlsOpen, setSharedControlsOpen] = useState(false)
   const [sortBy, setSortBy] = useState<'score' | 'date'>('score')
   const [tripFilter, setTripFilter] = useState<'all' | 'drive' | 'fly' | 'multi' | 'anchor' | 'starred'>('all')
-  const [tripLengthFilter, setTripLengthFilter] = useState<'all' | '1' | '2' | '3'>('all')
+  const [tripLengthFilter] = useState<'all' | '1' | '2' | '3'>('all') // length chips removed 2026-07-22 (simplify)
   const [showAllTrips, setShowAllTrips] = useState(false)
   // tierFilter removed — was adding clutter to the results toolbar
   const [anchorPlayerNames, setAnchorPlayerNames] = useState<string[]>([])
@@ -657,16 +640,6 @@ export default function TripPlanner() {
                 {getDayName(endDate)}
               </span>
             </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-text-dim">Starting From</label>
-            <CityPicker
-              value={homeBaseName}
-              onChange={(coords, name) => setHomeBase(coords, name)}
-              presets={STARTING_LOCATIONS.map((l) => ({ name: l.name, coords: { lat: l.coords.lat, lng: l.coords.lng } }))}
-              buttonClass="min-w-[160px] py-1.5 text-sm"
-              title="Where you'll be traveling from. Type any city or pick from common ones."
-            />
           </div>
           {startDate > endDate && (
             <p className="self-center text-xs text-accent-red">End date is before start date</p>
@@ -1201,46 +1174,29 @@ export default function TripPlanner() {
                     {label}
                   </button>
                 ))}
+                {/* One optional filter, not a filter wall (Tom 2026-07-22:
+                    "simplify simplify simplify") */}
                 <span className="mx-1 text-text-dim/20">|</span>
-                <span className="text-[11px] text-text-dim">Show:</span>
-                {([
-                  { key: 'all', label: 'All', tip: 'Show all trip options — drives and flights.' },
-                  { key: 'drive', label: 'Drives', tip: `Only show trips you can drive to from ${homeBaseName}.` },
-                  { key: 'fly', label: 'Flights', tip: 'Only show trips that require a flight.' },
-                  { key: 'multi', label: '👥 2+ Players', tip: 'Only show trips where you can see 2 or more players.' },
-                  ...(anchorPlayerNames.length > 0 ? [{ key: 'anchor' as const, label: 'Near destination', tip: 'Only show trips near your selected destination.' }] : []),
-                  { key: 'starred', label: '★ Starred', tip: 'Show only trips you\'ve saved as favorites.' },
-                ] as Array<{ key: typeof tripFilter; label: string; tip: string }>).map(({ key, label, tip }) => (
+                <button
+                  onClick={() => setTripFilter(tripFilter === 'starred' ? 'all' : 'starred')}
+                  title="Show only trips you've saved as favorites"
+                  className={`rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                    tripFilter === 'starred' ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
+                  }`}
+                >
+                  ★ Starred
+                </button>
+                {anchorPlayerNames.length > 0 && (
                   <button
-                    key={key}
-                    onClick={() => setTripFilter(key)}
-                    title={tip}
+                    onClick={() => setTripFilter(tripFilter === 'anchor' ? 'all' : 'anchor')}
+                    title="Only show trips near your selected destination"
                     className={`rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${
-                      tripFilter === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
+                      tripFilter === 'anchor' ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
                     }`}
                   >
-                    {label}
+                    Near destination
                   </button>
-                ))}
-                <span className="mx-1 text-text-dim/20">|</span>
-                <span className="text-[11px] text-text-dim">Days:</span>
-                {([
-                  { key: 'all', label: 'Any', tip: 'Show trips of any length.' },
-                  { key: '1', label: '1-day', tip: 'Only show day trips — no overnight stay needed.' },
-                  { key: '2', label: '2-day', tip: 'Only show 2-day trips — one overnight stay.' },
-                  { key: '3', label: '3-day', tip: 'Only show 3-day trips — the maximum trip length.' },
-                ] as const).map(({ key, label, tip }) => (
-                  <button
-                    key={key}
-                    onClick={() => setTripLengthFilter(key)}
-                    title={tip}
-                    className={`rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${
-                      tripLengthFilter === key ? 'bg-accent-blue/20 text-accent-blue' : 'bg-gray-800/50 text-text-dim hover:text-text'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
+                )}
               </div>
 
               {/* Heading copy reflects "fewer + relevant" — when priority

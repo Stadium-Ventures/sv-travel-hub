@@ -121,7 +121,25 @@ export const useTripStore = create<TripState>()(
 
   generateTrips: async () => {
     if (get().computing) return
-    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers, useHeartbeatBoost, homeBase, homeBaseName, maxNights } = get()
+    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers, useHeartbeatBoost, maxNights } = get()
+    let { homeBase, homeBaseName } = get()
+
+    // Origin scrapped (Tom 2026-07-22): with priority players set, anchor
+    // the engine at the FIRST priority player's earliest in-range game —
+    // trips are built around where the games are, and the user handles
+    // getting to the area themselves.
+    if (priorityPlayers.length > 0) {
+      const ss = useScheduleStore.getState()
+      const pool = [...ss.proGames, ...ss.ncaaGames, ...ss.hsGames]
+      const anchorGame = pool
+        .filter((g) => g.date >= startDate && g.date <= endDate && g.playerNames.includes(priorityPlayers[0]!))
+        .sort((a, b) => a.date.localeCompare(b.date))[0]
+      if (anchorGame) {
+        homeBase = anchorGame.venue.coords
+        homeBaseName = anchorGame.venue.name
+        set({ homeBase, homeBaseName })
+      }
+    }
     const players = useRosterStore.getState().players
     let scheduleState = useScheduleStore.getState()
 

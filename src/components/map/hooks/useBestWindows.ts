@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 import type { TierMarker } from './useTierMarkers'
-import type { Coordinates } from '../../../types/roster'
 import type { DoubleUp } from '../../../types/schedule'
 import { useScheduleStore } from '../../../store/scheduleStore'
 import { useHeartbeatStore } from '../../../store/heartbeatStore'
@@ -30,20 +29,6 @@ export interface WindowResult {
   doubleUpCount: number
 }
 
-function haversineKm(a: Coordinates, b: Coordinates): number {
-  const R = 6371
-  const dLat = (b.lat - a.lat) * Math.PI / 180
-  const dLng = (b.lng - a.lng) * Math.PI / 180
-  const sinLat = Math.sin(dLat / 2)
-  const sinLng = Math.sin(dLng / 2)
-  const h = sinLat * sinLat + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * sinLng * sinLng
-  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
-}
-
-function estimateDriveMinutes(from: Coordinates, to: Coordinates): number {
-  const km = haversineKm(from, to)
-  return (km * 1.2 / 95) * 60 // 1.2x detour factor, 95 km/h average
-}
 
 function addDays(dateStr: string, n: number): string {
   const d = new Date(dateStr + 'T12:00:00Z')
@@ -69,8 +54,6 @@ export type BestWindowStrategy = 'impact' | 't1-count' | 'overdue-priority' | 'p
 
 export function useBestWindows(
   tierMarkers: TierMarker[],
-  homeBase: Coordinates,
-  maxDriveMinutes: number,
   filterStart: string,
   filterEnd: string,
   windowDays = 3,
@@ -89,13 +72,9 @@ export function useBestWindows(
   return useMemo(() => {
     if (!filterStart || !filterEnd || tierMarkers.length === 0) return []
 
-    // Pre-filter markers to those within drive radius
-    const reachableMarkers = tierMarkers.filter((tm) => {
-      const driveMin = estimateDriveMinutes(homeBase, tm.coords)
-      return driveMin <= maxDriveMinutes
-    })
-
-    if (reachableMarkers.length === 0) return []
+    // Origin scrapped 2026-07-22 — every venue is a candidate; the user
+    // "is in the area" of whatever they choose to plan around.
+    const reachableMarkers = tierMarkers
 
     // Quick lookups
     const reachableKeys = new Set(reachableMarkers.map((m) => m.key))
@@ -119,11 +98,7 @@ export function useBestWindows(
       arr.push({ venueKey, hour })
       dateVenueStartHours.set(g.date, arr)
     }
-    // Double-ups reachable from the star — count per window below. A pair is
-    // "reachable" when at least one of its venues is inside the drive radius.
-    const reachableDoubleUps = doubleUps.filter((du) =>
-      du.games.some((g) => estimateDriveMinutes(homeBase, g.venue.coords) <= maxDriveMinutes),
-    )
+    const reachableDoubleUps = doubleUps
     function countDoubleUpsInWindow(start: string, end: string): number {
       let n = 0
       for (const du of reachableDoubleUps) {
@@ -354,5 +329,5 @@ export function useBestWindows(
     }
 
     return picked
-  }, [tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, topN, strategy, doubleUps, proGames, ncaaGames, hsGames, heartbeatPlayers])
+  }, [tierMarkers, filterStart, filterEnd, windowDays, topN, strategy, doubleUps, proGames, ncaaGames, hsGames, heartbeatPlayers])
 }

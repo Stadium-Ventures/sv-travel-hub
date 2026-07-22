@@ -4,8 +4,6 @@ import type { RosterPlayer } from '../../types/roster'
 import type { PairApproach } from '../../lib/doubleUps'
 import { formatDate, formatDriveTime, formatGameTime, TIER_DOT_COLORS } from '../../lib/formatters'
 import { findNearestAirport } from '../../data/majorAirports'
-import { estimateDriveMinutes } from '../../lib/tripEngine'
-import { useTripStore } from '../../store/tripStore'
 
 /** "Does X double up with Y?" verdict for a pair of priority players —
  *  Tom 2026-07-21: when two players are picked, an impossible combo must be
@@ -111,35 +109,11 @@ export function byStartTime(games: DoubleUp['games']): DoubleUp['games'] {
   })
 }
 
-/** Origin-aware travel chip. "fly BOS" when the user IS in Boston read as
- *  nonsense (Tom 2026-07-22) — if the opportunity is within the drive
- *  radius of the trip origin, say the drive time; only a true flight says
- *  "fly into <code>". */
-export function travelLabelFor(
-  du: DoubleUp,
-  homeBase: { lat: number; lng: number },
-  homeBaseName: string,
-  maxDriveMinutes: number,
-): { label: string; hint: string } {
-  const nearestDrive = Math.min(...du.games.map((g) => estimateDriveMinutes(homeBase, g.venue.coords)))
-  if (nearestDrive <= maxDriveMinutes) {
-    return {
-      label: `${formatDriveTime(Math.round(nearestDrive))} drive`,
-      hint: `Estimated drive from ${homeBaseName} to the nearest of these venues`,
-    }
-  }
+/** Nearest major airport(s) to the opportunity's venues — pure destination
+ *  info (origin was scrapped 2026-07-22; the user books their own travel). */
+export function airportLabelFor(du: DoubleUp): { label: string; hint: string } {
   const airports = [...new Set(du.games.map((g) => findNearestAirport(g.venue.coords).code))]
-  return {
-    label: `fly into ${airports.join(' / ')}`,
-    hint: `Beyond your drive radius from ${homeBaseName} — nearest major airport(s) to these venues`,
-  }
-}
-
-export function useTravelLabel(du: DoubleUp): { label: string; hint: string } {
-  const homeBase = useTripStore((s) => s.homeBase)
-  const homeBaseName = useTripStore((s) => s.homeBaseName)
-  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
-  return travelLabelFor(du, homeBase, homeBaseName, maxDriveMinutes)
+  return { label: airports.join(' / '), hint: 'Nearest major airport to these venues' }
 }
 
 export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers, windowDays, pairVerdicts = [], startCollapsed = false, onPlayerClick, onPlanTrip }: Props) {
@@ -258,7 +232,7 @@ function DoubleUpCard({
 }) {
   const du = doubleUp
   const typeInfo = TYPE_LABELS[du.type] ?? { label: du.type, hint: '' }
-  const travel = useTravelLabel(du)
+  const travel = airportLabelFor(du)
 
   // Series (consecutive dates at the same venue) collapse to one card
   const isSeries = du.dates.length > 1
@@ -312,7 +286,7 @@ function DoubleUpCard({
             · {formatDriveTime(du.driveMinutesBetween)} apart
           </span>
         )}
-        <span title={travel.hint}>· {travel.label}</span>
+        <span title={travel.hint}>· fly into {travel.label}</span>
       </p>
 
       {/* Venues — one line per game, earliest first pitch first, so it's

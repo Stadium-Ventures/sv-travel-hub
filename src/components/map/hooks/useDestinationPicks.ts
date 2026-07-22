@@ -28,13 +28,6 @@ export interface DestinationPick {
   anchorVenue: string
   /** Every venue in the cluster, for map fit-bounds on "Go here". */
   venues: Array<{ name: string; coords: Coordinates }>
-  /** Estimated one-way drive minutes from the user's current home base. */
-  driveFromHomeMin: number
-  /** Estimated one-way flight time in hours from the user's current home
-   *  base (great-circle / 500mph + 1h overhead). */
-  flightHoursFromHome: number
-  /** Whether driving from home is realistic (under driveCapMin). */
-  drivable: boolean
 }
 
 function estimateDriveMinutes(from: Coordinates, to: Coordinates): number {
@@ -42,12 +35,6 @@ function estimateDriveMinutes(from: Coordinates, to: Coordinates): number {
   return (km * 1.2 / 95) * 60
 }
 
-function estimateFlightHours(from: Coordinates, to: Coordinates): number {
-  const km = haversineKm(from, to)
-  const miles = km * 0.621371
-  // 500mph cruise + 1h overhead for taxi/climb/descent.
-  return miles / 500 + 1
-}
 
 /** Friendly label for a destination. Picks the nearest US city from a
  *  curated set so "Tampa, FL" reads better than raw coordinates. */
@@ -117,9 +104,7 @@ function labelFor(coords: Coordinates): string {
  */
 export function useDestinationPicks(
   tierMarkers: TierMarker[],
-  homeBase: Coordinates,
   clusterRadiusMin: number = 180,
-  driveCapMin: number = 360,
   topN: number = 5,
 ): DestinationPick[] {
   return useMemo(() => {
@@ -163,7 +148,6 @@ export function useDestinationPicks(
         else if (tier === 2) t2++
         else if (tier === 3) t3++
       }
-      const driveFromHomeMin = estimateDriveMinutes(homeBase, s.seed.coords)
       return {
         centroid: s.seed.coords,
         label: labelFor(s.seed.coords),
@@ -175,17 +159,10 @@ export function useDestinationPicks(
         venueCount: s.venues.length,
         anchorVenue: s.seed.venueName,
         venues: s.venues,
-        driveFromHomeMin,
-        flightHoursFromHome: estimateFlightHours(homeBase, s.seed.coords),
-        drivable: driveFromHomeMin <= driveCapMin,
       } satisfies DestinationPick
     })
 
-    scored.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score
-      // Tie-break: prefer the closer one to the user's home base (less effort).
-      return a.driveFromHomeMin - b.driveFromHomeMin
-    })
+    scored.sort((a, b) => b.score - a.score)
 
     // Dedupe destinations that overlap by label OR by >60% player set.
     const picked: DestinationPick[] = []
@@ -206,5 +183,5 @@ export function useDestinationPicks(
       if (picked.length >= topN) break
     }
     return picked
-  }, [tierMarkers, homeBase, clusterRadiusMin, driveCapMin, topN])
+  }, [tierMarkers, clusterRadiusMin, topN])
 }

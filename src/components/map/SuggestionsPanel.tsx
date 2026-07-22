@@ -6,7 +6,7 @@ import type { RosterPlayer } from '../../types/roster'
 import { useTripStore } from '../../store/tripStore'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 import { formatDate, formatDriveTime } from '../../lib/formatters'
-import { DatesAndTimes, byStartTime, travelLabelFor } from '../trips/DoubleUpSection'
+import { DatesAndTimes, byStartTime, airportLabelFor } from '../trips/DoubleUpSection'
 
 // One panel, three questions: WHEN should I travel, WHERE should I go,
 // and WHO can I double up on. Replaces the old stacked Best Windows +
@@ -16,8 +16,8 @@ export type SuggestTab = 'when' | 'where' | 'doubleups'
 const TIER_DOT_COLORS: Record<number, string> = { 1: 'bg-[#ef4444]', 2: 'bg-[#f97316]', 3: 'bg-gray-500' }
 
 const TAB_SUBTITLES: Record<SuggestTab, string> = {
-  when: 'Best dates to travel from your star location, within the drive radius.',
-  where: 'Best cities anywhere in the US for this date range — ignores the drive radius.',
+  when: 'The best dates to travel in this range.',
+  where: 'The best areas in the US for this date range.',
   doubleups: 'See 2+ clients in one outing — head-to-heads, same-day doubles, stay-overs.',
 }
 
@@ -27,7 +27,7 @@ const STRATEGY_OPTIONS: { value: BestWindowStrategy; label: string; hint: string
   { value: 'overdue-priority',  label: 'Overdue high-priority players', hint: 'Catch must-see/high-priority players you haven\'t seen in 90+ days' },
   { value: 'player-count',      label: 'Most players (any tier)',     hint: 'Maximize total unique players regardless of tier' },
   { value: 'tuesday',           label: 'Includes a Tuesday',          hint: 'Best day for MiLB position-player visits' },
-  { value: 'double-ups',        label: 'Contains double ups',         hint: 'Windows with the most double-up opportunities inside the drive radius' },
+  { value: 'double-ups',        label: 'Contains double ups',         hint: 'Windows with the most double-up opportunities' },
 ]
 
 function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult[]): string {
@@ -159,7 +159,6 @@ export default function SuggestionsPanel(props: Props) {
 /* ────────────────────────── WHEN ────────────────────────── */
 
 function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onPlanWindow }: Props) {
-  const homeBaseName = useTripStore((s) => s.homeBaseName)
   const topPick = windows[0]
   const currentStrategy = STRATEGY_OPTIONS.find((o) => o.value === strategy) ?? STRATEGY_OPTIONS[0]!
 
@@ -200,17 +199,15 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
       )}
       {topPick && topPick.uniquePlayerCount <= 2 && (
         <p className="text-[10px] text-accent-orange/80 leading-relaxed">
-          ⚠ Only {topPick.uniquePlayerCount} player{topPick.uniquePlayerCount === 1 ? '' : 's'} reachable here.
-          Try changing the date range, moving the star, or widening the drive radius (top-right of the map).
+          Only {topPick.uniquePlayerCount} player{topPick.uniquePlayerCount === 1 ? '' : 's'} in this window — try a different date range.
         </p>
       )}
 
       {windows.length === 0 ? (
-        <div className="rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-3 py-2.5 text-xs">
-          <p className="text-accent-orange/90 font-medium">No reachable games in this window</p>
+        <div className="rounded-xl bg-gray-900/40 px-3 py-2.5 text-xs">
+          <p className="font-medium text-text">No games in this window</p>
           <p className="mt-1 text-text-dim/80 leading-relaxed">
-            No SV player has a game inside the drive radius from {homeBaseName} in this date range.
-            Try widening the radius (top-right of the map), moving the star, or changing dates.
+            No SV player has a game in this date range — try different dates.
           </p>
         </div>
       ) : (
@@ -293,22 +290,16 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
 /* ────────────────────────── WHERE ────────────────────────── */
 
 function WhereTab({ picks }: { picks: DestinationPick[] }) {
-  const homeBaseName = useTripStore((s) => s.homeBaseName)
-  const setHomeBase = useTripStore((s) => s.setHomeBase)
-
-  // "Go here" MOVES THE STAR and stays on the map (Tom 2026-07-21) — the
-  // radius, Best Windows, and drive times all recompute from the new spot
-  // so Kent can explore before committing. The map fits to the WHOLE
-  // cluster (not the old keep-current-zoom recenter, which could land
-  // zoomed into an empty spot). "Plan trips" does the old jump.
-  function goHere(p: DestinationPick) {
-    setHomeBase(p.centroid, p.label)
+  // Origin scrapped (Tom 2026-07-22) — picks are just the best AREAS.
+  // "Show on map" fits the viewport to the cluster; "Plan trips" anchors
+  // the engine at the area (assume-the-user-is-there) and generates.
+  function showArea(p: DestinationPick) {
     if (p.venues.length > 0) {
       dispatchMapEvent('map:fit-points', { points: p.venues.map((v) => v.coords) })
     }
   }
-  function planFrom(p: DestinationPick) {
-    setHomeBase(p.centroid, p.label)
+  function planArea(p: DestinationPick) {
+    useTripStore.getState().setHomeBase(p.centroid, p.label)
     dispatchMapEvent('app:switch-tab', { tab: 'trips' })
     window.scrollTo({ top: 0 })
     setTimeout(() => {
@@ -319,16 +310,9 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
   return (
     <div className="space-y-2">
       {picks.length === 0 ? (
-        <p className="text-xs text-text-dim">No reachable SV players anywhere in this date range. Try a wider window.</p>
+        <p className="text-xs text-text-dim">No SV players have games anywhere in this date range. Try a wider window.</p>
       ) : (
         picks.map((p, i) => {
-          const driveH = Math.floor(p.driveFromHomeMin / 60)
-          const driveM = Math.round(p.driveFromHomeMin % 60)
-          const driveLabel = driveH > 0 ? `${driveH}h${driveM > 0 ? ` ${driveM}m` : ''}` : `${driveM}m`
-          const flightLabel = `${p.flightHoursFromHome.toFixed(1)}h flight`
-          // After "Go here" the star sits on this pick — "from Cleveland:
-          // 0m drive" reads as nonsense, so say what's actually true.
-          const isCurrentOrigin = p.driveFromHomeMin < 15
           return (
             <div
               key={`${p.centroid.lat},${p.centroid.lng}`}
@@ -342,9 +326,6 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
                     <span className="rounded-full bg-accent-blue/20 px-2 py-0.5 text-[10px] font-bold text-accent-blue">BEST</span>
                   )}
                   <span className="text-sm font-medium text-text">{p.label}</span>
-                  <span className="text-[10px] text-text-dim/60">
-                    {isCurrentOrigin ? 'your current origin' : `from ${homeBaseName}: ${p.drivable ? `${driveLabel} drive` : flightLabel}`}
-                  </span>
                 </div>
                 {/* What "near" means — the cluster is anchored on a real
                     venue, and every listed player is within a 3h drive of it */}
@@ -382,23 +363,19 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
                 </div>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
-                {isCurrentOrigin ? (
-                  <span className="rounded-lg px-3 py-1.5 text-[11px] font-medium text-text-dim" title="The star is already here">★ Here</span>
-                ) : (
-                  <button
-                    onClick={() => goHere(p)}
-                    className="rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
-                    title="Move the star here and keep exploring — the radius, drive times, and When to go all recompute from this spot"
-                  >
-                    ★ Go here
-                  </button>
-                )}
                 <button
-                  onClick={() => planFrom(p)}
-                  className="text-[10px] text-text-dim hover:text-accent-blue transition-colors"
-                  title={`Set ${p.label} as the trip origin and generate trips`}
+                  onClick={() => planArea(p)}
+                  className="rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
+                  title={`Generate trips around ${p.label}`}
                 >
                   Plan trips →
+                </button>
+                <button
+                  onClick={() => showArea(p)}
+                  className="text-[10px] text-text-dim hover:text-accent-blue transition-colors"
+                  title="Zoom the map to this area's venues"
+                >
+                  Show on map
                 </button>
               </div>
             </div>
@@ -413,9 +390,6 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
 
 function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubleUp, onPlanDoubleUp }: Props) {
   const [showAll, setShowAll] = useState(false)
-  const homeBase = useTripStore((s) => s.homeBase)
-  const homeBaseName = useTripStore((s) => s.homeBaseName)
-  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const visible = showAll ? doubleUps : doubleUps.slice(0, 6)
 
   if (doubleUps.length === 0) {
@@ -435,7 +409,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
         const dateLabel = isSeries
           ? `${formatDate(du.dates[0]!)} – ${formatDate(du.dates[du.dates.length - 1]!)}`
           : formatDate(du.date)
-        const travel = travelLabelFor(du, homeBase, homeBaseName, maxDriveMinutes)
+        const travel = airportLabelFor(du)
         const selected = selectedDoubleUp === i
         return (
           <div
@@ -469,7 +443,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
                   · {formatDriveTime(du.driveMinutesBetween)} apart
                 </span>
               )}
-              <span title={travel.hint}>· {travel.label}</span>
+              <span title={travel.hint}>· fly into {travel.label}</span>
             </p>
             {/* Venues — one line per game, earliest first pitch first */}
             <div className="mt-0.5 space-y-0.5">
