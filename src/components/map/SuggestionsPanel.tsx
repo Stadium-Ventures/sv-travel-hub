@@ -514,7 +514,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
         </button>
       )}
       <p className="text-[10px] text-text-dim/40">
-        Lines on the map connect each pair — <span className="text-accent-green">green ≤45 min</span> · <span className="text-yellow-400">yellow 46–90 min</span> · dashed = overnight. ×2 = both clients in one game.
+        Click <span className="text-text-dim">Show on map</span> to draw a pair — <span className="text-accent-green">green ≤45 min</span> · <span className="text-yellow-400">yellow 46–90 min</span> · dashed = overnight · ×2 = one game covers both.
       </p>
     </div>
   )

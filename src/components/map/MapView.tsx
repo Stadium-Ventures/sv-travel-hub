@@ -317,8 +317,14 @@ export default function MapView() {
               colorBy={filterState.colorBy}
               eventMarkers={eventMarkers}
               fitToMarkersKey={filterState.selectedPlayer || undefined}
-              doubleUps={suggestTab === 'doubleups' ? doubleUps.slice(0, 12) : []}
-              selectedDoubleUp={selectedDoubleUp}
+              doubleUps={
+                // Only the SELECTED pair draws on the map — all 30 at once
+                // was a spaghetti of triangles (Tom 2026-07-22)
+                suggestTab === 'doubleups' && selectedDoubleUp != null && doubleUps[selectedDoubleUp]
+                  ? [doubleUps[selectedDoubleUp]!]
+                  : []
+              }
+              selectedDoubleUp={selectedDoubleUp != null ? 0 : null}
             />
           </div>
         </div>

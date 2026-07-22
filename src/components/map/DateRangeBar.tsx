@@ -185,25 +185,26 @@ export default function DateRangeBar({
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-surface border border-border/50 px-3 py-2">
-      {/* Date range — neither end may start in the past. The end picker is
-          also clamped to start so the range stays non-empty. */}
+      {/* Date range */}
       {(() => {
-        const today = new Date().toISOString().slice(0, 10)
         return (
           <>
+            {/* NOTE: no `min` clamp and an empty-value guard — with min set,
+                typing a month digit-by-digit produced transient out-of-range
+                values that the browser reported as "", which our onChange
+                wrote back and wiped the field (couldn't type "10", Tom
+                2026-07-22). Past dates are self-healed on reload instead. */}
             <input
               type="date"
               value={filterStart}
-              min={today}
-              onChange={(e) => setFilterStart(e.target.value)}
+              onChange={(e) => { if (e.target.value) setFilterStart(e.target.value) }}
               className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
             />
             <span className="text-text-dim text-xs">to</span>
             <input
               type="date"
               value={filterEnd}
-              min={filterStart > today ? filterStart : today}
-              onChange={(e) => setFilterEnd(e.target.value)}
+              onChange={(e) => { if (e.target.value) setFilterEnd(e.target.value) }}
               className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
             />
           </>

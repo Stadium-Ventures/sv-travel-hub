@@ -650,7 +650,7 @@ export default function TripPlanner() {
               <input
                 type="date"
                 value={endDate}
-                onChange={(e) => setDateRange(startDate, e.target.value)}
+                onChange={(e) => { if (e.target.value) setDateRange(startDate, e.target.value) }}
                 className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
               />
               <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">

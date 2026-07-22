@@ -18,14 +18,13 @@ import { isInSummerWindow } from '../data/summerLeagues'
 function toISO(d: Date): string {
   return d.toISOString().split('T')[0]!
 }
+// Default window: today → +14 days (Tom 2026-07-22 — Kent plans ~2 weeks out)
 function defaultStart(): string {
-  const d = new Date()
-  d.setDate(d.getDate() + 7)
-  return toISO(d)
+  return toISO(new Date())
 }
 function defaultEnd(): string {
   const d = new Date()
-  d.setDate(d.getDate() + 9) // +7 start + 2 more = 3 days
+  d.setDate(d.getDate() + 14)
   return toISO(d)
 }
 
@@ -404,10 +403,13 @@ export const useTripStore = create<TripState>()(
       // user) lives there, so it's the right default. Previously each user's
       // session held their last picked city forever via localStorage, which
       // meant Kent's session was stuck on whatever I last tested with.
-      version: 7,
+      // v8: reset dates to the fresh default (today → +14d) — persisted
+      // ranges went stale (start dates in the past) and Orlando default
+      // re-asserted (Tom 2026-07-22).
+      version: 8,
       migrate: (persisted: any) => ({
-        startDate: persisted?.startDate ?? defaultStart(),
-        endDate: persisted?.endDate ?? defaultEnd(),
+        startDate: defaultStart(),
+        endDate: defaultEnd(),
         maxDriveMinutes: persisted?.maxDriveMinutes === 180 ? MAX_DRIVE_MINUTES : (persisted?.maxDriveMinutes ?? MAX_DRIVE_MINUTES),
         maxFlightHours: persisted?.maxFlightHours ?? 4,
         useHeartbeatBoost: persisted?.useHeartbeatBoost ?? false,
@@ -436,6 +438,15 @@ export const useTripStore = create<TripState>()(
         homeBase: state.homeBase,
         homeBaseName: state.homeBaseName,
       }),
+      // Stale-date self-heal: a persisted range whose dates slipped into the
+      // past resets to the fresh default (today → +14d) on every load, not
+      // just on version bumps.
+      onRehydrateStorage: () => (state) => {
+        if (!state) return
+        const today = defaultStart()
+        if (state.endDate < today) state.setDateRange(defaultStart(), defaultEnd())
+        else if (state.startDate < today) state.setDateRange(today, state.endDate)
+      },
       merge: (persisted, current) => {
         const p = persisted as any
         return {

@@ -1507,27 +1507,43 @@ export const useScheduleStore = create<ScheduleState>()(
     }),
     {
       name: 'sv-travel-schedule',
-      version: 3,
+      // v4 (2026-07-22): purge polluted caches. Cached proGames carried the
+      // shared-array player leak (minor leaguers on every MLB game) and
+      // playerTeamAssignments carried false promotions from the 40-man
+      // fullRoster fallback + out-of-order transaction moves. Dropping both
+      // routes every client through the cold path: fresh auto-assign with
+      // the fixed logic, fresh schedule fetch with per-event player copies.
+      // Manual assignments survive.
+      version: 4,
       storage: createJSONStorage(() => idbStorage),
-      migrate: (persisted: any) => ({
-        playerTeamAssignments: persisted?.playerTeamAssignments ?? {},
-        affiliates: persisted?.affiliates ?? [],
-        customMlbAliases: persisted?.customMlbAliases ?? {},
-        customNcaaAliases: persisted?.customNcaaAliases ?? {},
-        rosterMoves: persisted?.rosterMoves ?? [],
-        rosterMovesCheckedAt: persisted?.rosterMovesCheckedAt ?? null,
-        // Preserve cached game data across migrations
-        proGames: persisted?.proGames ?? [],
-        ncaaGames: persisted?.ncaaGames ?? [],
-        hsGames: persisted?.hsGames ?? [],
-        proFetchedAt: persisted?.proFetchedAt ?? null,
-        ncaaFetchedAt: persisted?.ncaaFetchedAt ?? null,
-        hsFetchedAt: persisted?.hsFetchedAt ?? null,
-        // Track which teams/schools are in the cache for incremental fetching
-        cachedProTeamIds: persisted?.cachedProTeamIds ?? [],
-        cachedNcaaSchools: persisted?.cachedNcaaSchools ?? [],
-        cachedHsSchools: persisted?.cachedHsSchools ?? [],
-      }),
+      migrate: (persisted: any, version: number) => {
+        const keptAssignments: Record<string, PlayerTeamAssignment> = {}
+        if (version >= 4) {
+          Object.assign(keptAssignments, persisted?.playerTeamAssignments ?? {})
+        } else {
+          for (const [name, a] of Object.entries(persisted?.playerTeamAssignments ?? {})) {
+            if ((a as PlayerTeamAssignment)?.source === 'manual') keptAssignments[name] = a as PlayerTeamAssignment
+          }
+        }
+        const purge = version < 4
+        return {
+          playerTeamAssignments: keptAssignments,
+          affiliates: persisted?.affiliates ?? [],
+          customMlbAliases: persisted?.customMlbAliases ?? {},
+          customNcaaAliases: persisted?.customNcaaAliases ?? {},
+          rosterMoves: purge ? [] : (persisted?.rosterMoves ?? []),
+          rosterMovesCheckedAt: purge ? null : (persisted?.rosterMovesCheckedAt ?? null),
+          proGames: purge ? [] : (persisted?.proGames ?? []),
+          ncaaGames: persisted?.ncaaGames ?? [],
+          hsGames: persisted?.hsGames ?? [],
+          proFetchedAt: purge ? null : (persisted?.proFetchedAt ?? null),
+          ncaaFetchedAt: persisted?.ncaaFetchedAt ?? null,
+          hsFetchedAt: persisted?.hsFetchedAt ?? null,
+          cachedProTeamIds: purge ? [] : (persisted?.cachedProTeamIds ?? []),
+          cachedNcaaSchools: persisted?.cachedNcaaSchools ?? [],
+          cachedHsSchools: persisted?.cachedHsSchools ?? [],
+        }
+      },
       partialize: (state) => ({
         playerTeamAssignments: state.playerTeamAssignments,
         affiliates: state.affiliates,

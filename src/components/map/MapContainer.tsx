@@ -241,11 +241,13 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       const map = mapInstance.current
       if (!L || !map || points.length === 0) return
       dragOriginRef.current = true // suppress the homeBase-change recenter
+      // Regional zoom, not street zoom — Kent needs to see the surrounding
+      // venues after "Go here", not one block of a city (Tom 2026-07-22)
       if (points.length === 1) {
-        map.setView(L.latLng(points[0]!.lat, points[0]!.lng), 8, { animate: true })
+        map.setView(L.latLng(points[0]!.lat, points[0]!.lng), 7, { animate: true })
       } else {
         const bounds = L.latLngBounds(points.map((p) => L.latLng(p.lat, p.lng)))
-        map.fitBounds(bounds, { padding: [70, 70], maxZoom: 9, animate: true })
+        map.fitBounds(bounds, { padding: [90, 90], maxZoom: 7, animate: true })
       }
     })
   }, [loaded])
