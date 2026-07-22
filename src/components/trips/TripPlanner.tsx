@@ -907,6 +907,7 @@ export default function TripPlanner() {
           priorityPlayers={priorityPlayers}
           windowDays={DOUBLE_UP_WINDOW_DAYS}
           pairVerdicts={pairVerdicts}
+          startCollapsed={!!tripPlan}
           onPlayerClick={(n) => setSelectedPlayer(n)}
           onPlanTrip={handlePlanDoubleUp}
         />

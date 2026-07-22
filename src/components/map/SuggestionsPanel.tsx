@@ -6,8 +6,7 @@ import type { RosterPlayer } from '../../types/roster'
 import { useTripStore } from '../../store/tripStore'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 import { formatDate, formatDriveTime } from '../../lib/formatters'
-import { findNearestAirport } from '../../data/majorAirports'
-import { DatesAndTimes, byStartTime } from '../trips/DoubleUpSection'
+import { DatesAndTimes, byStartTime, travelLabelFor } from '../trips/DoubleUpSection'
 
 // One panel, three questions: WHEN should I travel, WHERE should I go,
 // and WHO can I double up on. Replaces the old stacked Best Windows +
@@ -414,6 +413,9 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
 
 function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubleUp, onPlanDoubleUp }: Props) {
   const [showAll, setShowAll] = useState(false)
+  const homeBase = useTripStore((s) => s.homeBase)
+  const homeBaseName = useTripStore((s) => s.homeBaseName)
+  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const visible = showAll ? doubleUps : doubleUps.slice(0, 6)
 
   if (doubleUps.length === 0) {
@@ -433,7 +435,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
         const dateLabel = isSeries
           ? `${formatDate(du.dates[0]!)} – ${formatDate(du.dates[du.dates.length - 1]!)}`
           : formatDate(du.date)
-        const airports = [...new Set(du.games.map((g) => findNearestAirport(g.venue.coords).code))]
+        const travel = travelLabelFor(du, homeBase, homeBaseName, maxDriveMinutes)
         const selected = selectedDoubleUp === i
         return (
           <div
@@ -467,7 +469,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
                   · {formatDriveTime(du.driveMinutesBetween)} apart
                 </span>
               )}
-              <span title="Nearest major airport">· fly {airports.join(' / ')}</span>
+              <span title={travel.hint}>· {travel.label}</span>
             </p>
             {/* Venues — one line per game, earliest first pitch first */}
             <div className="mt-0.5 space-y-0.5">

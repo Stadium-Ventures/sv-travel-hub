@@ -1,9 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import type { PairApproach } from '../../lib/doubleUps'
 import { formatDate, formatDriveTime, formatGameTime, TIER_DOT_COLORS } from '../../lib/formatters'
 import { findNearestAirport } from '../../data/majorAirports'
+import { estimateDriveMinutes } from '../../lib/tripEngine'
+import { useTripStore } from '../../store/tripStore'
 
 /** "Does X double up with Y?" verdict for a pair of priority players —
  *  Tom 2026-07-21: when two players are picked, an impossible combo must be
@@ -75,6 +77,10 @@ interface Props {
   priorityPlayers: string[]
   windowDays?: number
   pairVerdicts?: PairVerdict[]
+  /** Collapse to just the header — used once a trip plan exists so the
+   *  generated results are the page's focus, not the same opportunities
+   *  again (Tom 2026-07-22). User can re-expand. */
+  startCollapsed?: boolean
   onPlayerClick?: (name: string) => void
   onPlanTrip?: (du: DoubleUp) => void
 }
@@ -105,9 +111,42 @@ export function byStartTime(games: DoubleUp['games']): DoubleUp['games'] {
   })
 }
 
-export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers, windowDays, pairVerdicts = [], onPlayerClick, onPlanTrip }: Props) {
+/** Origin-aware travel chip. "fly BOS" when the user IS in Boston read as
+ *  nonsense (Tom 2026-07-22) — if the opportunity is within the drive
+ *  radius of the trip origin, say the drive time; only a true flight says
+ *  "fly into <code>". */
+export function travelLabelFor(
+  du: DoubleUp,
+  homeBase: { lat: number; lng: number },
+  homeBaseName: string,
+  maxDriveMinutes: number,
+): { label: string; hint: string } {
+  const nearestDrive = Math.min(...du.games.map((g) => estimateDriveMinutes(homeBase, g.venue.coords)))
+  if (nearestDrive <= maxDriveMinutes) {
+    return {
+      label: `${formatDriveTime(Math.round(nearestDrive))} drive`,
+      hint: `Estimated drive from ${homeBaseName} to the nearest of these venues`,
+    }
+  }
+  const airports = [...new Set(du.games.map((g) => findNearestAirport(g.venue.coords).code))]
+  return {
+    label: `fly into ${airports.join(' / ')}`,
+    hint: `Beyond your drive radius from ${homeBaseName} — nearest major airport(s) to these venues`,
+  }
+}
+
+export function useTravelLabel(du: DoubleUp): { label: string; hint: string } {
+  const homeBase = useTripStore((s) => s.homeBase)
+  const homeBaseName = useTripStore((s) => s.homeBaseName)
+  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
+  return travelLabelFor(du, homeBase, homeBaseName, maxDriveMinutes)
+}
+
+export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers, windowDays, pairVerdicts = [], startCollapsed = false, onPlayerClick, onPlanTrip }: Props) {
   const [tierFilter, setTierFilter] = useState<number | null>(null)
   const [showAll, setShowAll] = useState(false)
+  const [collapsed, setCollapsed] = useState(startCollapsed)
+  useEffect(() => { setCollapsed(startCollapsed) }, [startCollapsed])
 
   const filtered = useMemo(() => {
     let items = doubleUps
@@ -137,18 +176,22 @@ export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers,
 
   return (
     <div id="section-double-ups" className="rounded-xl border border-border/50 bg-surface p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
+      <div className={`flex items-center justify-between ${collapsed ? '' : 'mb-3'}`}>
+        <button onClick={() => setCollapsed(!collapsed)} className="text-left">
           <h3 className="text-sm font-semibold text-accent-green">
+            <span className={`mr-1.5 inline-block text-xs text-text-dim transition-transform ${collapsed ? '' : 'rotate-90'}`}>&#9654;</span>
             Double Up Opportunities
             <span className="ml-2 rounded-full bg-accent-green/20 px-2 py-0.5 text-xs font-bold text-accent-green">
               {filtered.length}
             </span>
           </h3>
-          <p className="text-[10px] text-text-dim/60">
-            {windowDays ? `Next ${windowDays} days · ` : ''}see 2+ clients in one outing — same game, or a short drive apart
-          </p>
-        </div>
+          {!collapsed && (
+            <p className="text-[10px] text-text-dim/60">
+              {windowDays ? `Next ${windowDays} days · ` : ''}see 2+ clients in one outing — same game, or a short drive apart
+            </p>
+          )}
+        </button>
+        {collapsed ? <span /> : (
         <div className="flex items-center gap-1">
           {[1, 2, 3].map((t) => (
             <button
@@ -172,8 +215,11 @@ export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers,
             All
           </button>
         </div>
+        )}
       </div>
 
+      {collapsed ? null : (
+      <>
       <PairVerdictBanner verdicts={pairVerdicts} />
 
       {filtered.length === 0 ? (
@@ -193,6 +239,8 @@ export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers,
           )}
         </div>
       )}
+      </>
+      )}
     </div>
   )
 }
@@ -210,15 +258,13 @@ function DoubleUpCard({
 }) {
   const du = doubleUp
   const typeInfo = TYPE_LABELS[du.type] ?? { label: du.type, hint: '' }
+  const travel = useTravelLabel(du)
 
   // Series (consecutive dates at the same venue) collapse to one card
   const isSeries = du.dates.length > 1
   const dateLabel = isSeries
     ? `${formatDate(du.dates[0]!)} – ${formatDate(du.dates[du.dates.length - 1]!)}`
     : formatDate(du.date)
-
-  // Nearest major airport(s) for fly-in planning
-  const airportCodes = [...new Set(du.games.map((g) => findNearestAirport(g.venue.coords).code))]
 
   // Detail-line fragments: date · series · type · drive tier · fly. Only
   // the drive time carries color (Kent's green ≤45 / yellow 46–90).
@@ -266,7 +312,7 @@ function DoubleUpCard({
             · {formatDriveTime(du.driveMinutesBetween)} apart
           </span>
         )}
-        <span title="Nearest major airport">· fly {airportCodes.join(' / ')}</span>
+        <span title={travel.hint}>· {travel.label}</span>
       </p>
 
       {/* Venues — one line per game, earliest first pitch first, so it's
