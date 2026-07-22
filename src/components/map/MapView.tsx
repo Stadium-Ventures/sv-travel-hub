@@ -119,6 +119,7 @@ export default function MapView() {
   const hasSchedules = proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0
   const anyScheduleLoading = useScheduleStore((s) => s.schedulesLoading || s.ncaaLoading || s.hsLoading || s.autoAssignLoading)
   const schedulesProgress = useScheduleStore((s) => s.schedulesProgress)
+  const loadErrorHint = useScheduleStore((s) => s.autoAssignResult?.error ?? s.schedulesError ?? s.ncaaError ?? null)
 
   // Load venues once
   const venuesLoaded = useRef(false)
@@ -207,8 +208,9 @@ export default function MapView() {
               Loading game data{schedulesProgress ? ` — Pro schedules ${schedulesProgress.completed}/${schedulesProgress.total} teams` : ''}... the first load takes a minute or two.
             </span>
           ) : (
-            <span className="flex items-center gap-3">
+            <span className="flex flex-wrap items-center gap-3">
               <span>Game data hasn't loaded yet.</span>
+              {loadErrorHint && <span className="text-xs text-accent-red">Last attempt failed: {loadErrorHint}</span>}
               <button
                 onClick={() => {
                   void (async () => {

@@ -9,9 +9,8 @@ import PlayerCoverageCard from './PlayerCoverageCard'
 // ICS export removed from main UI — kept in individual trip cards
 // import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
-import DoubleUpSection, { PairVerdictBanner, type PairVerdict } from './DoubleUpSection'
+import { PairVerdictBanner, type PairVerdict } from './DoubleUpSection'
 import { findDoubleUps, findClosestApproach } from '../../lib/doubleUps'
-import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 import { MAJOR_AIRPORTS } from '../../data/majorAirports'
@@ -363,21 +362,6 @@ export default function TripPlanner() {
     return out
   }, [priorityPlayers, upcomingDoubleUps, proGames, ncaaGames, hsGames, summerGames, DOUBLE_UP_WINDOW_DAYS])
 
-  // "Plan trip" from a double-up card: lock in the players involved as
-  // priorities, narrow dates to the series window, and generate.
-  function handlePlanDoubleUp(du: DoubleUp) {
-    setPriorityPlayers(du.playerNames.slice(0, PRIORITY_SLOTS))
-    const today = new Date().toISOString().split('T')[0]!
-    const first = du.dates[0] ?? du.date
-    const last = du.dates[du.dates.length - 1] ?? du.date
-    const start = addDaysISO(first, -1) < today ? today : addDaysISO(first, -1)
-    setDateRange(start, addDaysISO(last, 1))
-    generateTrips()
-    // The user is scrolled down at the double-up panel; the progress
-    // indicator and results render up at the controls card. Without this,
-    // clicking Plan trip looks like nothing happened (Tom 2026-07-21).
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
 
   // All players eligible for priority selection (don't filter by visits remaining)
   const eligibleForPriority = useMemo(
@@ -841,32 +825,11 @@ export default function TripPlanner() {
         )}
       </div>
 
-      {/* Double up opportunities — head-to-heads and within-an-hour pairs
-          over the next 30 days. Lives above the results and works even
-          before trips are generated (Kent's double-up ask). */}
-      {!computing && upcomingDoubleUps.length > 0 && (
-        <DoubleUpSection
-          doubleUps={upcomingDoubleUps}
-          playerMap={playerMap}
-          priorityPlayers={priorityPlayers}
-          windowDays={DOUBLE_UP_WINDOW_DAYS}
-          pairVerdicts={pairVerdicts}
-          startCollapsed={!!tripPlan}
-          onPlayerClick={(n) => setSelectedPlayer(n)}
-          onPlanTrip={handlePlanDoubleUp}
-        />
-      )}
-
-      {/* Empty state so the feature is discoverable even with zero hits —
-          still answers "does X double up with Y?" for the selected pair */}
-      {!computing && upcomingDoubleUps.length === 0 && allSchedulesLoaded && (
-        <div className="rounded-xl border border-border/40 bg-surface/40 px-4 py-2.5">
-          <PairVerdictBanner verdicts={pairVerdicts} />
-          <p className="text-xs text-text-dim">
-            <span className="font-medium text-accent-green">Double Ups:</span>{' '}
-            none found in the next 30 days. This scans the whole roster automatically — head-to-heads, same-day doubles within a 90-min drive, and back-to-back-day stay-overs.
-          </p>
-        </div>
+      {/* Double ups are no longer a separate drawer — trips ARE the options,
+          with double-up dates badged on each card (Tom 2026-07-22). Only the
+          pair verdicts remain here: "do my priority players line up?" */}
+      {!computing && pairVerdicts.length > 0 && (
+        <PairVerdictBanner verdicts={pairVerdicts} />
       )}
 
       {/* First-time welcome — dismissible */}
@@ -973,21 +936,19 @@ export default function TripPlanner() {
             const capped = showAllTrips ? relevantToFilters : relevantToFilters.slice(0, DEFAULT_TRIP_CAP)
             const hasMore = relevantToFilters.length > capped.length
 
-            const totalCollapsed = unified.length - numbered.length // how many trips were collapsed
-
             return (
             <div id="section-road-trips">
               <div className="mb-3">
+                {/* Honest count: say what's SHOWN, and why the rest isn't
+                    (Tom 2026-07-22: "why does it say 7 trips and show 3?") */}
                 <h3 className="text-sm font-semibold text-text">
                   Your Trips
                   <span className="ml-2 text-xs font-normal text-text-dim">
-                    {filtered.length === numbered.length
-                      ? `${numbered.length} trip options`
-                      : `${filtered.length} of ${numbered.length} trips`}
-                    {totalCollapsed > 0 && ` (${totalCollapsed} alt dates merged)`}
+                    {relevantToFilters.length} option{relevantToFilters.length !== 1 ? 's' : ''}
+                    {prioritySet.size > 0 && numbered.length > relevantToFilters.length &&
+                      ` · ${numbered.length - relevantToFilters.length} without your priority players hidden`}
                   </span>
                 </h3>
-                {/* Data-quality line moved into the Details section below */}
               </div>
 
 

@@ -89,6 +89,18 @@ export default function TripSummaryCard({
   const last = lines[lines.length - 1]!.date
   const dateLabel = first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`
   const venueCount = new Set(lines.map((l) => l.venue)).size
+
+  // Double ups aren't a separate list anymore — they're a property of the
+  // trip (Tom 2026-07-22). A date counts when you'd see 2+ clients that day.
+  const doubleUpDates = useMemo(() => {
+    const byDate = new Map<string, Set<string>>()
+    for (const l of lines) {
+      const set = byDate.get(l.date) ?? new Set<string>()
+      for (const n of l.players) set.add(n)
+      byDate.set(l.date, set)
+    }
+    return [...byDate.entries()].filter(([, names]) => names.size >= 2).map(([d]) => d)
+  }, [lines])
   const tripKey = item.type === 'road' ? getTripKey(item.trip) : null
   const starred = tripKey ? !!starredTrips[tripKey] : false
 
@@ -142,17 +154,25 @@ export default function TripSummaryCard({
       </div>
 
       {/* Detail line */}
-      <p className="mt-1 text-[11px] text-text-dim">
+      <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-text-dim">
         <span className="font-medium">{dateLabel}</span>
-        <span> · {lines.length} game{lines.length !== 1 ? 's' : ''}</span>
-        <span> · {venueCount} venue{venueCount !== 1 ? 's' : ''}</span>
+        <span>· {lines.length} game{lines.length !== 1 ? 's' : ''}</span>
+        <span>· {venueCount} venue{venueCount !== 1 ? 's' : ''}</span>
+        {doubleUpDates.length > 0 && (
+          <span
+            className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-green"
+            title={`See 2+ clients in one outing on: ${doubleUpDates.map((d) => formatDate(d)).join(', ')}`}
+          >
+            Double up{doubleUpDates.length > 1 ? ` ×${doubleUpDates.length}` : ` · ${formatDate(doubleUpDates[0]!)}`}
+          </span>
+        )}
       </p>
 
       {/* Games in relation to each other — no itinerary assumptions */}
       <div className="mt-1 space-y-0.5">
         {lines.map((l, i) => (
           <p key={`${l.date}-${l.venue}-${i}`} className="truncate text-[11px] text-text-dim/70">
-            <span className="inline-block w-24 font-medium text-text-dim">{formatDate(l.date)}</span>
+            <span className={`inline-block w-24 font-medium ${doubleUpDates.includes(l.date) ? 'text-accent-green' : 'text-text-dim'}`}>{formatDate(l.date)}</span>
             <span className="text-text-dim">{l.venue}</span>
             {l.time && <span className="text-text-dim/60"> {formatGameTime(l.time)}</span>}
             {l.players.length > 0 && <span> · {l.players.join(', ')}</span>}
