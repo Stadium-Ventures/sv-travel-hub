@@ -143,7 +143,13 @@ function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[])
       coords,
     },
     source: 'mlb-api',
-    playerNames,
+    // MUST be a copy — callers pass a shared per-team array, and
+    // mergeEventPlayers pushes into event.playerNames when a game shows up
+    // in both participants' schedules. Without the copy that push mutated
+    // the SHARED team array, leaking players onto every game of the team
+    // and cascading league-wide (the "Sterlin Thompson at Progressive
+    // Field" bug, 2026-07-22).
+    playerNames: [...playerNames],
     playerSides,
     sportId: undefined,
     sourceUrl: `https://www.mlb.com/gameday/${game.gamePk}`,
@@ -319,7 +325,11 @@ export const useScheduleStore = create<ScheduleState>()(
             return { teamId: orgId, sportId: 1, teamName }
           })
 
-          const mlbRosterResult = await fetchAllRosters(mlbTeamsToQuery)
+          // ACTIVE roster only — fullRoster at the MLB level includes the
+          // whole 40-man, so optioned MiLB players read as "at the parent
+          // club" whenever their MiLB roster lookup misses (mass false
+          // promotions under fetch failures, found 2026-07-22).
+          const mlbRosterResult = await fetchAllRosters(mlbTeamsToQuery, undefined, undefined, 'active')
           const mlbRosterEntries = mlbRosterResult.entries
           const mlbPlayerIdToTeam = new Map<number, PlayerTeamAssignment>()
           for (const entry of mlbRosterEntries) {
@@ -512,12 +522,18 @@ export const useScheduleStore = create<ScheduleState>()(
               }
             }
 
-            // Fall back to MLB roster (40-man)
+            // If the player's PREVIOUS team's roster fetch failed, keep the
+            // previous assignment — "not found" is a fetch gap, not a move.
+            const prevAssignment = state.playerTeamAssignments[player.playerName]
+            if (prevAssignment && failedMilbTeamIds.has(prevAssignment.teamId)) {
+              newAssignments[player.playerName] = prevAssignment
+              assignedCount++
+              continue
+            }
+
+            // Fall back to MLB roster (ACTIVE roster — a real call-up)
             const mlbMatch2 = mlbPlayerIdToTeam.get(player.mlbPlayerId!)
             if (mlbMatch2) {
-              // On the 40-man roster — assign to MLB team directly.
-              // During spring training this is the right call for established MLB players
-              // who weren't found on any complex league team.
               newAssignments[player.playerName] = { ...mlbMatch2, source: 'mlb-roster' }
               assignedCount++
             } else {
@@ -860,44 +876,49 @@ export const useScheduleStore = create<ScheduleState>()(
             if (assignment) playerAssignedTeams.set(player.playerName, assignment.teamId)
           }
 
-          // Filter transactions to only those involving our rostered players
-          const relevantMoves = transactions.filter((t) => {
-            const playerName = playerMlbIds.get(t.player.id)
-            if (!playerName) return false
-            // Check if the destination team differs from their current assignment
-            const assignedTeamId = playerAssignedTeams.get(playerName)
-            if (!assignedTeamId || !t.toTeam) return false
-            return t.toTeam.id !== assignedTeamId
-          })
+          // Apply moves CHRONOLOGICALLY against the evolving assignment.
+          // The old logic compared every move against the pre-update
+          // assignment, so a May recall could stick forever: the later
+          // option BACK to the original team read as "not a move" and was
+          // dropped (Sterlin Thompson stuck on the Rockies, 2026-07-22).
+          const candidateMoves = transactions
+            .filter((t) => playerMlbIds.has(t.player.id) && t.toTeam)
+            .sort((a, b) => (a.effectiveDate || a.date).localeCompare(b.effectiveDate || b.date))
 
-          // Auto-correct assignments based on detected moves
           const updatedAssignments = { ...assignments }
           const moveLog: AssignmentChange[] = []
           const moveTimestamp = Date.now()
+          const relevantMoves: typeof transactions = []
 
-          for (const move of relevantMoves) {
+          for (const move of candidateMoves) {
             const playerName = playerMlbIds.get(move.player.id)
             if (!playerName || !move.toTeam) continue
-
-            const oldAssignment = assignments[playerName]
-            if (!oldAssignment) continue
+            const current = updatedAssignments[playerName]
+            if (!current) continue
+            if (move.toTeam.id === current.teamId) continue
 
             // Find the destination team in affiliates to get sportId
             const destAff = allAffiliates.find((a) => a.teamId === move.toTeam!.id)
-            if (destAff) {
-              updatedAssignments[playerName] = {
-                teamId: destAff.teamId,
-                sportId: destAff.sportId,
-                teamName: destAff.teamName,
-              }
-              moveLog.push({
-                playerName,
-                action: 'reassigned',
-                from: oldAssignment.teamName,
-                to: destAff.teamName,
-                timestamp: moveTimestamp,
-              })
+            if (!destAff) continue
+
+            // Paper moves to the MLB club ("Assigned", contract selections in
+            // spring, etc.) don't mean the player physically plays there —
+            // only honor a real call-up.
+            if (destAff.sportId === 1 && !/recall|selected|purchas/i.test(move.typeDesc)) continue
+
+            relevantMoves.push(move)
+            updatedAssignments[playerName] = {
+              teamId: destAff.teamId,
+              sportId: destAff.sportId,
+              teamName: destAff.teamName,
             }
+            moveLog.push({
+              playerName,
+              action: 'reassigned',
+              from: current.teamName,
+              to: destAff.teamName,
+              timestamp: moveTimestamp,
+            })
           }
 
           set({

@@ -162,6 +162,7 @@ export async function fetchAllRosters(
   teams: Array<{ teamId: number; sportId: number; teamName: string }>,
   onProgress?: (completed: number, total: number) => void,
   season?: number,
+  rosterType: string = 'fullRoster',
 ): Promise<RosterFetchResult> {
   const all: MLBRosterEntry[] = []
   const failedTeams: RosterFetchResult['failedTeams'] = []
@@ -173,7 +174,7 @@ export async function fetchAllRosters(
     const results = await Promise.all(
       batch.map(async (t) => {
         try {
-          const roster = await fetchTeamRoster(t.teamId, t.sportId, season)
+          const roster = await fetchTeamRoster(t.teamId, t.sportId, season, rosterType)
           return { team: t, entries: roster.map((r) => ({ ...r, teamName: t.teamName })), failed: false }
         } catch (e) {
           console.warn(`Roster fetch failed for team ${t.teamId} after retries:`, e)

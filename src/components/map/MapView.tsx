@@ -119,6 +119,7 @@ export default function MapView() {
 
   // Are any schedules loaded?
   const hasSchedules = proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0
+  const anyScheduleLoading = useScheduleStore((s) => s.schedulesLoading || s.ncaaLoading || s.hsLoading || s.autoAssignLoading)
 
   // Load venues once
   const venuesLoaded = useRef(false)
@@ -268,9 +269,12 @@ export default function MapView() {
           {/* Suggestions — one tabbed panel replacing the old stacked Best
               Windows + Where to go? pair (Tom 2026-07-21: consolidate). Tabs:
               When (dates from the star) · Where (cities, radius-agnostic) ·
-              Double Ups (2+ clients, one outing — also draws map connectors). */}
-          {hasSchedules && allTierMarkers.length > 0 && (
+              Double Ups (2+ clients, one outing — also draws map connectors).
+              Rendered during the initial fetch too, showing a loading row —
+              an absent/empty panel read as broken (Tom 2026-07-22). */}
+          {(allTierMarkers.length > 0 || anyScheduleLoading) && (
             <SuggestionsPanel
+              loading={anyScheduleLoading && allTierMarkers.length === 0}
               windows={bestWindows}
               windowDays={windowDays}
               setWindowDays={setWindowDays}

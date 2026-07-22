@@ -123,20 +123,26 @@ export default function DataTab() {
     return rows
   }, [proGames, ncaaGames, hsGames, summerGames, players])
 
-  const filtered = useMemo(() => {
+  const { filtered, hiddenPastCount } = useMemo(() => {
     const q = search.trim().toLowerCase()
     const today = new Date().toISOString().split('T')[0]!
-    return allRows.filter((r) => {
-      if (!showPast && r.date < today) return false
-      if (!levelFilter.has(r.level)) return false
-      if (confidenceFilter === 'high' && r.confidence !== 'high') return false
-      if (confidenceFilter === 'low' && r.confidence === 'high') return false
+    const rows: Row[] = []
+    let hiddenPast = 0
+    for (const r of allRows) {
+      if (!levelFilter.has(r.level)) continue
+      if (confidenceFilter === 'high' && r.confidence !== 'high') continue
+      if (confidenceFilter === 'low' && r.confidence === 'high') continue
       if (q) {
         const hay = `${r.playerName} ${r.team} ${r.venueName} ${r.opponent}`.toLowerCase()
-        if (!hay.includes(q)) return false
+        if (!hay.includes(q)) continue
       }
-      return true
-    })
+      // Matches every filter except the date cutoff — count it so the
+      // empty state can explain "your rows exist, they're just past games"
+      // (NCAA/HS seasons are over → deselecting Pro showed a bare zero)
+      if (!showPast && r.date < today) { hiddenPast++; continue }
+      rows.push(r)
+    }
+    return { filtered: rows, hiddenPastCount: hiddenPast }
   }, [allRows, levelFilter, confidenceFilter, search, showPast])
 
   const sorted = useMemo(() => {
@@ -290,7 +296,20 @@ export default function DataTab() {
             {pageRows.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-3 py-6 text-center text-sm text-text-dim">
-                  No rows match. Try clearing filters or loading more schedules from the Trip Planner tab.
+                  {hiddenPastCount > 0 ? (
+                    <>
+                      No <span className="text-text">upcoming</span> games match — but {hiddenPastCount.toLocaleString()} past game{hiddenPastCount !== 1 ? 's' : ''} do
+                      (NCAA and HS seasons are over until spring).{' '}
+                      <button
+                        onClick={() => { setShowPast(true); setPage(0) }}
+                        className="text-accent-blue hover:underline underline-offset-2"
+                      >
+                        Show past games
+                      </button>
+                    </>
+                  ) : (
+                    'No rows match. Try clearing filters or loading more schedules from the Trip Planner tab.'
+                  )}
                 </td>
               </tr>
             ) : pageRows.map((r) => (

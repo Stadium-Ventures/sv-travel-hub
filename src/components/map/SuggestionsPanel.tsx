@@ -7,7 +7,7 @@ import { useTripStore } from '../../store/tripStore'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 import { formatDate, formatDriveTime } from '../../lib/formatters'
 import { findNearestAirport } from '../../data/majorAirports'
-import { DatesAndTimes } from '../trips/DoubleUpSection'
+import { DatesAndTimes, byStartTime } from '../trips/DoubleUpSection'
 
 // One panel, three questions: WHEN should I travel, WHERE should I go,
 // and WHO can I double up on. Replaces the old stacked Best Windows +
@@ -79,6 +79,9 @@ interface Props {
   setStrategy: (s: BestWindowStrategy) => void
   /** Set the window's dates, jump to Trip Planner, and generate. */
   onPlanWindow: (w: WindowResult) => void
+  /** True while schedules are still fetching — tabs show a loading row
+   *  instead of a premature empty state (Tom 2026-07-22). */
+  loading?: boolean
   // Where
   picks: DestinationPick[]
   // Double ups
@@ -136,9 +139,18 @@ export default function SuggestionsPanel(props: Props) {
 
       {open && (
         <div className="mt-3">
-          {activeTab === 'when' && <WhenTab {...props} />}
-          {activeTab === 'where' && <WhereTab picks={props.picks} />}
-          {activeTab === 'doubleups' && <DoubleUpsTab {...props} />}
+          {props.loading ? (
+            <p className="flex items-center gap-2 py-2 text-xs text-text-dim">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-accent-blue border-t-transparent" />
+              Loading game data — suggestions will appear in a moment...
+            </p>
+          ) : (
+            <>
+              {activeTab === 'when' && <WhenTab {...props} />}
+              {activeTab === 'where' && <WhereTab picks={props.picks} />}
+              {activeTab === 'doubleups' && <DoubleUpsTab {...props} />}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -242,12 +254,6 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
                   <span className="rounded bg-accent-red/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-red"
                     title={`${w.overdueCount} player(s) in this window are overdue (>90 days since visit) or never visited.`}>
                     {w.overdueCount} overdue
-                  </span>
-                )}
-                {w.timeConflictCount > 0 && (
-                  <span className="rounded bg-accent-orange/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-orange"
-                    title={`${w.timeConflictCount} game(s) overlap in start time across different venues.`}>
-                    {w.timeConflictCount} conflict{w.timeConflictCount !== 1 ? 's' : ''}
                   </span>
                 )}
                 {w.doubleUpCount > 0 && (
@@ -463,9 +469,9 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
               )}
               <span title="Nearest major airport">· fly {airports.join(' / ')}</span>
             </p>
-            {/* Venues — one line per game so who-is-where is explicit */}
+            {/* Venues — one line per game, earliest first pitch first */}
             <div className="mt-0.5 space-y-0.5">
-              {du.games.map((g, gi) => {
+              {byStartTime(du.games).map((g, gi) => {
                 const names = g.playerNames.filter((n) => du.playerNames.includes(n))
                 return (
                   <p key={g.id} className="truncate text-[10px] text-text-dim/60">

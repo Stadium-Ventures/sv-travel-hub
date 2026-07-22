@@ -95,6 +95,16 @@ function driveTierClass(driveMin: number): string {
   return driveMin <= 45 ? 'text-accent-green' : 'text-yellow-400'
 }
 
+/** Order games by first pitch (earliest first) so the → arrow reads as the
+ *  actual sequence of the day. Games without a real timestamp sort last. */
+export function byStartTime(games: DoubleUp['games']): DoubleUp['games'] {
+  return [...games].sort((a, b) => {
+    const ta = a.source === 'mlb-api' ? new Date(a.time).getTime() : Infinity
+    const tb = b.source === 'mlb-api' ? new Date(b.time).getTime() : Infinity
+    return ta - tb
+  })
+}
+
 export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers, windowDays, pairVerdicts = [], onPlayerClick, onPlanTrip }: Props) {
   const [tierFilter, setTierFilter] = useState<number | null>(null)
   const [showAll, setShowAll] = useState(false)
@@ -236,9 +246,9 @@ function DoubleUpCard({
           <button
             onClick={() => onPlanTrip(du)}
             className="ml-auto shrink-0 rounded-lg bg-accent-blue/15 px-2.5 py-1 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
-            title="Set these players as priority and generate trips for these dates"
+            title="Fills the planner above with these players and dates, then generates the full itinerary (routes, drive times, hotels-vs-fly)"
           >
-            Plan trip →
+            Generate this trip →
           </button>
         )}
       </div>
@@ -259,10 +269,10 @@ function DoubleUpCard({
         <span title="Nearest major airport">· fly {airportCodes.join(' / ')}</span>
       </p>
 
-      {/* Venues — one line per game so it's clear WHO is at WHICH park
-          (Tom 2026-07-21: "not clear what games I would be going to") */}
+      {/* Venues — one line per game, earliest first pitch first, so it's
+          clear WHO is at WHICH park and in what order */}
       <div className="mt-0.5 space-y-0.5">
-        {du.games.map((g, gi) => {
+        {byStartTime(du.games).map((g, gi) => {
           const names = g.playerNames.filter((n) => du.playerNames.includes(n))
           return (
             <p key={g.id} className="truncate text-[11px] text-text-dim/60">
@@ -275,14 +285,6 @@ function DoubleUpCard({
           )
         })}
       </div>
-
-      {/* Timing note — quiet, informational only */}
-      {du.timeFeasible === true && du.type === 'nearby-venues' && (
-        <p className="mt-0.5 text-[10px] text-accent-green/80" title="Enough time between first pitches to watch both games in full">Both games in full</p>
-      )}
-      {du.timeFeasible === false && (
-        <p className="mt-0.5 text-[10px] text-text-dim/60" title="Games overlap — split innings between parks, or watch one game and do a meal with the other client">Overlap — split innings or game + meal</p>
-      )}
 
       <DatesAndTimes du={du} />
     </div>
@@ -309,7 +311,7 @@ export function DatesAndTimes({ du, compact = false }: { du: DoubleUp; compact?:
           {occurrences.map((occ) => (
             <p key={occ.date} className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-text-dim">
               <span className="w-24 shrink-0 font-medium text-text">{formatDate(occ.date)}</span>
-              {occ.games.map((g, gi) => {
+              {byStartTime(occ.games).map((g, gi) => {
                 const t = g.source === 'mlb-api' ? formatGameTime(g.time) : ''
                 return (
                   <span key={g.id} className="whitespace-nowrap">
@@ -319,8 +321,6 @@ export function DatesAndTimes({ du, compact = false }: { du: DoubleUp; compact?:
                   </span>
                 )
               })}
-              {occ.timeFeasible === true && <span className="text-accent-green/80">✓ both in full</span>}
-              {occ.timeFeasible === false && <span className="text-text-dim/50">overlap</span>}
             </p>
           ))}
         </div>

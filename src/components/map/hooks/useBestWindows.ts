@@ -247,12 +247,9 @@ export function useBestWindows(
         if (overdueCount > 0) {
           tierWeightedScore *= (1 + Math.min(0.5, overdueCount * 0.1))
         }
-        // Conflict penalty — discount windows where many games overlap in
-        // time. Kent can't attend overlapping games, so the "score" was
-        // overstated. Penalty caps at 30% off.
-        if (timeConflictCount > 0) {
-          tierWeightedScore *= Math.max(0.7, 1 - timeConflictCount * 0.07)
-        }
+        // NOTE: no penalty for overlapping start times — per Kent
+        // (2026-07-22), same-time games are still visit opportunities
+        // (meals/coffee before or after), so conflicts don't reduce value.
 
         results.push({
           startDate: current,
