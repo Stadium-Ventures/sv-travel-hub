@@ -398,6 +398,10 @@ export default function TripPlanner() {
     const start = addDaysISO(first, -1) < today ? today : addDaysISO(first, -1)
     setDateRange(start, addDaysISO(last, 1))
     generateTrips()
+    // The user is scrolled down at the double-up panel; the progress
+    // indicator and results render up at the controls card. Without this,
+    // clicking Plan trip looks like nothing happened (Tom 2026-07-21).
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   // All players eligible for priority selection (don't filter by visits remaining)

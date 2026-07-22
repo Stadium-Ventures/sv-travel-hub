@@ -80,6 +80,9 @@ interface Props {
   onApplyWindow: (w: WindowResult) => void
   /** Old chained behavior: set dates, jump to Trip Planner, generate. */
   onPlanWindow: (w: WindowResult) => void
+  /** The map's current date filter — used to hide "Use dates" when a
+   *  window already IS the selected range (the button would be a no-op). */
+  currentRange: { start: string; end: string }
   // Where
   picks: DestinationPick[]
   // Double ups
@@ -148,7 +151,7 @@ export default function SuggestionsPanel(props: Props) {
 
 /* ────────────────────────── WHEN ────────────────────────── */
 
-function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onApplyWindow, onPlanWindow }: Props) {
+function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onApplyWindow, onPlanWindow, currentRange }: Props) {
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const topPick = windows[0]
   const currentStrategy = STRATEGY_OPTIONS.find((o) => o.value === strategy) ?? STRATEGY_OPTIONS[0]!
@@ -271,13 +274,17 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
               </div>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1">
-              <button
-                onClick={() => onApplyWindow(w)}
-                className="rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
-                title="Set the map's date range to this window — the dots update to show what's playable, no trip generated yet"
-              >
-                Use dates
-              </button>
+              {w.startDate === currentRange.start && w.endDate === currentRange.end ? (
+                <span className="rounded-lg px-3 py-1.5 text-[11px] text-text-dim" title="The map is already showing exactly this date range">Current dates</span>
+              ) : (
+                <button
+                  onClick={() => onApplyWindow(w)}
+                  className="rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
+                  title="Narrow the map's date range to this window — the dots update to show exactly what's playable then, no trip generated yet"
+                >
+                  Use dates
+                </button>
+              )}
               <button
                 onClick={() => onPlanWindow(w)}
                 className="text-[10px] text-text-dim hover:text-accent-blue transition-colors"
@@ -313,6 +320,7 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
   function planFrom(p: DestinationPick) {
     setHomeBase(p.centroid, p.label)
     dispatchMapEvent('app:switch-tab', { tab: 'trips' })
+    window.scrollTo({ top: 0 })
     setTimeout(() => {
       useTripStore.getState().generateTrips().catch((e) => console.warn('[where-to-go] auto-generate failed:', e))
     }, 100)
@@ -328,6 +336,9 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
           const driveM = Math.round(p.driveFromHomeMin % 60)
           const driveLabel = driveH > 0 ? `${driveH}h${driveM > 0 ? ` ${driveM}m` : ''}` : `${driveM}m`
           const flightLabel = `${p.flightHoursFromHome.toFixed(1)}h flight`
+          // After "Go here" the star sits on this pick — "from Cleveland:
+          // 0m drive" reads as nonsense, so say what's actually true.
+          const isCurrentOrigin = p.driveFromHomeMin < 15
           return (
             <div
               key={`${p.centroid.lat},${p.centroid.lng}`}
@@ -342,7 +353,7 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
                   )}
                   <span className="text-sm font-medium text-text">{p.label}</span>
                   <span className="text-[10px] text-text-dim/60">
-                    from {homeBaseName}: {p.drivable ? `${driveLabel} drive` : flightLabel}
+                    {isCurrentOrigin ? 'your current origin' : `from ${homeBaseName}: ${p.drivable ? `${driveLabel} drive` : flightLabel}`}
                   </span>
                 </div>
                 {/* What "near" means — the cluster is anchored on a real
@@ -381,13 +392,17 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
                 </div>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
-                <button
-                  onClick={() => goHere(p)}
-                  className="rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
-                  title="Move the star here and keep exploring — the radius, drive times, and When to go all recompute from this spot"
-                >
-                  ★ Go here
-                </button>
+                {isCurrentOrigin ? (
+                  <span className="rounded-lg px-3 py-1.5 text-[11px] font-medium text-text-dim" title="The star is already here">★ Here</span>
+                ) : (
+                  <button
+                    onClick={() => goHere(p)}
+                    className="rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
+                    title="Move the star here and keep exploring — the radius, drive times, and When to go all recompute from this spot"
+                  >
+                    ★ Go here
+                  </button>
+                )}
                 <button
                   onClick={() => planFrom(p)}
                   className="text-[10px] text-text-dim hover:text-accent-blue transition-colors"
@@ -463,15 +478,20 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
               )}
               <span title="Nearest major airport">· fly {airports.join(' / ')}</span>
             </p>
-            {/* Venues */}
-            <p className="mt-0.5 truncate text-[10px] text-text-dim/60" title={du.games.map((g) => `${g.venue.name} (${g.homeTeam} vs ${g.awayTeam})`).join('  →  ')}>
-              {du.games.map((g, gi) => (
-                <span key={g.id}>
-                  {gi > 0 && <span className="text-text-dim/40"> → </span>}
-                  {g.venue.name}
-                </span>
-              ))}
-            </p>
+            {/* Venues — one line per game so who-is-where is explicit */}
+            <div className="mt-0.5 space-y-0.5">
+              {du.games.map((g, gi) => {
+                const names = g.playerNames.filter((n) => du.playerNames.includes(n))
+                return (
+                  <p key={g.id} className="truncate text-[10px] text-text-dim/60">
+                    {gi > 0 && <span className="text-text-dim/40">→ </span>}
+                    {du.type === 'stay-over' && <span className="text-text-dim">{formatDate(g.date)}: </span>}
+                    <span className="text-text-dim">{g.venue.name}</span>
+                    {names.length > 0 && <span> · sees {names.join(', ')}</span>}
+                  </p>
+                )
+              })}
+            </div>
             <div className="mt-1.5 flex items-center gap-2">
               <button
                 onClick={() => setSelectedDoubleUp(selected ? null : i)}

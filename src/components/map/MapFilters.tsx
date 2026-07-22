@@ -72,6 +72,8 @@ interface MapFiltersProps {
   /** Pre-built lookup so the Overdue toggle and applyMapFilters share a single
    *  source of truth for days-since-visit. Built by MapView from heartbeatStore. */
   daysByPlayerKey?: Map<string, number | null>
+  /** All loaded venue names — powers the venue search typeahead. */
+  venueNames?: string[]
 }
 
 const TIER_LABEL: Record<number, string> = { 1: 'Must-see (T1)', 2: 'High (T2)', 3: 'Standard (T3)', 4: 'Dev (T4)' }
@@ -121,13 +123,22 @@ export function HeartbeatLegend() {
  * of chrome). The badge shows how many filter categories are active so a
  * narrowed map is never a mystery.
  */
-export default function MapFilters({ state, setState, markerCount, totalCount, daysByPlayerKey }: MapFiltersProps) {
+export default function MapFilters({ state, setState, markerCount, totalCount, daysByPlayerKey, venueNames = [] }: MapFiltersProps) {
   void daysByPlayerKey // accepted so caller can pass; consumed by applyMapFilters below
   const players = useRosterStore((s) => s.players)
   const filtered = markerCount < totalCount
   const [open, setOpen] = useState(false)
+  const [venueFocus, setVenueFocus] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
   const activeCount = countActiveFilters(state)
+
+  // Venue typeahead — Kent types "Dayt" hoping for Daytona; the venue is
+  // named "Jackie Robinson Ballpark", so raw substring match found nothing.
+  // Suggest matching venue names as he types; picking one fills the filter.
+  const venueQuery = state.search.trim().toLowerCase()
+  const venueMatches = venueFocus && venueQuery.length >= 2
+    ? venueNames.filter((v) => v.toLowerCase().includes(venueQuery)).slice(0, 8)
+    : []
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -276,16 +287,34 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
             />
           </div>
 
-          {/* Venue text search (kept as secondary find — e.g. "Lowell Park") */}
+          {/* Venue text search with typeahead over loaded venue names */}
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Venue</span>
-            <input
-              type="text"
-              value={state.search}
-              onChange={(e) => setState({ ...state, search: e.target.value })}
-              placeholder="e.g. Daytona, Bowman Field"
-              className="min-w-0 flex-1 rounded-lg border border-border/40 bg-gray-950/40 px-2 py-1 text-[11px] text-text placeholder:text-text-dim/40 focus:outline-none focus:border-accent-blue/50"
-            />
+            <div className="relative min-w-0 flex-1">
+              <input
+                type="text"
+                value={state.search}
+                onChange={(e) => setState({ ...state, search: e.target.value })}
+                onFocus={() => setVenueFocus(true)}
+                onBlur={() => setTimeout(() => setVenueFocus(false), 150)}
+                placeholder="e.g. Bowman Field"
+                className="w-full rounded-lg border border-border/40 bg-gray-950/40 px-2 py-1 text-[11px] text-text placeholder:text-text-dim/40 focus:outline-none focus:border-accent-blue/50"
+              />
+              {venueMatches.length > 0 && (
+                <div className="absolute left-0 top-full z-50 mt-1 w-full overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
+                  {venueMatches.map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onMouseDown={() => setState({ ...state, search: v })}
+                      className="block w-full truncate px-2.5 py-1.5 text-left text-[11px] text-text hover:bg-accent-blue/10 transition-colors"
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Footer: count + clear */}

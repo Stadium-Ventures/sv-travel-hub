@@ -111,6 +111,7 @@ export default function MapView() {
     const start = first > today ? first : today
     useTripStore.getState().setDateRange(start, last >= start ? last : start)
     dispatchMapEvent('app:switch-tab', { tab: 'trips' })
+    window.scrollTo({ top: 0 })
     setTimeout(() => {
       useTripStore.getState().generateTrips().catch((e) => console.warn('[map] auto-generate after double-up failed:', e))
     }, 100)
@@ -221,6 +222,7 @@ export default function MapView() {
             markerCount={tierMarkers.length}
             totalCount={allTierMarkers.length}
             daysByPlayerKey={daysByPlayerKey}
+            venueNames={[...new Set(allTierMarkers.map((m) => m.venueName))].sort()}
           />
         )}
         <MapHelp />
@@ -281,6 +283,7 @@ export default function MapView() {
                 setFilterStart(w.startDate)
                 setFilterEnd(w.endDate)
               }}
+              currentRange={{ start: filterStart, end: filterEnd }}
               onPlanWindow={(w) => {
                 setFilterStart(w.startDate)
                 setFilterEnd(w.endDate)
@@ -288,6 +291,7 @@ export default function MapView() {
                 // the shared trip store and we kick off generation after a brief
                 // delay so the date state propagates before generateTrips reads it.
                 dispatchMapEvent('app:switch-tab', { tab: 'trips' })
+    window.scrollTo({ top: 0 })
                 setTimeout(() => {
                   useTripStore.getState().generateTrips().catch((e) => console.warn('[map] auto-generate after Plan trips failed:', e))
                 }, 100)

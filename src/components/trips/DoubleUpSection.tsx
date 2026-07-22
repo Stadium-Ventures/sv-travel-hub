@@ -19,27 +19,49 @@ export interface PairVerdict {
 
 export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
   if (verdicts.length === 0) return null
+  const hits = verdicts.filter((v) => v.doubleUpDates)
+  const misses = verdicts.filter((v) => !v.doubleUpDates)
+
+  const missLine = (v: PairVerdict) => (
+    <p key={`${v.a}|${v.b}`} className="rounded-lg bg-accent-orange/10 px-3 py-1.5 text-xs text-accent-orange/90">
+      <strong>{v.a} + {v.b}:</strong> no double up in this window.{' '}
+      {v.closest
+        ? `Closest their schedules come: ${formatDate(v.closest.dateA)}${v.closest.dateB !== v.closest.dateA ? `/${formatDate(v.closest.dateB)}` : ''} — venues ${formatDriveTime(v.closest.driveMinutes)} apart (needs 90 min or less).`
+        : 'Their schedules are never within a day of each other in this window.'}
+    </p>
+  )
+
+  // With 3+ priority players the pair count explodes (5 players = 10 pairs)
+  // and a wall of "they double up" banners buries the actual cards. The
+  // good news compresses to one line; only the MISSES stay itemized —
+  // that's the actionable signal.
+  if (verdicts.length > 3) {
+    return (
+      <div className="mb-3 space-y-1">
+        {hits.length > 0 && (
+          <p className="rounded-lg bg-accent-green/10 px-3 py-1.5 text-xs text-accent-green">
+            {hits.length === verdicts.length
+              ? <>All <strong>{verdicts.length} priority pairs</strong> double up in this window — their cards are pinned first below.</>
+              : <><strong>{hits.length} of {verdicts.length} priority pairs</strong> double up in this window — their cards are pinned first below.</>}
+          </p>
+        )}
+        {misses.map(missLine)}
+      </div>
+    )
+  }
+
   return (
     <div className="mb-3 space-y-1">
       {verdicts.map((v) => {
-        if (v.doubleUpDates) {
-          const first = v.doubleUpDates[0]!
-          const last = v.doubleUpDates[v.doubleUpDates.length - 1]!
-          const when = first === last
-            ? formatDate(first)
-            : `${formatDate(first)} – ${formatDate(last)}${v.doubleUpDates.length > 2 ? ` (${v.doubleUpDates.length} dates)` : ''}`
-          return (
-            <p key={`${v.a}|${v.b}`} className="rounded-lg border border-accent-green/30 bg-accent-green/10 px-3 py-1.5 text-xs text-accent-green">
-              <strong>{v.a} + {v.b}</strong> double up {when} — their cards are pinned first below.
-            </p>
-          )
-        }
+        if (!v.doubleUpDates) return missLine(v)
+        const first = v.doubleUpDates[0]!
+        const last = v.doubleUpDates[v.doubleUpDates.length - 1]!
+        const when = first === last
+          ? formatDate(first)
+          : `${formatDate(first)} – ${formatDate(last)}${v.doubleUpDates.length > 2 ? ` (${v.doubleUpDates.length} dates)` : ''}`
         return (
-          <p key={`${v.a}|${v.b}`} className="rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-3 py-1.5 text-xs text-accent-orange/90">
-            <strong>{v.a} + {v.b}:</strong> no double up in this window.{' '}
-            {v.closest
-              ? `Closest their schedules come: ${formatDate(v.closest.dateA)}${v.closest.dateB !== v.closest.dateA ? `/${formatDate(v.closest.dateB)}` : ''} — venues ${formatDriveTime(v.closest.driveMinutes)} apart (needs 90 min or less).`
-              : 'Their schedules are never within a day of each other in this window.'}
+          <p key={`${v.a}|${v.b}`} className="rounded-lg bg-accent-green/10 px-3 py-1.5 text-xs text-accent-green">
+            <strong>{v.a} + {v.b}</strong> double up {when} — their cards are pinned first below.
           </p>
         )
       })}
@@ -237,17 +259,22 @@ function DoubleUpCard({
         <span title="Nearest major airport">· fly {airportCodes.join(' / ')}</span>
       </p>
 
-      {/* Venues line */}
-      <p className="mt-0.5 truncate text-[11px] text-text-dim/60" title={du.games.map((g) => `${g.venue.name} (${g.homeTeam} vs ${g.awayTeam})`).join('  →  ')}>
-        {du.games.map((g, gi) => (
-          <span key={g.id}>
-            {gi > 0 && <span className="text-text-dim/40"> → </span>}
-            {du.type === 'stay-over' && <span className="text-text-dim">{formatDate(g.date)}: </span>}
-            {g.venue.name}
-            <span className="text-text-dim/40"> ({g.homeTeam} vs {g.awayTeam})</span>
-          </span>
-        ))}
-      </p>
+      {/* Venues — one line per game so it's clear WHO is at WHICH park
+          (Tom 2026-07-21: "not clear what games I would be going to") */}
+      <div className="mt-0.5 space-y-0.5">
+        {du.games.map((g, gi) => {
+          const names = g.playerNames.filter((n) => du.playerNames.includes(n))
+          return (
+            <p key={g.id} className="truncate text-[11px] text-text-dim/60">
+              {gi > 0 && <span className="text-text-dim/40">→ </span>}
+              {du.type === 'stay-over' && <span className="text-text-dim">{formatDate(g.date)}: </span>}
+              <span className="text-text-dim">{g.venue.name}</span>
+              <span className="text-text-dim/40"> · {g.homeTeam} vs {g.awayTeam}</span>
+              {names.length > 0 && <span> · sees {names.join(', ')}</span>}
+            </p>
+          )
+        })}
+      </div>
 
       {/* Timing note — quiet, informational only */}
       {du.timeFeasible === true && du.type === 'nearby-venues' && (
