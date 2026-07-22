@@ -425,12 +425,20 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
           : formatDate(du.date)
         const travel = airportLabelFor(du)
         const selected = selectedDoubleUp === i
+        const focusOnMap = () => {
+          setSelectedDoubleUp(i)
+          // Star (and radius circle) follow the pair — same as Where to go
+          const anchor = du.games[0]!
+          useTripStore.getState().setHomeBase(anchor.venue.coords, anchor.venue.name)
+        }
         return (
           <div
             key={`${du.date}-${i}`}
-            className={`rounded-xl px-3 py-2.5 transition-colors ${
-              selected ? 'bg-accent-blue/10' : 'bg-gray-900/40 hover:bg-gray-900/60'
+            onClick={focusOnMap}
+            className={`cursor-pointer rounded-xl px-3 py-2.5 transition-all ${
+              selected ? 'bg-accent-blue/15 ring-1 ring-accent-blue/50' : 'bg-gray-900/40 hover:bg-gray-900/60'
             }`}
+            title="Show this pair on the map"
           >
             {/* Title: the players */}
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] font-semibold text-text">
@@ -473,10 +481,12 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
                 )
               })}
             </div>
-            <DatesAndTimes du={du} compact />
+            <div onClick={(e) => e.stopPropagation()}>
+              <DatesAndTimes du={du} compact />
+            </div>
             <div className="mt-1.5 flex items-center gap-2">
               <button
-                onClick={() => setSelectedDoubleUp(selected ? null : i)}
+                onClick={(e) => { e.stopPropagation(); if (selected) setSelectedDoubleUp(null); else focusOnMap() }}
                 className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
                   selected ? 'bg-accent-blue/20 text-accent-blue' : 'text-text-dim hover:text-text hover:bg-gray-800/50'
                 }`}
@@ -485,7 +495,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
                 {selected ? 'On map' : 'Show on map'}
               </button>
               <button
-                onClick={() => onPlanDoubleUp(du)}
+                onClick={(e) => { e.stopPropagation(); onPlanDoubleUp(du) }}
                 className="rounded-lg bg-accent-blue/15 px-2.5 py-1 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
                 title="Set these players as priority and generate trips for these dates"
               >

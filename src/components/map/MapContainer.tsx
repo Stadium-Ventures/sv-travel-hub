@@ -576,12 +576,19 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     map.addLayer(layer)
     doubleUpLayerRef.current = layer
 
-    // Zoom to the selected pair
+    // Zoom to the selected pair — framed WITH the drive-radius circle so
+    // the dashed circle is actually visible (Tom 2026-07-22)
     if (selectedDoubleUp != null && doubleUps[selectedDoubleUp]) {
       const du = doubleUps[selectedDoubleUp]!
       const pts = du.games.map((g) => L.latLng(g.venue.coords.lat, g.venue.coords.lng))
-      if (pts.length === 1) map.setView(pts[0]!, 9, { animate: true })
-      else map.fitBounds(L.latLngBounds(pts), { padding: [100, 100], maxZoom: 8, animate: true })
+      const b = L.latLngBounds(pts)
+      const c = b.getCenter()
+      const radiusKm = (useTripStore.getState().maxDriveMinutes / 60) * 95 / 1.2
+      const dLat = radiusKm / 111
+      const dLng = radiusKm / (111 * Math.cos((c.lat * Math.PI) / 180))
+      b.extend([c.lat + dLat, c.lng + dLng])
+      b.extend([c.lat - dLat, c.lng - dLng])
+      map.fitBounds(b, { padding: [40, 40], animate: true })
     }
   }, [loaded, doubleUps, selectedDoubleUp])
 
