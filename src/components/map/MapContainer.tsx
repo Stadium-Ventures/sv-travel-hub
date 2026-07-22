@@ -271,16 +271,20 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     if (homeMarkerRef.current) { map.removeLayer(homeMarkerRef.current); homeMarkerRef.current = null }
     if (radiusCircleRef.current) { map.removeLayer(radiusCircleRef.current); radiusCircleRef.current = null }
 
-    // Home base star marker — draggable
+    // Home base star marker — draggable. Anchored at its BOTTOM TIP so the
+    // star floats just above the location: when the star sits ON a venue
+    // (every "Show on map"/plan action moves it onto the anchor venue), the
+    // venue's dot stays visible underneath instead of being covered (Tom
+    // 2026-07-22: "why are there no visible dots?" — the star was on top).
     const starIcon = L.divIcon({
       className: '',
       html: `<div style="font-size:22px;text-shadow:0 0 6px rgba(0,0,0,0.7);line-height:1;color:#fbbf24;cursor:grab" title="Drag to move home base">&#9733;</div>`,
       iconSize: [24, 24],
-      iconAnchor: [12, 12],
+      iconAnchor: [12, 26],
     })
     homeMarkerRef.current = L.marker([homeBase.lat, homeBase.lng], {
       icon: starIcon,
-      zIndexOffset: 1000,
+      zIndexOffset: 400,
       draggable: true,
     })
       .addTo(map)
