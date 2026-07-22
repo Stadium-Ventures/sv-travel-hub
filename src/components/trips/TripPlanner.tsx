@@ -3,8 +3,8 @@ import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { useSummerStore } from '../../store/summerStore'
-import TripCard from './TripCard'
 import CompareStarredTrips from './CompareStarredTrips'
+import TripSummaryCard from './TripSummaryCard'
 import PlayerCoverageCard from './PlayerCoverageCard'
 // ICS export removed from main UI — kept in individual trip cards
 // import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
@@ -14,7 +14,7 @@ import { findDoubleUps, findClosestApproach } from '../../lib/doubleUps'
 import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
-import { MAJOR_AIRPORTS, findNearestAirport } from '../../data/majorAirports'
+import { MAJOR_AIRPORTS } from '../../data/majorAirports'
 import { groupAndNumberTrips, itemHasPriorityPlayer, type UnifiedTripItem } from './groupAndNumberTrips'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
@@ -23,12 +23,6 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 // Shared by the picker AND the Not Covered click-to-add flow so they agree.
 const PRIORITY_SLOTS = 5
 
-/** Estimated pure-flight time for a fly-in. estimatedTravelHours includes
- *  ~3h of airport/rental overhead; never show "~0h flight" for short hops. */
-function flightHoursLabel(estimatedTravelHours: number): string {
-  const h = Math.max(0.5, Math.round((estimatedTravelHours - 3) * 10) / 10)
-  return h % 1 === 0 ? String(h) : h.toFixed(1)
-}
 
 const LEVEL_ORDER: Record<string, number> = { Pro: 0, NCAA: 1, HS: 2 }
 const LEVEL_LABELS: Record<string, string> = { Pro: 'Pro', NCAA: 'College', HS: 'High School' }
@@ -410,7 +404,6 @@ export default function TripPlanner() {
     setPriorityPlayers(priorityPlayers.filter((n) => n !== name))
   }
 
-  const [copiedFlyIn, setCopiedFlyIn] = useState<string | null>(null)
   const flyInLimit = 5
 
   // Always include fly-ins with priority players, then fill remaining slots up to limit
@@ -1028,43 +1021,20 @@ export default function TripPlanner() {
               </div>
 
               <div className="space-y-4">
-                {capped.map((group, i) => {
-                  const { primary, alternatives } = group
-                  if (primary.type === 'road') {
-                    const altTrips = alternatives
-                      .filter((a): a is typeof a & { type: 'road' } => a.type === 'road')
-                      .map(a => a.trip)
-                    return (
-                      <TripCard
-                        key={`road-${group.displayIndex}`}
-                        trip={primary.trip}
-                        index={group.displayIndex}
-                        playerMap={playerMap}
-                        defaultExpanded={i === 0}
-                        onPlayerClick={setSelectedPlayer}
-                        alternativeTrips={altTrips.length > 0 ? altTrips : undefined}
-                      />
-                    )
-                  } else {
-                    const altVisits = alternatives
-                      .filter((a): a is typeof a & { type: 'flyin' } => a.type === 'flyin')
-                      .map(a => a.visit)
-                    return (
-                      <FlyInCard
-                        key={`flyin-${group.displayIndex}`}
-                        visit={primary.visit}
-                        index={group.displayIndex}
-                        players={players}
-                        playerMap={playerMap}
-                        priorityPlayers={priorityPlayers}
-                        copiedFlyIn={copiedFlyIn}
-                        setCopiedFlyIn={setCopiedFlyIn}
-                        onPlayerClick={setSelectedPlayer}
-                        defaultExpanded={i === 0 && tripPlan.trips.length === 0}
-                        alternativeVisits={altVisits.length > 0 ? altVisits : undefined}
-                      />
-                    )
-                  }
+                {capped.map((group) => {
+                  const { primary } = group
+                  const tripIndex = primary.type === 'road' && tripPlan
+                    ? tripPlan.trips.indexOf(primary.trip)
+                    : null
+                  return (
+                    <TripSummaryCard
+                      key={`${primary.type}-${group.displayIndex}`}
+                      item={primary}
+                      tripIndex={tripIndex != null && tripIndex >= 0 ? tripIndex : null}
+                      playerMap={playerMap}
+                      onPlayerClick={setSelectedPlayer}
+                    />
+                  )
                 })}
                 {unified.length === 0 && (
                   <p className="py-4 text-center text-sm text-text-dim">No trips generated for the selected date range.</p>
@@ -1813,441 +1783,6 @@ function TripAnchor({
 
       {expanded && results.length === 0 && !searching && anchorCity && (
         <p className="mt-2 text-xs text-text-dim">No players found within 3h drive of {anchorCity} during this date range.</p>
-      )}
-    </div>
-  )
-}
-
-function FlyInCard({
-  visit, index, players, playerMap, priorityPlayers,
-  dateConflicts: _dateConflicts, copiedFlyIn: _copiedFlyIn, setCopiedFlyIn: _setCopiedFlyIn, onPlayerClick, defaultExpanded,
-  alternativeVisits,
-}: {
-  visit: import('../../types/schedule').FlyInVisit
-  index: number
-  players: RosterPlayer[]
-  playerMap: Map<string, RosterPlayer>
-  priorityPlayers: string[]
-  dateConflicts?: number[]
-  copiedFlyIn: string | null
-  setCopiedFlyIn: (key: string | null) => void
-  onPlayerClick: (name: string) => void
-  defaultExpanded?: boolean
-  alternativeVisits?: import('../../types/schedule').FlyInVisit[]
-}) {
-  const [expanded, setExpanded] = useState(defaultExpanded ?? false)
-  const [selectedAltIndex, setSelectedAltIndex] = useState(-1) // -1 = primary visit
-  const allVariants = useMemo(() => [visit, ...(alternativeVisits ?? [])], [visit, alternativeVisits])
-  const activeVisit = selectedAltIndex === -1 ? visit : (allVariants[selectedAltIndex + 1] ?? visit)
-  const flyInHomeBaseName = useTripStore((s) => s.homeBaseName)
-
-  // Derive org label — prefer teamLabel from trip engine (accurate per-team grouping)
-  const firstPlayer = players.find((p) => activeVisit.playerNames.includes(p.playerName))
-  let orgLabel = activeVisit.teamLabel ?? ''
-  if (!orgLabel) {
-    if (activeVisit.source === 'hs-lookup' && firstPlayer) orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
-    else if (activeVisit.source === 'ncaa-lookup' && firstPlayer) orgLabel = firstPlayer.org
-    else if (activeVisit.source === 'mlb-api' && firstPlayer) orgLabel = firstPlayer.org
-  }
-
-  // Date formatting
-  const firstDate = activeVisit.dates[0]
-  const lastDate = activeVisit.dates[activeVisit.dates.length - 1]
-  const dateLabel = firstDate && lastDate && firstDate !== lastDate
-    ? `${formatDate(firstDate)} – ${formatDate(lastDate)}`
-    : firstDate ? formatDate(firstDate) : ''
-
-  const t1Names = activeVisit.playerNames.filter((n) => playerMap.get(n)?.tier === 1)
-  const isPriority = activeVisit.playerNames.some((n) => priorityPlayers.includes(n))
-
-  // Build "why this trip" explanation
-  let flyInWhy = ''
-  if (t1Names.length > 1) {
-    flyInWhy = `Worth the flight — sees ${t1Names.length} must-see players at one venue.`
-  } else if (t1Names.length === 1 && isPriority) {
-    flyInWhy = `Only way to reach ${t1Names[0]} this window.`
-  } else if (t1Names.length === 1) {
-    flyInWhy = `Worth the flight — sees ${t1Names[0]} (must-see).`
-  } else if (activeVisit.playerNames.length >= 3) {
-    flyInWhy = `Worth the flight — sees ${activeVisit.playerNames.length} players at one venue.`
-  }
-
-
-  // Check if the last game is early enough to fly home same day (before 3 PM ET)
-  const isEarlyGame = (gameTimeStr?: string): boolean => {
-    if (!gameTimeStr) return false
-    const d = new Date(gameTimeStr)
-    if (isNaN(d.getTime())) return false
-    // Convert to ET hours (America/New_York)
-    const etTime = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }))
-    return etTime.getHours() < 15 // before 3 PM
-  }
-
-  // For single-venue: check activeVisit.gameTime; for combo: check last stop's gameTime
-  const lastGameTime = activeVisit.isCombo && activeVisit.stops && activeVisit.stops.length > 1
-    ? activeVisit.stops[activeVisit.stops.length - 1]!.gameTime
-    : activeVisit.gameTime
-  const couldFlyHomeSameDay = isEarlyGame(lastGameTime)
-  const totalDaysShown = activeVisit.isCombo && activeVisit.stops ? activeVisit.stops.length + 1 : activeVisit.dates.length + 1
-
-  // Source badge
-  const sourceBadge = activeVisit.source === 'mlb-api'
-    ? { label: activeVisit.isHome ? 'Home Game' : 'Away Game', color: activeVisit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400', tip: activeVisit.isHome ? 'Confirmed home game from the MLB/MiLB schedule.' : 'Away game — location is based on the opposing team\'s home venue.' }
-    : (activeVisit.source === 'hs-lookup' && activeVisit.confidence === 'high')
-      ? { label: 'Home Game (Schedule Sheet)', color: 'bg-accent-green/15 text-accent-green', tip: 'Confirmed home game from the client schedule sheet.' }
-      : (activeVisit.source === 'ncaa-lookup' && activeVisit.confidence === 'high')
-        ? { label: activeVisit.isHome ? 'School Visit (D1Baseball)' : 'Away Game (D1Baseball)', color: activeVisit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400', tip: activeVisit.isHome ? 'Confirmed home game from D1Baseball schedule.' : 'Away game — location is based on the opposing team\'s home venue.' }
-        : { label: activeVisit.isHome ? 'School Visit (est.)' : 'Away Game (est.)', color: 'bg-accent-orange/15 text-accent-orange', tip: 'Location is estimated — we know the game exists but aren\'t sure of the exact venue. Click "Verify" to confirm.' }
-
-  return (
-    <div className={`rounded-xl border bg-surface p-5 ${isPriority ? 'border-purple-500/40' : 'border-border'}`}>
-      {/* Header — clickable to expand/collapse */}
-      <div
-        className="flex cursor-pointer items-start justify-between gap-4"
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded}
-        onClick={() => setExpanded(!expanded)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded) } }}
-      >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className={`text-text-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
-            <h3 className="text-base font-semibold text-text">
-              Trip #{index}
-              <span className="ml-1.5 text-sm font-medium text-purple-400">
-                Fly to {findNearestAirport(activeVisit.venue.coords).name}
-              </span>
-            </h3>
-          </div>
-          <p className="mt-0.5 text-sm text-text-dim">
-            {dateLabel} · {activeVisit.playerNames.join(', ')}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2 text-[11px] text-text-dim/60">
-          <span>{activeVisit.dates.length + 1} days</span>
-          <span className="text-text-dim/20">·</span>
-          <span>~{flightHoursLabel(activeVisit.estimatedTravelHours)}h flight</span>
-          {allVariants.length > 1 && (
-            <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-bold text-purple-400">
-              {allVariants.length} dates
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Alternative date selector — shown when multiple date options exist */}
-      {allVariants.length > 1 && expanded && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-text-dim mr-1">Dates:</span>
-          {allVariants.map((variant, vi) => {
-            const vDates = variant.dates
-            const vStart = formatDate(vDates[0]!)
-            const vEnd = vDates.length > 1 ? formatDate(vDates[vDates.length - 1]!) : null
-            const label = vEnd ? `${vStart} – ${vEnd}` : vStart
-            const isActive = vi === 0 ? selectedAltIndex === -1 : selectedAltIndex === vi - 1
-            const isTue = vDates.some(d => new Date(d + 'T12:00:00Z').getUTCDay() === 2)
-            return (
-              <button
-                key={vi}
-                onClick={(e) => { e.stopPropagation(); setSelectedAltIndex(vi === 0 ? -1 : vi - 1) }}
-                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                  isActive
-                    ? 'bg-purple-500/20 text-purple-400 ring-1 ring-purple-500/30'
-                    : 'bg-gray-800/50 text-text-dim hover:text-text hover:bg-gray-700/50'
-                }`}
-              >
-                {label}
-                {isTue && <span className="ml-1 text-[11px] opacity-70">Tue</span>}
-                {vi === 0 && <span className="ml-1 text-[11px] opacity-50">best</span>}
-              </button>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Expanded content — day-by-day itinerary */}
-      {expanded && (() => {
-        // Days render in chronological order. A Tuesday (Kent's preferred day
-        // for position players) gets a "best day" badge instead of being
-        // forced to Day 1 out of order.
-        const isTueDate = (d: string) => new Date(d + 'T12:00:00Z').getUTCDay() === 2
-        const sortedDates = [...activeVisit.dates].sort()
-        const firstDate = sortedDates[0]!
-        const lastDate = sortedDates[sortedDates.length - 1]!
-        const hasMultipleDays = sortedDates.length > 1
-        const anyTue = sortedDates.some(isTueDate)
-
-        // Combo trip: multi-stop fly-in with driving between venues
-        if (activeVisit.isCombo && activeVisit.stops && activeVisit.stops.length > 1) {
-          // Sort combo stops by date, then by game time within the same day
-          const comboStops = [...activeVisit.stops].sort((a, b) => {
-            const dateCmp = a.date.localeCompare(b.date)
-            if (dateCmp !== 0) return dateCmp
-            const aTime = a.gameTime ? new Date(a.gameTime).getTime() : Infinity
-            const bTime = b.gameTime ? new Date(b.gameTime).getTime() : Infinity
-            if (isNaN(aTime) && isNaN(bTime)) return 0
-            if (isNaN(aTime)) return 1
-            if (isNaN(bTime)) return -1
-            return aTime - bTime
-          })
-          const nearestApt = findNearestAirport(comboStops[0]!.venue.coords)
-          return (
-          <div className="mt-4 space-y-3">
-            {/* Natural language summary */}
-            <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
-              {formatDate(comboStops[0]!.date)} – {formatDate(comboStops[comboStops.length - 1]!.date)}: Fly to {nearestApt.name} ({nearestApt.code}) (~{flightHoursLabel(activeVisit.estimatedTravelHours)}h flight).
-              {comboStops.map((s, i) => {
-                const names = s.playerNames.map((n) => {
-                  const p = playerMap.get(n)
-                  return p ? `${n} (${p.org})` : n
-                }).join(', ')
-                const drive = i > 0 && s.driveMinutesFromPrev > 0
-                  ? ` Drive ${formatDriveTime(s.driveMinutesFromPrev)},`
-                  : ''
-                return ` Day ${i + 1}:${drive} see ${names} at ${s.teamLabel || s.venue.name}.`
-              }).join('')}
-              {' '}Fly home after.
-            </p>
-
-            {/* Day-by-day stops */}
-            {comboStops.map((stop, i) => {
-              const dayDate = new Date(stop.date + 'T12:00:00Z')
-              const isTueDay = dayDate.getUTCDay() === 2
-              return (
-              <div key={i} className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-purple-400">Day {i + 1}</span>
-                    <span className="text-xs text-text-dim">{formatDate(stop.date)}{isTueDay ? ' (best day)' : ''}</span>
-                    {i > 0 && stop.driveMinutesFromPrev > 0 && (
-                      <span className="text-[11px] text-accent-blue font-medium">
-                        {formatDriveTime(stop.driveMinutesFromPrev)} drive from previous stop
-                      </span>
-                    )}
-                  </div>
-                  {i === 0 && <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{flightHoursLabel(activeVisit.estimatedTravelHours)}h flight</span>}
-                </div>
-                <div className="ml-4">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-sm font-medium text-text">{stop.teamLabel || stop.venue.name}</span>
-                    {stop.teamLabel && stop.teamLabel !== stop.venue.name && (
-                      <span className="text-[11px] text-text-dim/60">{stop.venue.name}</span>
-                    )}
-                    {stop.gameTime && (() => {
-                      const d = new Date(stop.gameTime)
-                      return !isNaN(d.getTime()) ? (
-                        <span className="text-[11px] text-text-dim/60">
-                          {d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })} ET
-                        </span>
-                      ) : null
-                    })()}
-                    {stop.sourceUrl && (
-                      <a href={stop.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400" title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
-                    )}
-                  </div>
-                  {stop.source === 'hs-lookup' && !stop.isHome && (
-                    <p className="text-[10px] text-accent-orange/60 mt-0.5">
-                      Location approximate — away game venue estimated from home field area.{' '}
-                      <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${stop.teamLabel || stop.venue.name} high school baseball field`)}`} target="_blank" rel="noopener noreferrer" className="text-accent-blue/70 hover:text-accent-blue underline">Confirm on Google Maps ↗</a>
-                    </p>
-                  )}
-                  {isTueDay && <p className="mt-0.5 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>}
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                    {stop.playerNames.map((name) => {
-                      const player = playerMap.get(name)
-                      const tier = player?.tier ?? 4
-                      const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                      return (
-                        <span key={name} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-text cursor-pointer hover:bg-accent-blue/10"
-                          onClick={(e) => { e.stopPropagation(); onPlayerClick(name) }}>
-                          <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
-                          {name} <span className="text-text-dim/50">{TIER_LABELS[tier] ?? ''}</span>
-                        </span>
-                      )
-                    })}
-                    {stop.playerNames.length >= 2 && (
-                      <span className="text-[10px] text-accent-green/70 ml-1" title={`${stop.playerNames.length} SV players in the same game — efficient visit`}>
-                        {stop.playerNames.length} players, 1 game
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              )
-            })}
-
-            {/* Return day */}
-            {(() => {
-              const lastComboStop = comboStops[comboStops.length - 1]!
-              const returnAirport = findNearestAirport(lastComboStop.venue.coords)
-              const arrivalCode = activeVisit.hubAirport || nearestApt.code
-              const showReturnAirport = returnAirport.code !== arrivalCode
-              return (
-              <div className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-text-dim">Day {comboStops.length + 1}</span>
-                  <span className="text-xs text-text-dim/50">Fly home</span>
-                </div>
-                {showReturnAirport && (
-                  <p className="mt-1 text-[11px] text-text-dim/50">Fly home from {returnAirport.code} ({returnAirport.name}) — closest to last stop</p>
-                )}
-                {couldFlyHomeSameDay && (
-                  <p className="mt-1 text-[11px] text-text-dim/50 italic">Early game — could fly home same day instead of Day {totalDaysShown}</p>
-                )}
-              </div>
-              )
-            })()}
-
-            {flyInWhy && <p className="text-xs italic text-text-dim/60">{flyInWhy}</p>}
-            <FlyInScoreExplainer breakdown={activeVisit.scoreBreakdown} />
-          </div>
-          )
-        }
-
-        // Single-venue fly-in (existing behavior)
-        return (
-        <div className="mt-4 space-y-3">
-          {/* Natural language summary */}
-          <p className="text-sm text-text-dim leading-relaxed bg-gray-950/40 rounded-lg px-4 py-2.5">
-            {(() => {
-              const apt = findNearestAirport(activeVisit.venue.coords)
-              return `${formatDate(firstDate)}${hasMultipleDays ? ` – ${formatDate(lastDate)}` : ''}: Fly to ${apt.name} (${apt.code}) (~${flightHoursLabel(activeVisit.estimatedTravelHours)}h flight).`
-            })()}
-            {' '}See {activeVisit.playerNames.map((n) => {
-              const p = playerMap.get(n)
-              return p ? `${n} (${p.org})` : n
-            }).join(' and ')}{anyTue ? ` (${hasMultipleDays ? 'includes a Tuesday' : 'Tuesday'} — best day for position players)` : ''}.
-            {' '}Fly home after.
-          </p>
-
-          {/* Game days — chronological; the Tuesday gets a "best day" badge */}
-          {sortedDates.map((d, i) => {
-            const isTueDay = isTueDate(d)
-            const bestDayBadge = isTueDay && (
-              <span className="rounded bg-accent-blue/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue">best day — Tuesday</span>
-            )
-            if (i > 0) {
-              return (
-                <div key={d} className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-text-dim">Day {i + 1}</span>
-                    <span className="text-xs text-text-dim">{formatDate(d)}</span>
-                    {bestDayBadge}
-                    <span className="text-[10px] text-text-dim/50">Also available for games</span>
-                  </div>
-                </div>
-              )
-            }
-            return (
-          <div key={d} className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-purple-400">Day 1</span>
-                <span className="text-xs text-text-dim">{formatDate(d)}</span>
-                {bestDayBadge}
-              </div>
-              <span className="text-[10px] text-text-dim">Fly from {flyInHomeBaseName} · ~{flightHoursLabel(activeVisit.estimatedTravelHours)}h flight</span>
-            </div>
-
-            <div className="ml-4 space-y-2">
-              <div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-sm font-medium text-text">
-                    {orgLabel || activeVisit.venue.name}
-                  </span>
-                  {orgLabel && orgLabel !== activeVisit.venue.name && (
-                    <span className="text-[11px] text-text-dim/60">{activeVisit.venue.name}</span>
-                  )}
-                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium cursor-help ${sourceBadge.color}`} title={sourceBadge.tip}>
-                    {sourceBadge.label}
-                  </span>
-                  {activeVisit.sourceUrl && (
-                    <a href={activeVisit.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-dim/50 hover:text-purple-400" title="Open the source schedule to confirm this game's date, time, and location">Verify ↗</a>
-                  )}
-                </div>
-                {activeVisit.source === 'hs-lookup' && !activeVisit.isHome && (
-                  <p className="text-[10px] text-accent-orange/60 mt-0.5">
-                    Location approximate — away game venue estimated from home field area.{' '}
-                    <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${activeVisit.teamLabel || activeVisit.venue.name} high school baseball field`)}`} target="_blank" rel="noopener noreferrer" className="text-accent-blue/70 hover:text-accent-blue underline">Confirm on Google Maps ↗</a>
-                  </p>
-                )}
-                {isTueDay && (
-                  <p className="mt-1 text-xs text-accent-blue font-medium">Tuesday — ideal for position players</p>
-                )}
-                <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  {activeVisit.playerNames.map((name) => {
-                    const player = playerMap.get(name)
-                    const tier = player?.tier ?? 4
-                    const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                    return (
-                      <span key={name} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-text cursor-pointer hover:bg-accent-blue/10"
-                        onClick={(e) => { e.stopPropagation(); onPlayerClick(name) }}>
-                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
-                        {name} <span className="text-text-dim/50">{TIER_LABELS[tier] ?? ''}</span>
-                      </span>
-                    )
-                  })}
-                  {activeVisit.playerNames.length >= 2 && (
-                    <span className="text-[10px] text-accent-green/70 ml-1" title={`${activeVisit.playerNames.length} SV players in the same game — efficient visit`}>
-                      {activeVisit.playerNames.length} players, 1 game
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-            )
-          })}
-
-          {/* Return day */}
-          <div className="rounded-lg border border-border/30 bg-surface/50 px-4 py-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-text-dim">Day {sortedDates.length + 1}</span>
-                <span className="text-xs text-text-dim/50">Fly home</span>
-              </div>
-            </div>
-            {couldFlyHomeSameDay && (
-              <p className="mt-1 text-[11px] text-text-dim/50 italic">Early game — could fly home same day instead of Day {totalDaysShown}</p>
-            )}
-          </div>
-
-          {flyInWhy && (
-            <p className="text-xs italic text-text-dim/60">{flyInWhy}</p>
-          )}
-          <FlyInScoreExplainer breakdown={activeVisit.scoreBreakdown} />
-
-        </div>
-        )
-      })()}
-    </div>
-  )
-}
-
-/* ── Score explainer for fly-in cards ── */
-function FlyInScoreExplainer({ breakdown }: { breakdown?: import('../../types/schedule').ScoreBreakdown }) {
-  const [open, setOpen] = useState(false)
-  if (!breakdown) return null
-  const parts: string[] = []
-  if (breakdown.tier1Count > 0) parts.push(`${breakdown.tier1Count} must-see (${breakdown.tier1Points}pts)`)
-  if (breakdown.tier2Count > 0) parts.push(`${breakdown.tier2Count} high-priority (${breakdown.tier2Points}pts)`)
-  if (breakdown.tier3Count > 0) parts.push(`${breakdown.tier3Count} standard (${breakdown.tier3Points}pts)`)
-  if (breakdown.tuesdayBonus) parts.push('Tuesday bonus (+20%)')
-  if (breakdown.pitcherMatchBonus > 0) parts.push(`Pitcher match (+${Math.round(breakdown.pitcherMatchBonus * 100)}%)`)
-  return (
-    <div className="text-[11px]">
-      <button
-        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
-        className="text-text-dim/50 hover:text-text-dim transition-colors"
-      >
-        {open ? '▾' : '▸'} Why this ranking? <span className="text-text-dim/30">Score: {Math.round(breakdown.finalScore)}</span>
-      </button>
-      {open && (
-        <div className="mt-1 ml-3 text-text-dim/60 space-y-0.5">
-          {parts.map((p, i) => <div key={i}>· {p}</div>)}
-          <div className="text-text-dim/30 mt-1">Raw: {Math.round(breakdown.rawScore)} → Final: {Math.round(breakdown.finalScore)}</div>
-        </div>
       )}
     </div>
   )

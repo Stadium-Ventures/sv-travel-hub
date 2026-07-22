@@ -16,7 +16,7 @@ export type SuggestTab = 'when' | 'where' | 'doubleups'
 const TIER_DOT_COLORS: Record<number, string> = { 1: 'bg-[#ef4444]', 2: 'bg-[#f97316]', 3: 'bg-gray-500' }
 
 const TAB_SUBTITLES: Record<SuggestTab, string> = {
-  when: 'The best dates to travel in this range.',
+  when: 'The best dates to visit the starred area, within your drive radius.',
   where: 'The best areas in the US for this date range.',
   doubleups: 'See 2+ clients in one outing — head-to-heads, same-day doubles, stay-overs.',
 }
@@ -293,7 +293,10 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
   // Origin scrapped (Tom 2026-07-22) — picks are just the best AREAS.
   // "Show on map" fits the viewport to the cluster; "Plan trips" anchors
   // the engine at the area (assume-the-user-is-there) and generates.
+  // Engaging an area MOVES THE STAR there (Tom 2026-07-22): the radius
+  // circle follows, and "When to go" now answers dates for THIS area.
   function showArea(p: DestinationPick) {
+    useTripStore.getState().setHomeBase(p.centroid, p.label)
     if (p.venues.length > 0) {
       dispatchMapEvent('map:fit-points', { points: p.venues.map((v) => v.coords) })
     }
@@ -316,9 +319,11 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
           return (
             <div
               key={`${p.centroid.lat},${p.centroid.lng}`}
-              className={`flex items-start justify-between gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+              onClick={() => showArea(p)}
+              className={`flex cursor-pointer items-start justify-between gap-3 rounded-xl px-3 py-2.5 transition-colors ${
                 i === 0 ? 'bg-accent-blue/10' : 'bg-gray-900/40 hover:bg-gray-900/60'
               }`}
+              title="Move the star here and show the area on the map"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -364,14 +369,14 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <button
-                  onClick={() => planArea(p)}
+                  onClick={(e) => { e.stopPropagation(); planArea(p) }}
                   className="rounded-lg bg-accent-blue/15 px-3 py-1.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
                   title={`Generate trips around ${p.label}`}
                 >
                   Plan trips →
                 </button>
                 <button
-                  onClick={() => showArea(p)}
+                  onClick={(e) => { e.stopPropagation(); showArea(p) }}
                   className="text-[10px] text-text-dim hover:text-accent-blue transition-colors"
                   title="Zoom the map to this area's venues"
                 >

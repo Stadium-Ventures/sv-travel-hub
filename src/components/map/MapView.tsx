@@ -69,6 +69,8 @@ export default function MapView() {
 
   // Best window recommender (uses filtered markers — Kent's filters should
   // drive the recommendations too)
+  const homeBase = useTripStore((s) => s.homeBase)
+  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const [windowDays, setWindowDays] = useState(3)
   const [bestWindowStrategy, setBestWindowStrategy] = useState<BestWindowStrategy>('impact')
 
@@ -83,7 +85,7 @@ export default function MapView() {
     return findDoubleUps(all, players, filterStart, filterEnd)
   }, [proGames, ncaaGames, hsGames, summerGames, players, filterStart, filterEnd])
 
-  const bestWindows = useBestWindows(tierMarkers, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, doubleUps)
+  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, doubleUps)
 
   // Destination picks — scans ALL tier markers (not drive-filtered) because
   // the whole point of "Where to go?" is to look beyond the current radius.
@@ -205,7 +207,31 @@ export default function MapView() {
               Loading game data{schedulesProgress ? ` — Pro schedules ${schedulesProgress.completed}/${schedulesProgress.total} teams` : ''}... the first load takes a minute or two.
             </span>
           ) : (
-            <>Game data hasn't loaded yet. It loads automatically — if this persists, retry from the <span className="font-medium text-text">Trip Planner</span> tab.</>
+            <span className="flex items-center gap-3">
+              <span>Game data hasn't loaded yet.</span>
+              <button
+                onClick={() => {
+                  void (async () => {
+                    const sched = useScheduleStore.getState()
+                    if (Object.keys(sched.playerTeamAssignments).length === 0) {
+                      await sched.autoAssignPlayers()
+                    }
+                    if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length > 0) {
+                      const y = new Date().getFullYear()
+                      sched.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+                    }
+                    const roster = useRosterStore.getState().players
+                    const ncaaOrgs = roster.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))
+                    if (ncaaOrgs.length > 0) sched.fetchNcaaSchedules(ncaaOrgs)
+                    const hsOrgs = roster.filter((p) => p.level === 'HS' && p.state).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
+                    if (hsOrgs.length > 0) sched.fetchHsSchedules(hsOrgs)
+                  })()
+                }}
+                className="rounded-lg bg-accent-blue/15 px-3 py-1 text-xs font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
+              >
+                Load now
+              </button>
+            </span>
           )}
         </div>
       )}
@@ -302,7 +328,11 @@ export default function MapView() {
               doubleUps={doubleUps}
               playerMap={playerMap}
               activeTab={suggestTab}
-              setActiveTab={setSuggestTab}
+              setActiveTab={(t) => {
+                setSuggestTab(t)
+                // Returning to "When to go" = back to the starred area
+                if (t === 'when') dispatchMapEvent('map:fit-points', { points: [homeBase] })
+              }}
               selectedDoubleUp={selectedDoubleUp}
               setSelectedDoubleUp={setSelectedDoubleUp}
               onPlanDoubleUp={handlePlanDoubleUp}

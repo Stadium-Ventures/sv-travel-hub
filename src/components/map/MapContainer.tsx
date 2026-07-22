@@ -577,7 +577,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       const du = doubleUps[selectedDoubleUp]!
       const pts = du.games.map((g) => L.latLng(g.venue.coords.lat, g.venue.coords.lng))
       if (pts.length === 1) map.setView(pts[0]!, 9, { animate: true })
-      else map.fitBounds(L.latLngBounds(pts), { padding: [80, 80], maxZoom: 10, animate: true })
+      else map.fitBounds(L.latLngBounds(pts), { padding: [100, 100], maxZoom: 8, animate: true })
     }
   }, [loaded, doubleUps, selectedDoubleUp])
 

@@ -54,6 +54,8 @@ export type BestWindowStrategy = 'impact' | 't1-count' | 'overdue-priority' | 'p
 
 export function useBestWindows(
   tierMarkers: TierMarker[],
+  homeBase: { lat: number; lng: number },
+  maxDriveMinutes: number,
   filterStart: string,
   filterEnd: string,
   windowDays = 3,
@@ -72,9 +74,17 @@ export function useBestWindows(
   return useMemo(() => {
     if (!filterStart || !filterEnd || tierMarkers.length === 0) return []
 
-    // Origin scrapped 2026-07-22 — every venue is a candidate; the user
-    // "is in the area" of whatever they choose to plan around.
-    const reachableMarkers = tierMarkers
+    // Star-scoped (Tom 2026-07-22 course-correct): "when should I travel to
+    // the starred spot" — only venues within the drive radius count.
+    const reachableMarkers = tierMarkers.filter((tm) => {
+      const km = 6371 * 2 * Math.asin(Math.sqrt(
+        Math.sin(((tm.coords.lat - homeBase.lat) * Math.PI / 180) / 2) ** 2 +
+        Math.cos(homeBase.lat * Math.PI / 180) * Math.cos(tm.coords.lat * Math.PI / 180) *
+        Math.sin(((tm.coords.lng - homeBase.lng) * Math.PI / 180) / 2) ** 2,
+      ))
+      return (km * 1.2 / 95) * 60 <= maxDriveMinutes
+    })
+    if (reachableMarkers.length === 0) return []
 
     // Quick lookups
     const reachableKeys = new Set(reachableMarkers.map((m) => m.key))
@@ -329,5 +339,5 @@ export function useBestWindows(
     }
 
     return picked
-  }, [tierMarkers, filterStart, filterEnd, windowDays, topN, strategy, doubleUps, proGames, ncaaGames, hsGames, heartbeatPlayers])
+  }, [tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, topN, strategy, doubleUps, proGames, ncaaGames, hsGames, heartbeatPlayers])
 }
