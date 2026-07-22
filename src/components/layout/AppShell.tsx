@@ -5,34 +5,17 @@ import HeaderPlayerSearch from './HeaderPlayerSearch'
 
 export type TabId = 'roster' | 'trips' | 'map' | 'data'
 
-// Tab order: Map first (Kent's primary surface per interview 2026-06-08),
-// then Trip Planner (recommendation engine), Data (Maptive-style spreadsheet),
-// Roster (reference data).
-const TABS: { id: TabId; label: string; heading: string; description: string }[] = [
-  {
-    id: 'map',
-    label: 'Map',
-    heading: 'Player Map',
-    description: 'See where your players currently are. During spring training, Pro players show at their ST sites. Once game schedules are loaded, their regular season stadiums appear too. College and HS players show at their schools.',
-  },
-  {
-    id: 'trips',
-    label: 'Trip Planner',
-    heading: 'Trip Planner',
-    description: 'Pick a date range and the app builds optimized trip options — road trips for nearby players and fly-in visits for those farther away. You can also export trips to your calendar.',
-  },
-  {
-    id: 'data',
-    label: 'Schedule',
-    heading: 'Schedule',
-    description: 'Every loaded game as a sortable, filterable spreadsheet — Player · Team · Level · Date · Venue · Opponent. Scan and filter without leaving the table.',
-  },
-  {
-    id: 'roster',
-    label: 'Roster',
-    heading: 'Client Roster',
-    description: 'Your full list of players to visit this year. This pulls from the Google Sheet and shows each player\'s tier, visit targets, and progress.',
-  },
+// Primary nav = Kent's two product surfaces (Map, Trip Planner). Schedule
+// and Roster are reference/plumbing views, demoted to small header links
+// (Tom 2026-07-22: "Kent will never look at that tab — too prominent").
+const PRIMARY_TABS: { id: TabId; label: string }[] = [
+  { id: 'map', label: 'Map' },
+  { id: 'trips', label: 'Trip Planner' },
+]
+
+const UTILITY_TABS: { id: TabId; label: string; title: string }[] = [
+  { id: 'data', label: 'Schedule', title: 'Every loaded game as a sortable, filterable table' },
+  { id: 'roster', label: 'Data health', title: 'Roster, visit freshness, trades & promotions, and team-assignment checks' },
 ]
 
 interface AppShellProps {
@@ -61,21 +44,54 @@ export default function AppShell({ children }: AppShellProps) {
         </div>
       </header>
 
-      <nav className="mb-6 flex gap-1 rounded-xl border border-border bg-surface p-1">
-        {TABS.map((tab) => (
+      <div className="mb-6 flex items-center gap-3">
+        <nav className="flex flex-1 gap-1 rounded-xl border border-border/50 bg-surface p-1">
+          {PRIMARY_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-accent-blue/20 text-accent-blue'
+                  : 'text-text-dim hover:text-text'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+        {/* Utility views — quiet text links, not tabs */}
+        <div className="flex shrink-0 items-center gap-1">
+          {UTILITY_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              title={tab.title}
+              className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-gray-800/60 text-text'
+                  : 'text-text-dim/60 hover:text-text hover:bg-gray-800/40'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Breadcrumb back to the product when inside a utility view */}
+      {(activeTab === 'data' || activeTab === 'roster') && (
+        <div className="mb-3 flex items-center gap-2 text-xs text-text-dim">
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === tab.id
-                ? 'bg-accent-blue/20 text-accent-blue'
-                : 'text-text-dim hover:text-text'
-            }`}
+            onClick={() => setActiveTab('map')}
+            className="text-accent-blue/80 hover:text-accent-blue transition-colors"
           >
-            {tab.label}
+            ← Back to Map
           </button>
-        ))}
-      </nav>
+          <span className="text-text-dim/40">·</span>
+          <span>{UTILITY_TABS.find((t) => t.id === activeTab)?.label}</span>
+        </div>
+      )}
 
       <main>{children[activeTab]}</main>
     </div>
