@@ -119,7 +119,11 @@ export default function MapView() {
   const hasSchedules = proGames.length > 0 || ncaaGames.length > 0 || hsGames.length > 0
   const anyScheduleLoading = useScheduleStore((s) => s.schedulesLoading || s.ncaaLoading || s.hsLoading || s.autoAssignLoading)
   const schedulesProgress = useScheduleStore((s) => s.schedulesProgress)
-  const loadErrorHint = useScheduleStore((s) => s.autoAssignResult?.error ?? s.schedulesError ?? s.ncaaError ?? null)
+  const rosterError = useRosterStore((s) => s.error)
+  const scheduleErrorHint = useScheduleStore((s) => s.autoAssignResult?.error ?? s.schedulesError ?? s.ncaaError ?? null)
+  // Roster errors first — everything downstream depends on the roster, so a
+  // schedule-side symptom must not mask the root cause.
+  const loadErrorHint = rosterError ?? scheduleErrorHint
 
   // Load venues once
   const venuesLoaded = useRef(false)
@@ -320,11 +324,14 @@ export default function MapView() {
               onPlanWindow={(w) => {
                 setFilterStart(w.startDate)
                 setFilterEnd(w.endDate)
-                // Jump to Trip Planner; the planner picks up the new dates from
-                // the shared trip store and we kick off generation after a brief
-                // delay so the date state propagates before generateTrips reads it.
+                // Plan THIS window: the planner has its own dates and priority
+                // players, and stale ones hijack the results (Tom 2026-07-23 —
+                // clicked an Aug 10–12 card, got old priorities + old dates).
+                const trip = useTripStore.getState()
+                trip.setDateRange(w.startDate, w.endDate)
+                trip.setPriorityPlayers(w.players.slice(0, 5).map((p) => p.name))
                 dispatchMapEvent('app:switch-tab', { tab: 'trips' })
-    window.scrollTo({ top: 0 })
+                window.scrollTo({ top: 0 })
                 setTimeout(() => {
                   useTripStore.getState().generateTrips().catch((e) => console.warn('[map] auto-generate after Plan trips failed:', e))
                 }, 100)

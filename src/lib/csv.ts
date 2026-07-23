@@ -50,9 +50,19 @@ export async function fetchRoster(): Promise<RosterParseResult> {
     throw new Error('VITE_ROSTER_CSV_URL is not configured. Add it to your .env file.')
   }
 
-  const res = await fetchWithTimeout(ROSTER_CSV_URL, { timeoutMs: 10000 })
+  // no-store: a browser serving a months-old cached copy of the published
+  // CSV looks exactly like a healthy fetch, but with yesterday's columns.
+  const res = await fetchWithTimeout(ROSTER_CSV_URL, { timeoutMs: 10000, cache: 'no-store' })
   if (!res.ok) throw new Error(`Sheet fetch failed: ${res.status}`)
   const text = await res.text()
+
+  // Google can answer 200 with a sign-in/redirect PAGE instead of the CSV
+  // (browser not signed into an account with sheet access). Parsing that
+  // HTML "succeeds" with garbage rows and everything downstream fails
+  // quietly — fail loudly here instead.
+  if (/^\s*</.test(text)) {
+    throw new Error('Roster sheet returned a web page instead of CSV — this browser may not have access to the sheet (Google sign-in?)')
+  }
 
   const parsed = Papa.parse<RosterRow>(text, { header: true, skipEmptyLines: true })
   const warnings: string[] = []

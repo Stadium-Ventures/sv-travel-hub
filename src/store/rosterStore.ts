@@ -59,6 +59,13 @@ export const useRosterStore = create<RosterState>()(
         set({ loading: true, error: null, parseWarnings: [] })
         try {
           const result = await fetchRoster()
+          // Zero players from a "successful" fetch is a failure in disguise
+          // (wrong document, shifted columns). Keep whatever roster we had
+          // and surface the problem instead of stamping a fresh timestamp.
+          if (result.players.length === 0) {
+            set({ loading: false, error: 'Roster sheet parsed to 0 players — sheet unreachable or columns changed' })
+            return
+          }
           // Prune stale visitOverrides for players no longer on the roster
           const currentNames = new Set(result.players.map((p) => p.playerName))
           const existingOverrides = get().visitOverrides

@@ -954,7 +954,11 @@ export const useScheduleStore = create<ScheduleState>()(
         }
 
         if (schoolToPlayers.size === 0) {
-          set({ ncaaError: 'No recognized NCAA schools found' })
+          // Name the inputs — "No recognized NCAA schools" alone gave no way
+          // to tell a garbled roster from a broken alias table (Tom's
+          // personal Chrome, 2026-07-23).
+          const sample = playerOrgs.slice(0, 3).map((p) => `"${p.org || '(blank)'}"`).join(', ')
+          set({ ncaaError: `None of ${playerOrgs.length} NCAA players' orgs matched a known school — e.g. ${sample}` })
           return
         }
 
