@@ -21,13 +21,14 @@ const TAB_SUBTITLES: Record<SuggestTab, string> = {
   doubleups: 'See 2+ clients in one outing — head-to-heads, same-day doubles, stay-overs.',
 }
 
+// Trimmed to the strategies that give DIFFERENT answers (Tom 2026-07-23:
+// six options mostly returned the same windows). Tuesday preference is
+// already baked into scoring + the "Tue" chip; player-count shadowed
+// impact; double ups have their own tab + green chips on every card.
 const STRATEGY_OPTIONS: { value: BestWindowStrategy; label: string; hint: string }[] = [
   { value: 'impact',            label: 'Highest overall impact',     hint: 'Tier-weighted score — best mix of must-see and high-priority coverage' },
   { value: 't1-count',          label: 'Most must-see players in one trip', hint: 'Maximize must-see player count in the window' },
   { value: 'overdue-priority',  label: 'Overdue high-priority players', hint: 'Catch must-see/high-priority players you haven\'t seen in 90+ days' },
-  { value: 'player-count',      label: 'Most players (any tier)',     hint: 'Maximize total unique players regardless of tier' },
-  { value: 'tuesday',           label: 'Includes a Tuesday',          hint: 'Best day for MiLB position-player visits' },
-  { value: 'double-ups',        label: 'Contains double ups',         hint: 'Windows with the most double-up opportunities' },
 ]
 
 function spanDayCount(start: string, end: string): number {
