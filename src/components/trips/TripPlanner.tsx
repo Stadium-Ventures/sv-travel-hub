@@ -12,7 +12,6 @@ import { PairVerdictBanner, type PairVerdict } from './DoubleUpSection'
 import { findDoubleUps, findClosestApproach } from '../../lib/doubleUps'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
-import { MAJOR_AIRPORTS } from '../../data/majorAirports'
 import { groupAndNumberTrips, itemHasPriorityPlayer, type UnifiedTripItem } from './groupAndNumberTrips'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
@@ -297,7 +296,6 @@ export default function TripPlanner() {
   const [tripLengthFilter] = useState<'all' | '1' | '2' | '3'>('all') // length chips removed 2026-07-22 (simplify)
   const [showAllTrips, setShowAllTrips] = useState(false)
   // tierFilter removed — was adding clutter to the results toolbar
-  const [anchorPlayerNames, setAnchorPlayerNames] = useState<string[]>([])
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
 
 
@@ -810,14 +808,6 @@ export default function TripPlanner() {
                   if (item.visit.playerNames.length < 2) return false
                 }
               }
-              if (tripFilter === 'anchor' && anchorPlayerNames.length > 0) {
-                if (item.type === 'road') {
-                  const tripPlayers = [...item.trip.anchorGame.playerNames, ...item.trip.nearbyGames.flatMap(g => g.playerNames)]
-                  if (!tripPlayers.some(n => anchorPlayerNames.includes(n))) return false
-                } else {
-                  if (!item.visit.playerNames.some(n => anchorPlayerNames.includes(n))) return false
-                }
-              }
               // Starred filter — only show Kent's favorites (road trips only;
               // fly-ins don't have stable keys today).
               if (tripFilter === 'starred') {
@@ -1087,15 +1077,6 @@ export default function TripPlanner() {
       {/* Did you know? — rotating app tips (below results per Kent's flow) */}
       <DidYouKnow />
 
-      {/* Trip Anchor — "Already have a trip planned?" */}
-      <TripAnchor
-        allGames={[...proGames, ...ncaaGames, ...hsGames]}
-        playerMap={playerMap}
-        startDate={startDate}
-        endDate={endDate}
-        onPlayersFound={(names) => setAnchorPlayerNames(names)}
-      />
-
       {/* Player schedule drill-down panel */}
       {selectedPlayer && (
         <PlayerSchedulePanel
@@ -1108,271 +1089,6 @@ export default function TripPlanner() {
 }
 
 
-// --- Trip Anchor: "I'll be in [city], who can I see nearby?" ---
-function TripAnchor({
-  allGames,
-  playerMap,
-  startDate,
-  endDate,
-  onPlayersFound,
-}: {
-  allGames: import('../../types/schedule').GameEvent[]
-  playerMap: Map<string, RosterPlayer>
-  startDate: string
-  endDate: string
-  onPlayersFound?: (names: string[]) => void
-}) {
-  const [anchorCity, setAnchorCity] = useState('')
-  const [anchorCoords, setAnchorCoords] = useState<{ lat: number; lng: number } | null>(null)
-  const [anchorLabel, setAnchorLabel] = useState('') // cleaned city name for the Build-trip CTA
-  const [searching, setSearching] = useState(false)
-  const [results, setResults] = useState<Array<{ playerName: string; venue: string; date: string; driveMin: number; org: string; tier: number }>>([])
-  const [expanded, setExpanded] = useState(false)
-  const [showSuggestions, setShowSuggestions] = useState(false)
-  const MAX_ANCHOR_DRIVE = 180 // 3h drive from anchor point
-
-  async function handleSearch() {
-    if (!anchorCity.trim()) return
-    setSearching(true)
-    setResults([])
-    try {
-      // Strip common prefixes like "I'll be in", "going to", etc.
-      const cleanCity = anchorCity
-        .replace(/^(i'll be in|i will be in|i'm going to|going to|visiting|traveling to|in)\s+/i, '')
-        .trim()
-      if (!cleanCity) { setSearching(false); return }
-
-      // First check the bundled airports for quick match
-      const { MAJOR_AIRPORTS } = await import('../../data/majorAirports')
-      const cityLower = cleanCity.toLowerCase().trim()
-      const airportMatch = MAJOR_AIRPORTS.find((a) =>
-        a.name.toLowerCase().includes(cityLower) || a.code.toLowerCase() === cityLower
-      )
-
-      let coords: { lat: number; lng: number }
-      if (airportMatch) {
-        coords = airportMatch.coords
-      } else {
-        // Geocode via Nominatim
-        const params = new URLSearchParams({ q: `${cleanCity}, USA`, format: 'json', limit: '1' })
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
-          headers: { 'User-Agent': 'SVTravelHub/1.0' },
-        })
-        const data = await res.json()
-        if (!data.length) { setSearching(false); return }
-        coords = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
-      }
-
-      setAnchorCoords(coords)
-      setAnchorLabel(airportMatch ? airportMatch.name : cleanCity)
-
-      // Find all games within driving range of this anchor during the date range
-      const { estimateDriveMinutes } = await import('../../lib/tripEngine')
-      const nearby: typeof results = []
-      const seen = new Set<string>() // dedupe by player+date
-
-      for (const game of allGames) {
-        if (game.date < startDate || game.date > endDate) continue
-        if (game.venue.coords.lat === 0) continue
-
-        const driveMin = estimateDriveMinutes(coords, game.venue.coords)
-        if (driveMin > MAX_ANCHOR_DRIVE) continue
-
-        for (const name of game.playerNames) {
-          const key = `${name}|${game.date}`
-          if (seen.has(key)) continue
-          seen.add(key)
-
-          const player = playerMap.get(name)
-          if (!player) continue
-
-          nearby.push({
-            playerName: name,
-            venue: game.venue.name,
-            date: game.date,
-            driveMin: Math.round(driveMin),
-            org: player.org,
-            tier: player.tier,
-          })
-        }
-      }
-
-      // Sort by date, then tier
-      nearby.sort((a, b) => a.date.localeCompare(b.date) || a.tier - b.tier)
-      setResults(nearby)
-      const uniqueNames = [...new Set(nearby.map(r => r.playerName))]
-      onPlayersFound?.(uniqueNames)
-      setExpanded(true)
-    } catch (err) {
-      console.warn('Anchor search failed:', err)
-    }
-    setSearching(false)
-  }
-
-  // Build a real trip anchored on this city: make it the trip origin (home
-  // base), keep the current date window, and generate. Mirrors the pattern
-  // DataTab's "Plan trip →" uses so the anchor flow ENDS in a trip, not
-  // just a player list.
-  function handleBuildTrip() {
-    if (!anchorCoords || !anchorLabel) return
-    const store = useTripStore.getState()
-    store.setHomeBase(anchorCoords, anchorLabel)
-    store.setDateRange(startDate, endDate) // seed the window explicitly
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-    // Brief delay so the origin/date state propagates before generateTrips reads it.
-    setTimeout(() => {
-      store.generateTrips().catch((e) => console.warn('[trip-anchor] auto-generate failed:', e))
-    }, 100)
-  }
-
-  return (
-    <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
-      <label className="mb-2 block text-xs font-medium text-text-dim">
-        Already have a trip planned? <span className="text-text-dim/50">(find players near your destination)</span>
-      </label>
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <input
-            type="text"
-            value={anchorCity}
-            onChange={(e) => { setAnchorCity(e.target.value); setShowSuggestions(true) }}
-            onKeyDown={(e) => { if (e.key === 'Enter') { setShowSuggestions(false); handleSearch() } }}
-            onFocus={() => setShowSuggestions(true)}
-            placeholder="Type a city (e.g., Boston, Atlanta)"
-            className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text placeholder:text-text-dim/50 focus:border-accent-blue focus:outline-none"
-          />
-          {showSuggestions && anchorCity.length >= 2 && (() => {
-            const q = anchorCity.toLowerCase()
-            const matches = MAJOR_AIRPORTS.filter(a =>
-              a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q)
-            ).slice(0, 6)
-            if (matches.length === 0) return null
-            return (
-              <div className="absolute left-0 top-full z-20 mt-1 w-full rounded-lg border border-border bg-surface shadow-lg overflow-hidden">
-                {matches.map((a) => (
-                  <button
-                    key={a.code}
-                    onClick={() => { setAnchorCity(a.name); setShowSuggestions(false); }}
-                    className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-left hover:bg-accent-blue/10 transition-colors"
-                  >
-                    <span className="text-text">{a.name}</span>
-                    <span className="text-[10px] text-text-dim">{a.code}</span>
-                  </button>
-                ))}
-              </div>
-            )
-          })()}
-        </div>
-        <button
-          onClick={handleSearch}
-          disabled={searching || !anchorCity.trim()}
-          className="rounded-lg bg-purple-500/20 px-3 py-1.5 text-sm font-medium text-purple-400 hover:bg-purple-500/30 disabled:opacity-50"
-        >
-          {searching ? 'Searching...' : 'Find Players'}
-        </button>
-        {results.length > 0 && (
-          <button onClick={() => { setResults([]); setAnchorCity(''); setAnchorCoords(null); setAnchorLabel(''); setExpanded(false); onPlayersFound?.([]) }} className="text-xs text-text-dim hover:text-text">Clear</button>
-        )}
-      </div>
-
-      {expanded && results.length > 0 && (() => {
-        // Group by player — show each player once with their game count and next dates
-        const byPlayer = new Map<string, { dates: string[]; org: string; tier: number; driveMin: number; venue: string }>()
-        for (const r of results) {
-          const existing = byPlayer.get(r.playerName)
-          if (existing) {
-            if (!existing.dates.includes(r.date)) existing.dates.push(r.date)
-          } else {
-            byPlayer.set(r.playerName, { dates: [r.date], org: r.org, tier: r.tier, driveMin: r.driveMin, venue: r.venue })
-          }
-        }
-        // Sort by tier, then by number of games
-        const playerEntries = [...byPlayer.entries()].sort(([, a], [, b]) => a.tier - b.tier || b.dates.length - a.dates.length)
-
-        return (
-        <div className="mt-3 rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
-          {/* Primary action — turn this city into an actual trip */}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-text-dim">
-              <span className="font-medium text-purple-400">{playerEntries.length} players</span> within 3h drive of {anchorLabel || anchorCity}
-            </p>
-            <button
-              onClick={handleBuildTrip}
-              className="rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent-blue/80 transition-colors"
-              title={`Set ${anchorLabel || anchorCity} as your starting point and generate trip options for these dates`}
-            >
-              Build trip from {anchorLabel || anchorCity} →
-            </button>
-          </div>
-          <div className="max-h-64 overflow-y-auto space-y-2">
-            {playerEntries.map(([name, info]) => {
-              const sortedDates = info.dates.sort()
-              const nextDates = sortedDates.slice(0, 4).map(d => formatDate(d))
-              return (
-                <div key={name} className="flex items-start gap-2 text-[11px]">
-                  <span className={`mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ${TIER_DOT_COLORS[info.tier] ?? 'bg-gray-500'}`} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-text">{name}</span>
-                      <span className="text-text-dim/60">{info.org}</span>
-                      <span className="ml-auto text-text-dim/50">~{formatDriveTime(info.driveMin)} drive</span>
-                    </div>
-                    <p className="text-[10px] text-text-dim/60">
-                      {info.dates.length} game{info.dates.length !== 1 ? 's' : ''} nearby: {nextDates.join(', ')}
-                      {info.dates.length > 4 && ` +${info.dates.length - 4} more`}
-                    </p>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Trip suggestion from anchor — one line per UNIQUE player */}
-          {playerEntries.length > 0 && (
-            <div className="mt-3 rounded-lg border border-accent-blue/30 bg-accent-blue/5 px-4 py-3">
-              <p className="text-xs font-medium text-accent-blue mb-2">
-                While you're near {anchorCity}:
-              </p>
-              <div className="space-y-1.5">
-                {playerEntries.map(([name, info]) => {
-                  const sortedDates = info.dates.sort()
-                  const dateList = sortedDates.slice(0, 3).map(d => formatDate(d))
-                  return (
-                    <div key={name} className="text-[11px]">
-                      <span className={`inline-block h-1.5 w-1.5 rounded-full mr-1 ${TIER_DOT_COLORS[info.tier] ?? 'bg-gray-500'}`} />
-                      <span className="font-medium text-text">{name}</span>
-                      <span className="text-text-dim"> ({info.org})</span>
-                      <span className="text-text-dim"> · ~{formatDriveTime(info.driveMin)} drive</span>
-                      <span className="text-text-dim/60"> · {dateList.join(', ')}{sortedDates.length > 3 ? ` +${sortedDates.length - 3} more` : ''}</span>
-                    </div>
-                  )
-                })}
-              </div>
-              {playerEntries.length > 1 && (
-                <p className="mt-2 text-[10px] text-text-dim/60">
-                  Best day to see multiple players: {(() => {
-                    // Find dates where most players overlap
-                    const dateCounts = new Map<string, number>()
-                    for (const [, info] of playerEntries) {
-                      for (const d of info.dates) dateCounts.set(d, (dateCounts.get(d) ?? 0) + 1)
-                    }
-                    const best = [...dateCounts.entries()].sort((a, b) => b[1] - a[1])[0]
-                    return best ? `${formatDate(best[0])} (${best[1]} players)` : 'varies'
-                  })()}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-        )
-      })()}
-
-      {expanded && results.length === 0 && !searching && anchorCity && (
-        <p className="mt-2 text-xs text-text-dim">No players found within 3h drive of {anchorCity} during this date range.</p>
-      )}
-    </div>
-  )
-}
 
 /* ── Did You Know? ── rotating app tips ── */
 // Keep these true to the CURRENT UI — stale tips referencing removed
