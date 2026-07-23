@@ -447,7 +447,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
           <div
             key={`${du.date}-${i}`}
             onClick={focusOnMap}
-            className={`cursor-pointer rounded-xl px-3 py-2.5 transition-all ${
+            className={`cursor-pointer select-none rounded-xl px-3 py-2.5 transition-all ${
               selected ? 'bg-accent-blue/15 ring-1 ring-accent-blue/50' : 'bg-gray-900/40 hover:bg-gray-900/60'
             }`}
             title="Show this pair on the map"
@@ -493,9 +493,10 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
                 )
               })}
             </div>
-            <div onClick={(e) => e.stopPropagation()}>
-              <DatesAndTimes du={du} compact />
-            </div>
+            {/* No stopPropagation here — swallowing the click made "Dates &
+                times" a dead zone that LOOKED like selection randomly failing
+                (Tom 2026-07-23). Expanding it now also selects the card. */}
+            <DatesAndTimes du={du} compact />
             <div className="mt-1.5 flex items-center gap-2">
               <button
                 onClick={(e) => { e.stopPropagation(); if (selected) setSelectedDoubleUp(null); else focusOnMap() }}
