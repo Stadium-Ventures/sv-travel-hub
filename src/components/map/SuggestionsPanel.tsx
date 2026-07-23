@@ -30,6 +30,10 @@ const STRATEGY_OPTIONS: { value: BestWindowStrategy; label: string; hint: string
   { value: 'double-ups',        label: 'Contains double ups',         hint: 'Windows with the most double-up opportunities' },
 ]
 
+function spanDayCount(start: string, end: string): number {
+  return Math.round((new Date(end + 'T12:00:00Z').getTime() - new Date(start + 'T12:00:00Z').getTime()) / 86400000) + 1
+}
+
 function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult[]): string {
   if (windows.length === 0) return ''
   const top = windows[0]!
@@ -224,10 +228,17 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
                   <span className="rounded-full bg-accent-blue/20 px-2 py-0.5 text-[10px] font-bold text-accent-blue">BEST</span>
                 )}
                 <span className="text-sm font-medium text-text">
-                  {formatDate(w.startDate)} – {formatDate(w.endDate)}
+                  {w.startDate === w.endDate ? formatDate(w.startDate) : `${formatDate(w.startDate)} – ${formatDate(w.endDate)}`}
                 </span>
                 {w.hasTuesday && <span className="text-[10px] text-accent-blue/70">Tue</span>}
               </div>
+              {/* A span with a game-less day in the middle says which days
+                  actually have games — the range alone overpromises. */}
+              {w.gameDates.length >= 2 && spanDayCount(w.startDate, w.endDate) > w.gameDates.length && (
+                <p className="mt-0.5 text-[10px] text-text-dim/70">
+                  Games on {w.gameDates.map((d) => formatDate(d)).join(' · ')}
+                </p>
+              )}
               {/* Stat chips — flex-wrap so they never slide under the button */}
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 <span className="text-xs text-text-dim">{w.uniquePlayerCount} player{w.uniquePlayerCount !== 1 ? 's' : ''}</span>

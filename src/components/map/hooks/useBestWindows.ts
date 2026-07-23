@@ -7,9 +7,13 @@ import { useHeartbeatStore } from '../../../store/heartbeatStore'
 const TIER_WEIGHTS: Record<number, number> = { 1: 5, 2: 3, 3: 1, 4: 0 }
 
 export interface WindowResult {
-  startDate: string // ISO
-  endDate: string   // ISO
+  startDate: string // ISO — trimmed to the FIRST date with a game
+  endDate: string   // ISO — trimmed to the LAST date with a game
   days: number
+  /** The dates inside the window that actually have games. A 3-day search
+   *  window whose games all fall on one date must SAY so — "Aug 9 – Aug 11"
+   *  with everything on Aug 11 read as a lie (Tom 2026-07-23). */
+  gameDates: string[]
   players: Array<{ name: string; tier: number }>
   uniquePlayerCount: number
   tierWeightedScore: number
@@ -167,6 +171,7 @@ export function useBestWindows(
 
       // Collect unique players across all days in the window
       const windowPlayers = new Map<string, number>() // name → tier
+      const gameDates: string[] = []
       let hasTuesday = false
       let daysInWindow = 0
       let d = current
@@ -174,6 +179,7 @@ export function useBestWindows(
         daysInWindow++
         if (getDayOfWeek(d) === 0) { d = addDays(d, 1); continue } // skip Sunday
         const dayPlayers = datePlayerMap.get(d)
+        if (dayPlayers && dayPlayers.size > 0) gameDates.push(d)
         // Tuesday bonus only counts when there are actual players/games on
         // that Tuesday — a bare Tuesday date in the window is worth nothing
         if (getDayOfWeek(d) === 2 && dayPlayers && dayPlayers.size > 0) hasTuesday = true
@@ -236,10 +242,14 @@ export function useBestWindows(
         // (2026-07-22), same-time games are still visit opportunities
         // (meals/coffee before or after), so conflicts don't reduce value.
 
+        // Trim the advertised span to where the games actually are — sliding
+        // windows that catch the same single game date all collapse to that
+        // date (the overlap dedupe below then keeps only the best one).
         results.push({
-          startDate: current,
-          endDate: windowEnd,
+          startDate: gameDates[0]!,
+          endDate: gameDates[gameDates.length - 1]!,
           days: daysInWindow,
+          gameDates,
           players: players.sort((a, b) => a.tier - b.tier),
           uniquePlayerCount: windowPlayers.size,
           tierWeightedScore,
@@ -249,7 +259,7 @@ export function useBestWindows(
           hasTuesday,
           timeConflictCount,
           overdueCount,
-          doubleUpCount: countDoubleUpsInWindow(current, windowEnd),
+          doubleUpCount: countDoubleUpsInWindow(gameDates[0]!, gameDates[gameDates.length - 1]!),
         })
       }
 

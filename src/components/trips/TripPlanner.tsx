@@ -334,8 +334,11 @@ export default function TripPlanner() {
     const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
     if (all.length === 0) return []
     const today = new Date().toISOString().split('T')[0]!
-    return findDoubleUps(all, players, today, addDaysISO(today, DOUBLE_UP_WINDOW_DAYS))
-  }, [proGames, ncaaGames, hsGames, summerGames, players, DOUBLE_UP_WINDOW_DAYS])
+    // Horizon covers at least the planner's selected end date so in-window
+    // verdicts don't miss double ups late in a long range.
+    const horizon = addDaysISO(today, DOUBLE_UP_WINDOW_DAYS)
+    return findDoubleUps(all, players, today, endDate > horizon ? endDate : horizon)
+  }, [proGames, ncaaGames, hsGames, summerGames, players, DOUBLE_UP_WINDOW_DAYS, endDate])
 
   // "Does X double up with Y?" — Tom's 2026-07-21 read of the priority
   // pickers as a player-combo double-up filter. For each pair of selected
@@ -352,15 +355,23 @@ export default function TripPlanner() {
         const a = priorityPlayers[i]!
         const b = priorityPlayers[j]!
         const dus = upcomingDoubleUps.filter((du) => du.playerNames.includes(a) && du.playerNames.includes(b))
-        if (dus.length > 0) {
-          out.push({ a, b, doubleUpDates: [...new Set(dus.flatMap((d) => d.dates))].sort(), closest: null })
+        const allDates = [...new Set(dus.flatMap((d) => d.dates))].sort()
+        // A verdict that says "in this window" must actually mean the
+        // planner's selected dates — the fixed 30-day horizon claimed
+        // "3 of 6 pairs double up" for an Aug 9–11 plan whose double ups
+        // were on Aug 18 (Tom 2026-07-23).
+        const inWindow = allDates.filter((d) => d >= startDate && d <= endDate)
+        if (inWindow.length > 0) {
+          out.push({ a, b, doubleUpDates: inWindow, closest: null })
+        } else if (allDates.length > 0) {
+          out.push({ a, b, doubleUpDates: null, outsideDates: allDates, closest: null })
         } else {
           out.push({ a, b, doubleUpDates: null, closest: findClosestApproach(all, a, b, today, end) })
         }
       }
     }
     return out
-  }, [priorityPlayers, upcomingDoubleUps, proGames, ncaaGames, hsGames, summerGames, DOUBLE_UP_WINDOW_DAYS])
+  }, [priorityPlayers, upcomingDoubleUps, proGames, ncaaGames, hsGames, summerGames, DOUBLE_UP_WINDOW_DAYS, startDate, endDate])
 
 
   // All players eligible for priority selection (don't filter by visits remaining)

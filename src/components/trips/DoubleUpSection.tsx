@@ -11,30 +11,37 @@ import { findNearestAirport } from '../../data/majorAirports'
 export interface PairVerdict {
   a: string
   b: string
-  /** Dates where the two actually double up; null = no double up in window */
+  /** Dates where the two double up INSIDE the selected window; null = none */
   doubleUpDates: string[] | null
-  /** When no double up: how close their schedules come (null = never within a day) */
+  /** Dates where they double up OUTSIDE the window (the actionable miss:
+   *  "shift your dates to catch it") */
+  outsideDates?: string[] | null
+  /** When no double up anywhere: how close their schedules come */
   closest: PairApproach | null
 }
 
 export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
+  // "No double up" is information, not an alert — a wall of orange banners
+  // buried the trips (Tom 2026-07-23). Misses collapse to one muted line;
+  // the per-pair detail is behind an expander.
+  const [showMisses, setShowMisses] = useState(false)
   if (verdicts.length === 0) return null
   const hits = verdicts.filter((v) => v.doubleUpDates)
   const misses = verdicts.filter((v) => !v.doubleUpDates)
 
   const missLine = (v: PairVerdict) => (
-    <p key={`${v.a}|${v.b}`} className="rounded-lg bg-accent-orange/10 px-3 py-1.5 text-xs text-accent-orange/90">
-      <strong>{v.a} + {v.b}:</strong> no double up in this window.{' '}
-      {v.closest
-        ? `Closest their schedules come: ${formatDate(v.closest.dateA)}${v.closest.dateB !== v.closest.dateA ? `/${formatDate(v.closest.dateB)}` : ''} — venues ${formatDriveTime(v.closest.driveMinutes)} apart (needs 90 min or less).`
-        : 'Their schedules are never within a day of each other in this window.'}
+    <p key={`${v.a}|${v.b}`} className="rounded-lg bg-gray-900/40 px-3 py-1.5 text-xs text-text-dim">
+      <strong className="text-text">{v.a} + {v.b}:</strong> no double up in your dates.{' '}
+      {v.outsideDates && v.outsideDates.length > 0
+        ? <>They double up <strong className="text-accent-green">{formatDate(v.outsideDates[0]!)}</strong>{v.outsideDates.length > 1 ? ` (+${v.outsideDates.length - 1} more date${v.outsideDates.length > 2 ? 's' : ''})` : ''} — shift your dates to catch it.</>
+        : v.closest
+          ? `Closest: ${formatDate(v.closest.dateA)}${v.closest.dateB !== v.closest.dateA ? `/${formatDate(v.closest.dateB)}` : ''}, venues ${formatDriveTime(v.closest.driveMinutes)} apart.`
+          : 'Their schedules are never within a day of each other in the next 30 days.'}
     </p>
   )
 
-  // With 3+ priority players the pair count explodes (5 players = 10 pairs)
-  // and a wall of "they double up" banners buries the actual cards. The
-  // good news compresses to one line; only the MISSES stay itemized —
-  // that's the actionable signal.
+  // With 3+ priority players the pair count explodes (5 players = 10 pairs).
+  // One green line for the hits, one muted expandable line for the misses.
   if (verdicts.length > 3) {
     return (
       <div className="mb-3 space-y-1">
@@ -45,7 +52,18 @@ export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
               : <><strong>{hits.length} of {verdicts.length} priority pairs</strong> double up in this window — their cards are pinned first below.</>}
           </p>
         )}
-        {misses.map(missLine)}
+        {misses.length > 0 && (
+          <button
+            onClick={() => setShowMisses((s) => !s)}
+            className="block w-full rounded-lg bg-gray-900/40 px-3 py-1.5 text-left text-xs text-text-dim hover:text-text transition-colors"
+          >
+            {misses.length} pair{misses.length !== 1 ? "s don't" : " doesn't"} line up in your dates
+            {misses.some((v) => v.outsideDates && v.outsideDates.length > 0) &&
+              ` (${misses.filter((v) => v.outsideDates && v.outsideDates.length > 0).length} could with different dates)`}
+            <span className="ml-2 text-accent-blue">{showMisses ? 'Hide details' : 'Show details'}</span>
+          </button>
+        )}
+        {showMisses && misses.map(missLine)}
       </div>
     )
   }

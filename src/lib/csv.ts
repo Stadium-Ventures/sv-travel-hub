@@ -9,15 +9,21 @@ interface RosterRow {
   [key: string]: string
 }
 
-function findColumn(row: RosterRow, candidates: string[]): string {
+export function findColumn(row: RosterRow, candidates: string[]): string {
+  const keys = Object.keys(row)
   for (const c of candidates) {
     const cl = c.toLowerCase()
-    const key = Object.keys(row).find((k) => {
+    // Exact header match FIRST, prefix matches only as fallback. A single
+    // combined pass let a new "Org Temp" sheet column shadow "Org" (it comes
+    // first and prefix-matches), blanking every player's org (2026-07-23).
+    const exact = keys.find((k) => k.trim().toLowerCase() === cl)
+    if (exact && row[exact]) return row[exact].trim()
+    // Prefix match handles "State (High School)" matching "State"
+    const prefix = keys.find((k) => {
       const kl = k.trim().toLowerCase()
-      // Exact match or starts-with match (handles "State (High School)" matching "State")
-      return kl === cl || kl.startsWith(cl + ' ') || kl.startsWith(cl + '(')
+      return kl.startsWith(cl + ' ') || kl.startsWith(cl + '(')
     })
-    if (key && row[key]) return row[key].trim()
+    if (prefix && row[prefix]) return row[prefix].trim()
   }
   return ''
 }
