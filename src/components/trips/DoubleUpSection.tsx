@@ -21,13 +21,13 @@ export interface PairVerdict {
 }
 
 export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
-  // "No double up" is information, not an alert — a wall of orange banners
-  // buried the trips (Tom 2026-07-23). Misses collapse to one muted line;
-  // the per-pair detail is behind an expander.
+  // Only MISSES render — pairs that DO double up show it on their card's
+  // green badge, so a banner restating "the cards are below" was noise
+  // (Tom 2026-07-23). Misses collapse to one muted line with an expander;
+  // the original ask stands: an impossible combo must be SAID.
   const [showMisses, setShowMisses] = useState(false)
-  if (verdicts.length === 0) return null
-  const hits = verdicts.filter((v) => v.doubleUpDates)
   const misses = verdicts.filter((v) => !v.doubleUpDates)
+  if (misses.length === 0) return null
 
   const missLine = (v: PairVerdict) => (
     <p key={`${v.a}|${v.b}`} className="rounded-lg bg-gray-900/40 px-3 py-1.5 text-xs text-text-dim">
@@ -40,51 +40,25 @@ export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
     </p>
   )
 
-  // With 3+ priority players the pair count explodes (5 players = 10 pairs).
-  // One green line for the hits, one muted expandable line for the misses.
-  if (verdicts.length > 3) {
+  // 1-2 misses show inline; more collapse behind an expander.
+  if (misses.length > 2) {
     return (
       <div className="mb-3 space-y-1">
-        {hits.length > 0 && (
-          <p className="rounded-lg bg-accent-green/10 px-3 py-1.5 text-xs text-accent-green">
-            {hits.length === verdicts.length
-              ? <>All <strong>{verdicts.length} priority pairs</strong> double up in this window — their cards are pinned first below.</>
-              : <><strong>{hits.length} of {verdicts.length} priority pairs</strong> double up in this window — their cards are pinned first below.</>}
-          </p>
-        )}
-        {misses.length > 0 && (
-          <button
-            onClick={() => setShowMisses((s) => !s)}
-            className="block w-full rounded-lg bg-gray-900/40 px-3 py-1.5 text-left text-xs text-text-dim hover:text-text transition-colors"
-          >
-            {misses.length} pair{misses.length !== 1 ? "s don't" : " doesn't"} line up in your dates
-            {misses.some((v) => v.outsideDates && v.outsideDates.length > 0) &&
-              ` (${misses.filter((v) => v.outsideDates && v.outsideDates.length > 0).length} could with different dates)`}
-            <span className="ml-2 text-accent-blue">{showMisses ? 'Hide details' : 'Show details'}</span>
-          </button>
-        )}
+        <button
+          onClick={() => setShowMisses((s) => !s)}
+          className="block w-full rounded-lg bg-gray-900/40 px-3 py-1.5 text-left text-xs text-text-dim hover:text-text transition-colors"
+        >
+          {misses.length} priority pairs don't line up in your dates
+          {misses.some((v) => v.outsideDates && v.outsideDates.length > 0) &&
+            ` (${misses.filter((v) => v.outsideDates && v.outsideDates.length > 0).length} could with different dates)`}
+          <span className="ml-2 text-accent-blue">{showMisses ? 'Hide details' : 'Show details'}</span>
+        </button>
         {showMisses && misses.map(missLine)}
       </div>
     )
   }
 
-  return (
-    <div className="mb-3 space-y-1">
-      {verdicts.map((v) => {
-        if (!v.doubleUpDates) return missLine(v)
-        const first = v.doubleUpDates[0]!
-        const last = v.doubleUpDates[v.doubleUpDates.length - 1]!
-        const when = first === last
-          ? formatDate(first)
-          : `${formatDate(first)} – ${formatDate(last)}${v.doubleUpDates.length > 2 ? ` (${v.doubleUpDates.length} dates)` : ''}`
-        return (
-          <p key={`${v.a}|${v.b}`} className="rounded-lg bg-accent-green/10 px-3 py-1.5 text-xs text-accent-green">
-            <strong>{v.a} + {v.b}</strong> double up {when} — their cards are pinned first below.
-          </p>
-        )
-      })}
-    </div>
-  )
+  return <div className="mb-3 space-y-1">{misses.map(missLine)}</div>
 }
 
 interface Props {

@@ -5,7 +5,6 @@ import { useRosterStore } from '../../store/rosterStore'
 import { useSummerStore } from '../../store/summerStore'
 import CompareStarredTrips from './CompareStarredTrips'
 import TripSummaryCard from './TripSummaryCard'
-import PlayerCoverageCard from './PlayerCoverageCard'
 // ICS export removed from main UI — kept in individual trip cards
 // import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
@@ -264,13 +263,8 @@ export default function TripPlanner() {
   const progressStep = useTripStore((s) => s.progressStep)
   const progressDetail = useTripStore((s) => s.progressDetail)
   const setDateRange = useTripStore((s) => s.setDateRange)
-  const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
-  const useHeartbeatBoost = useTripStore((s) => s.useHeartbeatBoost)
-  const setUseHeartbeatBoost = useTripStore((s) => s.setUseHeartbeatBoost)
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
-  const maxNights = useTripStore((s) => s.maxNights)
-  const setMaxNights = useTripStore((s) => s.setMaxNights)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const clearTrips = useTripStore((s) => s.clearTrips)
   const proGames = useScheduleStore((s) => s.proGames)
@@ -298,10 +292,6 @@ export default function TripPlanner() {
     }
   }, [players.length, rosterLoading, fetchRoster])
 
-  // "Refine" disclosure for the 4 controls that are shared with the Map tab
-  // (date range, starting city, drive radius). Collapsed by default since
-  // they're typically set on the Map and inherited here. Click summary to expand.
-  const [sharedControlsOpen, setSharedControlsOpen] = useState(false)
   const [sortBy] = useState<'score' | 'date'>('score') // toolbar removed 2026-07-22 — best-first, always
   const [tripFilter] = useState<'all' | 'drive' | 'fly' | 'multi' | 'anchor' | 'starred'>('all') // filter chips removed 2026-07-22
   const [tripLengthFilter] = useState<'all' | '1' | '2' | '3'>('all') // length chips removed 2026-07-22 (simplify)
@@ -309,9 +299,6 @@ export default function TripPlanner() {
   // tierFilter removed — was adding clutter to the results toolbar
   const [anchorPlayerNames, setAnchorPlayerNames] = useState<string[]>([])
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
-  // "Not Covered" explainer — lives in the Details section; also toggled by
-  // clicking the Not Covered stat card, so the state lives up here.
-  const [notCoveredOpen, setNotCoveredOpen] = useState(false)
 
 
 
@@ -434,24 +421,6 @@ export default function TripPlanner() {
   const proStale = proFetchedAt ? (now - proFetchedAt > STALE_THRESHOLD) : false
   const anyStale = proStale
 
-  // Summer assignment + game counts for the freshness pill
-  const summerAssignmentsCount = useSummerStore((s) => s.assignments.length)
-  const summerActiveCount = useSummerStore((s) => s.assignments.filter((a) => a.active).length)
-  const summerGamesCount = useSummerStore((s) => s.summerGames.length)
-  const summerUnresolved = useSummerStore((s) => s.unresolvedPlayers.length)
-  const summerFetchedAt = useSummerStore((s) => s.fetchedAt)
-  const rosterMovesCount = useScheduleStore((s) => s.rosterMoves.length)
-  const rosterMovesCheckedAt = useScheduleStore((s) => s.rosterMovesCheckedAt)
-
-  // Freshness helper — formats a timestamp as "5h ago" / "2d ago"
-  function relativeAge(iso: string | null | undefined): string {
-    if (!iso) return 'never'
-    const ageMs = Date.now() - new Date(iso).getTime()
-    const h = ageMs / 3600000
-    if (h < 1) return 'just now'
-    if (h < 24) return `${Math.round(h)}h ago`
-    return `${Math.round(h / 24)}d ago`
-  }
 
   // (formatAge removed — schedule badges simplified)
 
@@ -677,74 +646,13 @@ export default function TripPlanner() {
           </span>
         </div>
 
-        {/* Trip options — drive + length caps (drive-based app; flights
-            are the user's own business). Tucked behind a
-            disclosure so results stay close to the Generate button. */}
-        <div className="mt-3">
-          <button
-            onClick={() => setSharedControlsOpen((v) => !v)}
-            className="text-xs text-text-dim hover:text-text transition-colors"
-          >
-            {sharedControlsOpen ? '▾' : '▸'} Trip options
-            <span className="text-text-dim/50">
-              {' '}— drive up to {Math.floor(maxDriveMinutes / 60)}h · {maxNights} night{maxNights !== 1 ? 's' : ''} max
-            </span>
-          </button>
-          {sharedControlsOpen && (
-            <div className="mt-2 flex flex-wrap items-end gap-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
-              <div>
-                <label className="mb-1 block text-xs text-text-dim">
-                  Max Drive: {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''}
-                </label>
-                <input
-                  type="range"
-                  min={120}
-                  max={480}
-                  step={30}
-                  value={maxDriveMinutes}
-                  onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
-                  className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
-                />
-                <p className="mt-0.5 text-[11px] text-text-dim/50" title="Drive times are rough estimates — actual times depend on traffic and route">
-                  How far you'll drive within the trip's area · estimates only
-                </p>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-text-dim">
-                  Max Trip: {maxNights} night{maxNights !== 1 ? 's' : ''}
-                </label>
-                <div className="flex gap-1">
-                  {([1, 2, 3] as const).map((n) => (
-                    <button
-                      key={n}
-                      onClick={() => setMaxNights(n)}
-                      title={n === 1 ? 'Day trips and overnights only — back home the next day.' : n === 2 ? 'Up to 2 nights away — covers most multi-stop trips.' : 'Up to 3 nights — the maximum trip length.'}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                        maxNights === n ? 'bg-accent-blue/20 text-accent-blue ring-1 ring-accent-blue/30' : 'bg-gray-950 border border-border text-text-dim hover:text-text'
-                      }`}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-0.5 text-[11px] text-text-dim/50">
-                  {maxNights === 1 ? 'Quick trips — 1-2 days max' : maxNights === 2 ? 'Standard trips — up to 3 days' : 'Longest trips — 3-day rule'}
-                </p>
-              </div>
-              {/* Heartbeat boost toggle */}
-              <label className="flex w-full items-center gap-2 text-xs text-text-dim cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={useHeartbeatBoost}
-                  onChange={(e) => setUseHeartbeatBoost(e.target.checked)}
-                  className="rounded border-border accent-accent-blue"
-                />
-                Prioritize overdue players
-                <span className="text-text-dim/50">(boost players who haven't been visited recently according to the <a href="https://sv-heartbeat.vercel.app/" target="_blank" rel="noopener noreferrer" className="text-accent-blue hover:underline">Heartbeat app</a>)</span>
-              </label>
-            </div>
-          )}
-        </div>
+        {/* Trip options panel removed (Tom 2026-07-23): Max Drive is the
+            map's Drive chip (same shared value), overdue priority lives in
+            the map's strategy dropdown, and trip length is fixed at Kent's
+            3-day rule. One static line keeps the drive setting visible. */}
+        <p className="mt-3 text-xs text-text-dim/60">
+          Trips assume up to {Math.floor(maxDriveMinutes / 60)}h driving within the area (set with the Drive chip on the Map) · 3 days max
+        </p>
 
         {/* Priority players — selected names as chips + ONE add picker
             (2026-07-21 apple-fy: five empty search boxes read as a form). */}
@@ -1135,10 +1043,12 @@ export default function TripPlanner() {
           {/* Fly-in visits — all options */}
           {/* Fly-ins are now merged into the unified trip list above */}
 
-          {/* Truly unreachable players (no games at all) — with reasons */}
+          {/* Players whose games are far from this trip's area. The old
+              "N players with no games in date range" wall moved off the
+              planner entirely (Tom 2026-07-23) — that's a data-health
+              concern, and its per-player "reasons" read as broken data. */}
           {(() => {
             const beyondFlight = tripPlan.unvisitablePlayers.filter((e) => e.reason.startsWith('Beyond max flight'))
-            const noGames = tripPlan.unvisitablePlayers.filter((e) => !e.reason.startsWith('Beyond max flight'))
             return (
               <>
                 {beyondFlight.length > 0 && (
@@ -1166,64 +1076,6 @@ export default function TripPlanner() {
                     </div>
                   </div>
                 )}
-                {noGames.length > 0 && (() => {
-                  // Split into expected (season over) vs actionable (missing data)
-                  const seasonOver = noGames.filter((e) => e.reason.includes('season may be over'))
-                  const missingData = noGames.filter((e) => !e.reason.includes('season may be over'))
-                  const t1Count = missingData.filter((e) => (playerMap.get(e.name)?.tier ?? 4) === 1).length
-                  const t2Count = missingData.filter((e) => (playerMap.get(e.name)?.tier ?? 4) === 2).length
-
-                  return (
-                    <details id="section-no-games" className="rounded-xl border border-border/50 bg-surface">
-                      <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-text-dim">
-                        {noGames.length} player{noGames.length !== 1 ? 's' : ''} with no games in date range
-                        {(t1Count > 0 || t2Count > 0) && (
-                          <span className="ml-2 text-xs font-normal text-accent-orange">
-                            ({t1Count > 0 ? `${t1Count} must-see` : ''}{t1Count > 0 && t2Count > 0 ? ', ' : ''}{t2Count > 0 ? `${t2Count} high-priority` : ''} need attention)
-                          </span>
-                        )}
-                      </summary>
-                      <div className="border-t border-border/30 px-5 py-3 space-y-3">
-                        {/* Actionable: missing data */}
-                        {missingData.length > 0 && (
-                          <div className="space-y-1.5">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-accent-orange">Missing schedule data</p>
-                            {missingData.map((entry) => {
-                              const player = playerMap.get(entry.name)
-                              const tier = player?.tier ?? 4
-                              const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                              return (
-                                <div key={entry.name} className="flex items-center gap-2 text-sm">
-                                  <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-                                  <span className="font-medium text-accent-orange cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
-                                  <span className="text-xs text-text-dim">{TIER_LABELS[tier] ?? ''}</span>
-                                  <span className="text-xs text-text-dim/70">— {entry.reason}</span>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                        {/* Expected: season over */}
-                        {seasonOver.length > 0 && (
-                          <div className="space-y-1.5">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-text-dim/50">Season over for date range</p>
-                            {seasonOver.map((entry) => {
-                              const player = playerMap.get(entry.name)
-                              const tier = player?.tier ?? 4
-                              return (
-                                <div key={entry.name} className="flex items-center gap-2 text-sm text-text-dim/60">
-                                  <span className="h-2 w-2 rounded-full bg-gray-600" />
-                                  <span className="cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
-                                  <span className="text-xs">{TIER_LABELS[tier] ?? ''}</span>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </details>
-                  )
-                })()}
               </>
             )
           })()}
@@ -1231,176 +1083,6 @@ export default function TripPlanner() {
         </>
       )}
 
-      {/* Details — data freshness, quality, and coverage diagnostics.
-          Collapsed by default so results stay front and center. */}
-      <details className="rounded-xl border border-border/50 bg-surface">
-        <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-text-dim hover:text-text">
-          Details
-          <span className="ml-2 text-xs font-normal text-text-dim/50">data freshness, quality &amp; player coverage</span>
-        </summary>
-        <div className="border-t border-border/30 px-5 py-4 space-y-4">
-          {/* Freshness pills — one per data layer */}
-          {allSchedulesLoaded && !anyScheduleLoading ? (
-            <div className="flex flex-wrap gap-1.5 text-[10px] text-text-dim">
-              <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title={`Pro schedules last fetched ${relativeAge(proFetchedAt ? new Date(proFetchedAt).toISOString() : null)}. Live from MLB Stats API.`}>
-                Pro · {proGames.length} games · {proStale ? <span className="text-accent-orange">stale</span> : relativeAge(proFetchedAt ? new Date(proFetchedAt).toISOString() : null)}
-              </span>
-              <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title="NCAA schedules are bundled from D1Baseball generation. Static.">
-                NCAA · {ncaaGames.length} games · bundled
-              </span>
-              {hasHsPlayers && (
-                <span className="rounded bg-gray-800/60 px-1.5 py-0.5" title="HS schedules are bundled from a generated CSV. Static.">
-                  HS · {hsGames.length} games · bundled
-                </span>
-              )}
-              {summerAssignmentsCount > 0 && (
-                <span className="rounded bg-gray-800/60 px-1.5 py-0.5"
-                  title={`${summerActiveCount} active summer assignment(s); ${summerGamesCount} games loaded${summerUnresolved > 0 ? `; ${summerUnresolved} player(s) without fetchable schedule (PGCBL/NECBL/FCBL pending)` : ''}.`}>
-                  Summer · {summerGamesCount} games · {relativeAge(summerFetchedAt)}
-                  {summerUnresolved > 0 && <span className="ml-1 text-accent-orange">({summerUnresolved} pending)</span>}
-                </span>
-              )}
-              {rosterMovesCheckedAt && (
-                <span className="rounded bg-gray-800/60 px-1.5 py-0.5"
-                  title={`MLB transactions checked ${relativeAge(rosterMovesCheckedAt)}. ${rosterMovesCount} player movement(s) detected.`}>
-                  Roster moves · {rosterMovesCount === 0 ? 'none' : `${rosterMovesCount} detected`} · {relativeAge(rosterMovesCheckedAt)}
-                </span>
-              )}
-            </div>
-          ) : (
-            <p className="text-xs text-text-dim">{anyScheduleLoading ? 'Schedules are still loading...' : 'Schedules not loaded yet.'}</p>
-          )}
-
-          {/* Data quality — game-source confidence across the current results */}
-          {tripPlan && tripGrouping && (() => {
-            const confidenceCounts = { mlb: 0, d1: 0, hsConfirmed: 0, estimated: 0 }
-            const countedGameIds = new Set<string>()
-            function countGame(g: { id: string; source: import('../../types/schedule').ScheduleSource; confidence?: import('../../types/schedule').VisitConfidence }) {
-              if (countedGameIds.has(g.id)) return
-              countedGameIds.add(g.id)
-              if (g.source === 'mlb-api') confidenceCounts.mlb++
-              else if (g.source === 'ncaa-lookup' && g.confidence === 'high') confidenceCounts.d1++
-              else if (g.source === 'hs-lookup' && g.confidence === 'high') confidenceCounts.hsConfirmed++
-              else confidenceCounts.estimated++
-            }
-            for (const item of tripGrouping.unified) {
-              if (item.type === 'road') {
-                countGame(item.trip.anchorGame)
-                for (const g of item.trip.nearbyGames) countGame(g)
-              } else if (item.visit.isCombo && item.visit.stops) {
-                for (const s of item.visit.stops) countGame({ id: `${s.venue.name}-${s.date}`, source: s.source, confidence: s.confidence })
-              } else {
-                countGame({ id: `${item.visit.venue.name}-${item.visit.dates[0]}`, source: item.visit.source, confidence: item.visit.confidence })
-              }
-            }
-            const totalGames = confidenceCounts.mlb + confidenceCounts.d1 + confidenceCounts.hsConfirmed + confidenceCounts.estimated
-            if (totalGames === 0) return null
-            return (
-              <p className="text-[11px] text-text-dim/70">
-                Data quality: {' '}
-                {confidenceCounts.mlb > 0 && <span className="text-accent-green">{confidenceCounts.mlb} confirmed <span className="text-text-dim/40">(MLB API)</span></span>}
-                {confidenceCounts.mlb > 0 && (confidenceCounts.d1 + confidenceCounts.hsConfirmed + confidenceCounts.estimated > 0) && <span className="text-text-dim/30"> · </span>}
-                {confidenceCounts.d1 > 0 && <span className="text-accent-blue/70">{confidenceCounts.d1} likely <span className="text-text-dim/40">(D1Baseball)</span></span>}
-                {confidenceCounts.d1 > 0 && (confidenceCounts.hsConfirmed + confidenceCounts.estimated > 0) && <span className="text-text-dim/30"> · </span>}
-                {confidenceCounts.hsConfirmed > 0 && <span className="text-accent-blue/70">{confidenceCounts.hsConfirmed} confirmed <span className="text-text-dim/40">(schedule sheet)</span></span>}
-                {confidenceCounts.hsConfirmed > 0 && confidenceCounts.estimated > 0 && <span className="text-text-dim/30"> · </span>}
-                {confidenceCounts.estimated > 0 && <span className="text-accent-orange">{confidenceCounts.estimated} estimated <span className="text-text-dim/40">(location approximate)</span></span>}
-              </p>
-            )
-          })()}
-
-          {/* Coverage stats — who made it into a trip and who didn't */}
-          {tripPlan && (() => {
-            // Collect all player names that appear in road trips
-            const roadTripPlayerNames = [...new Set(tripPlan.trips.flatMap((t) => [
-              ...t.anchorGame.playerNames,
-              ...t.nearbyGames.flatMap((g) => g.playerNames),
-            ]))]
-            // Collect fly-in player names
-            const flyInPlayerNames = [...new Set(tripPlan.flyInVisits.flatMap((v) => v.playerNames))]
-            // Unique players across ALL trip types
-            const allTripPlayerNames = [...new Set([...roadTripPlayerNames, ...flyInPlayerNames])]
-            const totalEligible = players.length
-
-            const notCoveredCount = Math.max(0, totalEligible - allTripPlayerNames.length)
-
-            // Build detailed breakdown of why players aren't covered
-            const coveredSet = new Set(allTripPlayerNames)
-            const uncoveredPlayers = players.filter((p) => !coveredSet.has(p.playerName))
-            const unvisitableMap = new Map(tripPlan.unvisitablePlayers.map((u) => [u.name, u.reason]))
-
-            // Group by reason — inactive players (from skippedPlayers) first
-            const skippedMap = new Map(tripPlan.skippedPlayers.map((s) => [s.name, s.reason]))
-            const inactivePlayers = uncoveredPlayers.filter((p) => {
-              const reason = skippedMap.get(p.playerName)
-              return reason && reason !== 'Tier 4 — no visits required'
-            })
-            const inactiveSet = new Set(inactivePlayers.map(p => p.playerName))
-            const remainingUncovered = uncoveredPlayers.filter(p => !inactiveSet.has(p.playerName))
-
-            const beyondFlight = remainingUncovered.filter((p) => unvisitableMap.get(p.playerName)?.startsWith('Beyond max flight'))
-            const noGamesInRange = remainingUncovered.filter((p) => {
-              const r = unvisitableMap.get(p.playerName)
-              return r && !r.includes('not selected') && (r.includes('No games in date range') || r.includes('season may be over'))
-            })
-            const noSchedule = remainingUncovered.filter((p) => {
-              const r = unvisitableMap.get(p.playerName)
-              return r && (r.includes('No schedule') || r.includes('No venue') || r.includes('geocoding'))
-            })
-            const otherUncovered = remainingUncovered.filter((p) =>
-              !beyondFlight.includes(p) && !noGamesInRange.includes(p) && !noSchedule.includes(p)
-            )
-
-            return (
-            <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <StatCard label="Total Trips" value={tripPlan.trips.length + displayedFlyIns.length} scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
-              <div title={`${allTripPlayerNames.length} of your ${totalEligible} players appear in at least one trip option.`}>
-                <StatCard label="Players in Trips" value={allTripPlayerNames.length} accent="blue" scrollTo="section-road-trips" hoverNames={allTripPlayerNames} />
-              </div>
-              <StatCard
-                label="Not Covered"
-                value={notCoveredCount}
-                accent={notCoveredCount <= 2 ? 'green' : 'orange'}
-                hoverNames={uncoveredPlayers.map((p) => p.playerName)}
-                onClick={notCoveredCount > 0 ? () => setNotCoveredOpen((v) => !v) : undefined}
-              />
-            </div>
-
-            {/* Not Covered explainer — expandable (also toggled by clicking
-                the Not Covered card above) */}
-            {notCoveredCount > 0 && (
-              <NotCoveredExplainer
-                expanded={notCoveredOpen}
-                onToggle={() => setNotCoveredOpen((v) => !v)}
-                inactivePlayers={inactivePlayers}
-                skippedMap={skippedMap}
-                beyondFlight={beyondFlight}
-                noGamesInRange={noGamesInRange}
-                noSchedule={noSchedule}
-                otherUncovered={otherUncovered}
-                unvisitableMap={unvisitableMap}
-                onPlayerClick={setSelectedPlayer}
-                priorityPlayers={priorityPlayers}
-                setPriorityPlayers={setPriorityPlayers}
-              />
-            )}
-            </>
-            )
-          })()}
-
-          {/* Player Coverage — answers "where is Player X?" */}
-          {tripPlan && (
-            <PlayerCoverageCard
-              players={players}
-              allGames={[...proGames, ...ncaaGames, ...hsGames]}
-              onPlayerClick={setSelectedPlayer}
-              onLoadAll={handleLoadAllSchedules}
-              loadingAll={anyScheduleLoading}
-            />
-          )}
-        </div>
-      </details>
 
       {/* Did you know? — rotating app tips (below results per Kent's flow) */}
       <DidYouKnow />
@@ -1425,52 +1107,6 @@ export default function TripPlanner() {
   )
 }
 
-function StatCard({ label, value, accent, scrollTo, hoverNames, onClick }: {
-  label: string
-  value: string | number
-  accent?: string
-  scrollTo?: string
-  hoverNames?: string[]
-  onClick?: () => void
-}) {
-  // Popover shows on hover (desktop) and PINS on click/tap (mobile-friendly —
-  // hover-only meant iPad users could never see the player list).
-  const [pinned, setPinned] = useState(false)
-  const [hovering, setHovering] = useState(false)
-  const hasNames = !!hoverNames && hoverNames.length > 0
-  const showPopover = hasNames && (pinned || hovering)
-  const accentColor =
-    accent === 'green' ? 'text-accent-green' :
-    accent === 'blue' ? 'text-accent-blue' :
-    accent === 'orange' ? 'text-accent-orange' :
-    accent === 'red' ? 'text-accent-red' :
-    'text-text'
-
-  // Click precedence: explicit onClick > toggle the popover > scroll target.
-  function handleClick() {
-    if (onClick) { onClick(); return }
-    if (hasNames) { setPinned((v) => !v); return }
-    if (scrollTo) document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-  const isClickable = !!onClick || hasNames || !!scrollTo
-  return (
-    <div
-      className={`relative rounded-xl border border-border bg-surface p-4 ${isClickable ? 'cursor-pointer hover:border-border/80 hover:bg-surface/80 transition-colors' : ''}`}
-      onClick={isClickable ? handleClick : undefined}
-      onMouseEnter={hasNames ? () => setHovering(true) : undefined}
-      onMouseLeave={() => setHovering(false)}
-    >
-      <p className="text-xs font-medium text-text-dim">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${accentColor}`}>{value}</p>
-      {showPopover && (
-        <div className="absolute left-0 top-full z-30 mt-1 max-h-48 w-64 overflow-y-auto rounded-lg border border-border bg-gray-950 p-2 shadow-lg">
-          <p className="mb-1 text-[10px] font-medium text-text-dim">{label} ({hoverNames!.length}){pinned ? ' — tap card to close' : ''}</p>
-          <p className="text-[11px] text-text leading-relaxed">{hoverNames!.join(', ')}</p>
-        </div>
-      )}
-    </div>
-  )
-}
 
 // --- Trip Anchor: "I'll be in [city], who can I see nearby?" ---
 function TripAnchor({
@@ -1739,206 +1375,16 @@ function TripAnchor({
 }
 
 /* ── Did You Know? ── rotating app tips ── */
+// Keep these true to the CURRENT UI — stale tips referencing removed
+// controls (drive slider, sort toolbar, stat cards) confused more than
+// they helped (Tom 2026-07-23).
 const APP_TIPS = [
   'Click any player name to see their full schedule and upcoming games.',
   'Use Priority Players to build trips around specific guys first.',
-  'Hover over yellow badges for details on what\'s estimated or unconfirmed.',
-  '"Not Covered" means no trip exists yet — try widening your date range or increasing the drive slider.',
-  'Combo fly-ins cluster nearby players so you can see more per trip.',
-  'The drive time slider controls which trips appear — slide right to see more options.',
-  'Sort trips by "Best" for our recommendation, or "Date" to plan chronologically.',
-  'Hover over the stat cards (Total Trips, Players in Trips) to see which players are included.',
-  '"Verify" links open the source schedule so you can double-check game details.',
-  'Estimated pro assignments auto-correct once official rosters are published — just hit Check Assignments again.',
-  'The "Prioritize overdue players" checkbox boosts players who haven\'t been visited recently.',
-  'Filter trips by Drives or Flights to focus on one travel type at a time.',
-  'Click the "Not Covered" section to see exactly which players are missing and why.',
+  'Green dates on a trip card are double ups — 2+ clients in one outing.',
+  'Set the star and drive radius on the Map to control where trips are built.',
+  'Estimated pro assignments auto-correct once official rosters are published.',
 ]
-
-/* ── Not Covered Explainer ── shows who isn't in any trip and why ── */
-function NotCoveredExplainer({
-  expanded, onToggle,
-  inactivePlayers, skippedMap,
-  beyondFlight, noGamesInRange, noSchedule, otherUncovered, unvisitableMap, onPlayerClick,
-  priorityPlayers, setPriorityPlayers,
-}: {
-  expanded: boolean
-  onToggle: () => void
-  inactivePlayers: RosterPlayer[]
-  skippedMap: Map<string, string>
-  beyondFlight: RosterPlayer[]
-  noGamesInRange: RosterPlayer[]
-  noSchedule: RosterPlayer[]
-  otherUncovered: RosterPlayer[]
-  unvisitableMap: Map<string, string>
-  onPlayerClick: (name: string) => void
-  priorityPlayers: string[]
-  setPriorityPlayers: (players: string[]) => void
-}) {
-  const total = inactivePlayers.length + beyondFlight.length + noGamesInRange.length + noSchedule.length + otherUncovered.length
-  if (total === 0) return null
-
-  return (
-    <div className="rounded-xl border border-accent-orange/20 bg-accent-orange/5">
-      <button
-        onClick={onToggle}
-        className="flex w-full items-center justify-between px-4 py-2.5 text-left"
-      >
-        <span className="text-xs font-medium text-accent-orange">
-          {expanded ? '▾' : '▸'} {total} player{total !== 1 ? 's' : ''} not in any trip — why?
-        </span>
-        <span className="text-[10px] text-accent-orange/50">{expanded ? 'hide' : 'show'}</span>
-      </button>
-      {expanded && (
-        <div className="border-t border-accent-orange/10 px-4 py-3 space-y-3">
-          {inactivePlayers.length > 0 && (
-            <div>
-              <p className="text-[11px] font-medium text-accent-red mb-1">Inactive ({inactivePlayers.length})</p>
-              <p className="text-[10px] text-text-dim/60 mb-1.5">These players are marked as unavailable in the roster and excluded from trip planning.</p>
-              <div className="flex flex-wrap gap-1">
-                {inactivePlayers.map((p) => {
-                  const reason = skippedMap.get(p.playerName) ?? p.status
-                  return (
-                    <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
-                      {p.playerName} <span className="rounded bg-accent-red/15 px-1 py-0.5 text-[10px] font-medium text-accent-red ml-0.5">{reason}</span>
-                    </span>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-          {beyondFlight.length > 0 && (
-            <div>
-              <p className="text-[11px] font-medium text-accent-orange mb-1">Too far to reach ({beyondFlight.length})</p>
-              <p className="text-[10px] text-text-dim/60 mb-1.5">These players' games are nowhere near this trip's area — plan a separate trip around them.</p>
-              <div className="flex flex-wrap gap-1">
-                {beyondFlight.map((p) => (
-                  <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
-                    {p.playerName} <span className="text-text-dim/40">({p.org})</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          {noGamesInRange.length > 0 && (
-            <div>
-              <p className="text-[11px] font-medium text-accent-orange mb-1">No games in your date range ({noGamesInRange.length})</p>
-              <p className="text-[10px] text-text-dim/60 mb-1.5">These players have schedules, but no games fall within your selected dates. Try extending your end date.</p>
-              <div className="flex flex-wrap gap-1">
-                {noGamesInRange.map((p) => {
-                  const reason = unvisitableMap.get(p.playerName)
-                  return (
-                    <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
-                      {p.playerName} <span className="text-text-dim/40">({reason?.includes('season may be over') ? 'season may be over' : p.org})</span>
-                    </span>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-          {noSchedule.length > 0 && (
-            <div>
-              <p className="text-[11px] font-medium text-accent-orange mb-1">No schedule data ({noSchedule.length})</p>
-              <p className="text-[10px] text-text-dim/60 mb-1.5">We couldn't find or load a schedule for these players. Their team may not be recognized, or data hasn't been published yet.</p>
-              <div className="flex flex-wrap gap-1">
-                {noSchedule.map((p) => (
-                  <span key={p.playerName} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10" onClick={() => onPlayerClick(p.playerName)}>
-                    {p.playerName} <span className="text-text-dim/40">({p.org})</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          {otherUncovered.length > 0 && (() => {
-            const TIER_EXPLAIN: Record<number, string> = {
-              1: 'Must-see',
-              2: 'High priority',
-              3: 'Standard',
-              4: 'Development',
-            }
-            const TIER_COLOR: Record<number, string> = {
-              1: 'text-accent-red',
-              2: 'text-accent-orange',
-              3: 'text-yellow-400',
-              4: 'text-text-dim',
-            }
-            // Group by tier
-            const byTier = new Map<number, typeof otherUncovered>()
-            for (const p of otherUncovered) {
-              const tier = p.tier ?? 4
-              const arr = byTier.get(tier) ?? []
-              arr.push(p)
-              byTier.set(tier, arr)
-            }
-            const sortedTiers = [...byTier.entries()].sort((a, b) => a[0] - b[0])
-            const highTierCount = (byTier.get(1)?.length ?? 0) + (byTier.get(2)?.length ?? 0)
-
-            const canAddPriority = priorityPlayers.length < PRIORITY_SLOTS
-            const isAlreadyPriority = (name: string) => priorityPlayers.includes(name)
-            const addAsPriority = (name: string) => {
-              if (!canAddPriority || isAlreadyPriority(name)) return
-              setPriorityPlayers([...priorityPlayers, name])
-            }
-
-            return (
-            <div>
-              <p className="text-[11px] font-medium text-text-dim mb-1">Have games but not in a trip ({otherUncovered.length})</p>
-              <p className="text-[10px] text-text-dim/60 mb-1.5">
-                {highTierCount > 0
-                  ? `${highTierCount} high-priority player${highTierCount !== 1 ? 's' : ''} missed — try adding them as Priority Players. Lower-tier players are included when they're near higher-priority stops.`
-                  : 'These are mostly lower-tier players. The engine prioritizes trips with must-see and high-priority players first. Add any of these as a Priority Player to force the engine to build a trip around them.'}
-              </p>
-              {highTierCount > 0 && (
-                <p className="text-[10px] text-accent-blue/70 mb-2 italic">
-                  Click any must-see or high-priority player below to add them as a Priority Player — the engine will build trips around them.
-                </p>
-              )}
-              <div className="space-y-2">
-                {sortedTiers.map(([tier, players]) => {
-                  const isClickableTier = tier <= 2
-                  return (
-                  <div key={tier}>
-                    <p className={`text-[10px] font-medium mb-1 ${TIER_COLOR[tier] ?? 'text-text-dim'}`}>
-                      Tier {tier} — {TIER_EXPLAIN[tier] ?? 'Other'} ({players.length})
-                    </p>
-                    <div className="flex flex-wrap gap-1">
-                      {players.map((p) => {
-                        const r = unvisitableMap.get(p.playerName)
-                        const gameCount = r?.match(/Has (\d+) game/)?.[1]
-                        const alreadyPrio = isAlreadyPriority(p.playerName)
-                        const clickable = isClickableTier && canAddPriority && !alreadyPrio
-                        return (
-                          <span
-                            key={p.playerName}
-                            className={`rounded-full bg-surface px-2 py-0.5 text-[11px] text-text cursor-pointer hover:bg-accent-blue/10 ${clickable ? 'ring-1 ring-accent-blue/30 hover:ring-accent-blue/60' : ''} ${alreadyPrio ? 'opacity-50' : ''}`}
-                            title={isClickableTier ? (alreadyPrio ? 'Already a Priority Player' : canAddPriority ? 'Click to add as Priority Player' : `Priority Player slots full (max ${PRIORITY_SLOTS})`) : undefined}
-                            onClick={() => {
-                              if (clickable) {
-                                addAsPriority(p.playerName)
-                              } else {
-                                onPlayerClick(p.playerName)
-                              }
-                            }}
-                          >
-                            {p.playerName} <span className="text-text-dim/40">({p.org}{gameCount ? ` · ${gameCount} games` : ''})</span>
-                            {isClickableTier && canAddPriority && !alreadyPrio && <span className="text-accent-blue/60 ml-0.5">+</span>}
-                            {alreadyPrio && <span className="text-accent-green/60 ml-0.5">✓</span>}
-                          </span>
-                        )
-                      })}
-                    </div>
-                  </div>
-                  )
-                })}
-              </div>
-            </div>
-            )
-          })()}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function DidYouKnow() {
   const [index, setIndex] = useState(() => Math.floor(Math.random() * APP_TIPS.length))

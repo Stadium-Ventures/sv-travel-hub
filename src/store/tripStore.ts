@@ -464,6 +464,9 @@ export const useTripStore = create<TripState>()(
         const today = defaultStart()
         if (state.endDate < today) state.setDateRange(defaultStart(), defaultEnd())
         else if (state.startDate < today) state.setDateRange(today, state.endDate)
+        // Nights UI removed 2026-07-23 — pin persisted values to Kent's
+        // 3-day rule (2 nights) so old 1/3 settings don't silently differ.
+        if (state.maxNights !== 2) state.maxNights = 2
       },
       merge: (persisted, current) => {
         const p = persisted as any
