@@ -86,7 +86,13 @@ function AutoFetchData() {
   const rosterFetched = useRosterStore((s) => s.lastFetchedAt)
   useEffect(() => {
     const stale = !rosterFetched || (Date.now() - new Date(rosterFetched).getTime() > TWENTY_FOUR_H)
-    if (stale) fetchRoster()
+    // Corrupt-roster self-heal: a persisted roster where most orgs are
+    // blank came from a parse bug (e.g. the 2026-07-23 "Org Temp" column
+    // shadowing "Org"), and its fresh timestamp would otherwise block a
+    // refetch for 24h — the fixed parser never gets a chance to run.
+    const ps = useRosterStore.getState().players
+    const corrupt = ps.length > 0 && ps.filter((p) => !p.org?.trim()).length > ps.length / 2
+    if (stale || corrupt) fetchRoster()
   }, [fetchRoster, rosterFetched, TWENTY_FOUR_H])
 
   const fetchHeartbeat = useHeartbeatStore((s) => s.fetchHeartbeat)
@@ -151,6 +157,10 @@ function AutoFetchData() {
   useEffect(() => {
     if (schedulesInitialized.current) return
     if (players.length === 0) return // wait for roster
+    // Don't burn the one-shot schedule init on a corrupt roster (mostly
+    // blank orgs) — the roster effect above is refetching it; this effect
+    // re-runs when the healthy players array lands.
+    if (players.filter((p) => !p.org?.trim()).length > players.length / 2) return
     const anyLoading = schedulesLoading || ncaaLoading || hsLoading
     if (anyLoading) return
 
