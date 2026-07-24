@@ -6,7 +6,7 @@ import type { RosterPlayer } from '../../types/roster'
 import { useTripStore } from '../../store/tripStore'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 import { formatDate, formatDriveTime } from '../../lib/formatters'
-import { DatesAndTimes, byStartTime, airportLabelFor } from '../trips/DoubleUpSection'
+import { DatesAndTimes, byStartTime, airportLabelFor, driveTierClass, driveTierTitle } from '../trips/DoubleUpSection'
 
 // One panel, three questions: WHEN should I travel, WHERE should I go,
 // and WHO can I double up on. Replaces the old stacked Best Windows +
@@ -471,8 +471,8 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
               <span title={typeInfo.hint}>· {typeInfo.label}</span>
               {du.driveMinutesBetween > 0 && (
                 <span
-                  className={`font-medium ${du.driveMinutesBetween <= 45 ? 'text-accent-green' : 'text-yellow-400'}`}
-                  title={du.driveMinutesBetween <= 45 ? 'Green: within 45 min' : 'Yellow: 46–90 min'}
+                  className={`font-medium ${driveTierClass(du.driveMinutesBetween)}`}
+                  title={driveTierTitle(du.driveMinutesBetween)}
                 >
                   · {formatDriveTime(du.driveMinutesBetween)} apart
                 </span>
@@ -527,7 +527,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
         </button>
       )}
       <p className="text-[10px] text-text-dim/40">
-        Click <span className="text-text-dim">Show on map</span> to draw a pair — <span className="text-accent-green">green ≤45 min</span> · <span className="text-yellow-400">yellow 46–90 min</span> · dashed = overnight · ×2 = one game covers both.
+        Click <span className="text-text-dim">Show on map</span> to draw a pair — <span className="text-accent-green">green ≤45 min</span> · <span className="text-yellow-400">yellow 46–90 min</span> · <span className="text-accent-orange">orange 91 min–2h</span> · dashed = overnight · ×2 = one game covers both.
       </p>
     </div>
   )

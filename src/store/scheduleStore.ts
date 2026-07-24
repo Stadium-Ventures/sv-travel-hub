@@ -113,7 +113,11 @@ function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[])
   const coords = extractVenueCoords(game)
   if (!coords) return null
 
-  const date = new Date(game.gameDate)
+  // officialDate is the venue-LOCAL calendar date. gameDate is UTC, so a
+  // 6:40 PM PT game carries a UTC timestamp on the NEXT day — deriving the
+  // date from it shifted every late game forward (Petco "two games on 7/29"
+  // that MLB lists as 7/28 + 7/29, Tom 2026-07-24).
+  const localDate = game.officialDate ?? game.gameDate.split('T')[0]!
   const isHome = game.teams.home.team.id === teamId
 
   // All players passed in are assigned to `teamId`, so they share one side
@@ -132,9 +136,9 @@ function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[])
 
   return {
     id: `mlb-${game.gamePk}`,
-    date: game.gameDate.split('T')[0]!,
-    dayOfWeek: date.getUTCDay(),
-    time: date.toISOString(),
+    date: localDate,
+    dayOfWeek: new Date(localDate + 'T12:00:00Z').getUTCDay(),
+    time: new Date(game.gameDate).toISOString(),
     homeTeam: game.teams.home.team.name,
     awayTeam: game.teams.away.team.name,
     isHome,
@@ -1518,7 +1522,11 @@ export const useScheduleStore = create<ScheduleState>()(
       // routes every client through the cold path: fresh auto-assign with
       // the fixed logic, fresh schedule fetch with per-event player copies.
       // Manual assignments survive.
-      version: 4,
+      // v5 (2026-07-24): purge proGames again — cached events carried dates
+      // derived from the UTC gameDate, which shifted every night game
+      // starting ≥8pm ET to the next day (Petco 7/28 listed as 7/29).
+      // mlbGameToEvent now uses officialDate; the cache must refetch.
+      version: 5,
       storage: createJSONStorage(() => idbStorage),
       migrate: (persisted: any, version: number) => {
         const keptAssignments: Record<string, PlayerTeamAssignment> = {}
@@ -1529,7 +1537,7 @@ export const useScheduleStore = create<ScheduleState>()(
             if ((a as PlayerTeamAssignment)?.source === 'manual') keptAssignments[name] = a as PlayerTeamAssignment
           }
         }
-        const purge = version < 4
+        const purge = version < 5
         return {
           playerTeamAssignments: keptAssignments,
           affiliates: persisted?.affiliates ?? [],

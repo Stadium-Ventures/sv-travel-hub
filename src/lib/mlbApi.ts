@@ -46,6 +46,10 @@ export interface MLBAffiliate {
 export interface MLBGameRaw {
   gamePk: number
   gameDate: string
+  /** Venue-local calendar date (YYYY-MM-DD). gameDate is UTC, so a West
+   *  Coast night game's UTC date is the NEXT day — never derive the
+   *  schedule date from gameDate. */
+  officialDate?: string
   teams: {
     away: {
       team: { id: number; name: string }

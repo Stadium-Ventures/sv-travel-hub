@@ -7,14 +7,15 @@ import { haversineKm, estimateDriveMinutes, TIER_WEIGHTS } from './tripEngine'
  *
  * Types:
  * - same-venue-matchup: two SV players on opposing teams in the same game
- * - nearby-venues: two games within a 90min drive on the same day. Start-time
+ * - nearby-venues: two games within a 2h drive on the same day. Start-time
  *   overlap does NOT disqualify — per Kent (2026-07-21): "if they are
  *   scheduled to physically be within a reasonable driving distance then we
  *   can double with a meal + game — doesn't have to be two games." Kent's
- *   tiers: green ≤45min drive, yellow 46-90min (rendered by the UI from
- *   driveMinutesBetween).
+ *   tiers: green ≤45min drive, yellow 46-90min, orange 91min-2h (rendered
+ *   by the UI from driveMinutesBetween; cap raised 90→120, Tom 2026-07-24:
+ *   "shouldn't less than 2 hours drive be viable for a double up?").
  * - tournament-cluster: 3+ games within 5km on the same day
- * - stay-over: games on back-to-back DAYS within a 90min drive — one hotel
+ * - stay-over: games on back-to-back DAYS within a 2h drive — one hotel
  *   covers both visits. Suppressed when the same players already have a
  *   same-day double on either date.
  *
@@ -22,7 +23,7 @@ import { haversineKm, estimateDriveMinutes, TIER_WEIGHTS } from './tripEngine'
  * hosting Peoria for 6 games) are collapsed into ONE entry with `dates`
  * listing every game date in the run.
  */
-const MAX_DRIVE_MINUTES = 90
+const MAX_DRIVE_MINUTES = 120
 export function findDoubleUps(
   allGames: GameEvent[],
   players: RosterPlayer[],

@@ -130,7 +130,7 @@ describe('findDoubleUps — nearby venues', () => {
     expect(result.filter((r) => r.type === 'nearby-venues')).toHaveLength(0)
   })
 
-  it('does not pair venues beyond a 90-minute drive (Beloit↔Peoria ~2.5h)', () => {
+  it('does not pair venues beyond a 2-hour drive (Beloit↔Peoria ~2.5h)', () => {
     const players = [player('A', 'Marlins'), player('B', 'Cardinals')]
     const g1 = game({ id: 'y1', date: '2026-07-22', playerNames: ['A'], playerSides: { A: 'home' } })
     const g2 = game({
@@ -156,6 +156,22 @@ describe('findDoubleUps — nearby venues', () => {
     expect(nearby).toHaveLength(1)
     expect(nearby[0]!.driveMinutesBetween).toBeGreaterThan(45)
     expect(nearby[0]!.driveMinutesBetween).toBeLessThanOrEqual(90)
+  })
+
+  it("includes pairs in the orange band (91min-2h — cap raised 2026-07-24)", () => {
+    const players = [player('A', 'Marlins'), player('B', 'Cardinals')]
+    const g1 = game({ id: 'o1', date: '2026-07-22', playerNames: ['A'], playerSides: { A: 'home' } })
+    const g2 = game({
+      id: 'o2', date: '2026-07-22', playerNames: ['B'], playerSides: { B: 'home' },
+      homeTeam: 'Other Team', awayTeam: 'Visitors',
+      // ~145km south of Beloit → ~105 min estimated drive
+      venue: { name: 'Orange Band Park', coords: { lat: 41.19, lng: -89.03 } },
+    })
+    const result = findDoubleUps([g1, g2], players, '2026-07-20', '2026-07-30')
+    const nearby = result.filter((r) => r.type === 'nearby-venues')
+    expect(nearby).toHaveLength(1)
+    expect(nearby[0]!.driveMinutesBetween).toBeGreaterThan(90)
+    expect(nearby[0]!.driveMinutesBetween).toBeLessThanOrEqual(120)
   })
 })
 

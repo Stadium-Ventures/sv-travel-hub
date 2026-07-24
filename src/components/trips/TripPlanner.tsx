@@ -9,7 +9,9 @@ import TripSummaryCard from './TripSummaryCard'
 // import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import { PairVerdictBanner, type PairVerdict } from './DoubleUpSection'
+import ConvergenceBanner from './ConvergenceBanner'
 import { findDoubleUps, findClosestApproach } from '../../lib/doubleUps'
+import { findConvergenceWindows, playersWithoutGames } from '../../lib/convergence'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 import { groupAndNumberTrips, itemHasPriorityPlayer, type UnifiedTripItem } from './groupAndNumberTrips'
@@ -331,8 +333,6 @@ export default function TripPlanner() {
   // up, or how close their schedules come (silence read as noise before).
   const pairVerdicts = useMemo<PairVerdict[]>(() => {
     if (priorityPlayers.length < 2) return []
-    const today = new Date().toISOString().split('T')[0]!
-    const end = addDaysISO(today, DOUBLE_UP_WINDOW_DAYS)
     const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
     const out: PairVerdict[] = []
     for (let i = 0; i < priorityPlayers.length; i++) {
@@ -351,13 +351,36 @@ export default function TripPlanner() {
         } else if (allDates.length > 0) {
           out.push({ a, b, doubleUpDates: null, outsideDates: allDates, closest: null })
         } else {
-          out.push({ a, b, doubleUpDates: null, closest: findClosestApproach(all, a, b, today, end) })
+          // Scan the planner's SELECTED dates, not a fixed 30-day horizon —
+          // "closest" must mean closest within the window Kent is looking at
+          // (a 2-month range was reporting only next-30-day approaches).
+          out.push({ a, b, doubleUpDates: null, closest: findClosestApproach(all, a, b, startDate, endDate) })
         }
       }
     }
     return out
   }, [priorityPlayers, upcomingDoubleUps, proGames, ncaaGames, hsGames, summerGames, DOUBLE_UP_WINDOW_DAYS, startDate, endDate])
 
+
+  // Convergence scan — the all-N answer to Kent's "west coast swing" text
+  // (2026-07-24): with 3+ priority players, when do ALL of them land within
+  // one multi-stop swing? Scans the planner's full selected range (set a
+  // season-long range to search "soon" without knowing dates). 2 players
+  // stay the pair verdicts' job.
+  const CONVERGENCE_SPAN_DAYS = 5
+  const convergence = useMemo(() => {
+    if (priorityPlayers.length < 3) return null
+    const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
+    if (all.length === 0) return null
+    const missing = playersWithoutGames(all, priorityPlayers, startDate, endDate)
+    const windows = missing.length > 0
+      ? []
+      : findConvergenceWindows(all, priorityPlayers, startDate, endDate, {
+          maxSpanDays: CONVERGENCE_SPAN_DAYS,
+          maxHopMinutes: maxDriveMinutes,
+        })
+    return { windows, missing }
+  }, [priorityPlayers, proGames, ncaaGames, hsGames, summerGames, startDate, endDate, maxDriveMinutes])
 
   // All players eligible for priority selection (don't filter by visits remaining)
   const eligibleForPriority = useMemo(
@@ -741,6 +764,25 @@ export default function TripPlanner() {
           </div>
         )}
       </div>
+
+      {/* Convergence — with 3+ priority players, lead with the all-N answer:
+          the tightest window where every one of them has a game (or the
+          closest they come, flagged infeasible). */}
+      {!computing && convergence && (
+        <ConvergenceBanner
+          windows={convergence.windows}
+          playerNames={priorityPlayers}
+          missingPlayers={convergence.missing}
+          playerMap={playerMap}
+          maxHopMinutes={maxDriveMinutes}
+          maxSpanDays={CONVERGENCE_SPAN_DAYS}
+          onUseDates={(w) => {
+            setDateRange(w.startDate, w.endDate)
+            generateTrips()
+          }}
+          onPlayerClick={setSelectedPlayer}
+        />
+      )}
 
       {/* Double ups are no longer a separate drawer — trips ARE the options,
           with double-up dates badged on each card (Tom 2026-07-22). Only the

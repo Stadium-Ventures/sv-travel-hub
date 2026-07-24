@@ -35,8 +35,8 @@ export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
       {v.outsideDates && v.outsideDates.length > 0
         ? <>They double up <strong className="text-accent-green">{formatDate(v.outsideDates[0]!)}</strong>{v.outsideDates.length > 1 ? ` (+${v.outsideDates.length - 1} more date${v.outsideDates.length > 2 ? 's' : ''})` : ''} — shift your dates to catch it.</>
         : v.closest
-          ? `Closest: ${formatDate(v.closest.dateA)}${v.closest.dateB !== v.closest.dateA ? `/${formatDate(v.closest.dateB)}` : ''}, venues ${formatDriveTime(v.closest.driveMinutes)} apart.`
-          : 'Their schedules are never within a day of each other in the next 30 days.'}
+          ? <>Closest: {formatDate(v.closest.dateA)}{v.closest.dateB !== v.closest.dateA ? `/${formatDate(v.closest.dateB)}` : ''} — {v.a} at <span className="text-text">{v.closest.venueA}</span>, {v.b} at <span className="text-text">{v.closest.venueB}</span> ({formatDriveTime(v.closest.driveMinutes)} apart).</>
+          : 'Their schedules are never within a day of each other in your dates.'}
     </p>
   )
 
@@ -86,9 +86,14 @@ const TYPE_LABELS: Record<string, { label: string; hint: string }> = {
   'stay-over': { label: 'Stay-Over Double', hint: 'Games on back-to-back days a short drive apart — one hotel covers both visits' },
 }
 
-/** Kent's proximity tiers (2026-07-21): green within 45 min, yellow 46–90. */
-function driveTierClass(driveMin: number): string {
-  return driveMin <= 45 ? 'text-accent-green' : 'text-yellow-400'
+/** Kent's proximity tiers (2026-07-21): green within 45 min, yellow 46–90,
+ *  orange 91 min–2h (cap raised to 2h, Tom 2026-07-24). */
+export function driveTierClass(driveMin: number): string {
+  return driveMin <= 45 ? 'text-accent-green' : driveMin <= 90 ? 'text-yellow-400' : 'text-accent-orange'
+}
+
+export function driveTierTitle(driveMin: number): string {
+  return driveMin <= 45 ? 'Green: within 45 min' : driveMin <= 90 ? 'Yellow: 46–90 min' : 'Orange: 91 min–2h'
 }
 
 /** Order games by first pitch (earliest first) so the → arrow reads as the
@@ -233,7 +238,7 @@ function DoubleUpCard({
     : formatDate(du.date)
 
   // Detail-line fragments: date · series · type · drive tier · fly. Only
-  // the drive time carries color (Kent's green ≤45 / yellow 46–90).
+  // the drive time carries color (Kent's green ≤45 / yellow 46–90 / orange 91–120).
   return (
     <div className="rounded-xl bg-gray-900/40 px-4 py-3 transition-colors hover:bg-gray-900/60">
       {/* Title: the players — that's what Kent scans for */}
@@ -273,7 +278,7 @@ function DoubleUpCard({
         {du.driveMinutesBetween > 0 && (
           <span
             className={`font-medium ${driveTierClass(du.driveMinutesBetween)}`}
-            title={du.driveMinutesBetween <= 45 ? 'Green: within 45 min' : 'Yellow: 46–90 min'}
+            title={driveTierTitle(du.driveMinutesBetween)}
           >
             · {formatDriveTime(du.driveMinutesBetween)} apart
           </span>

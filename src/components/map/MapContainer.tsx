@@ -94,7 +94,7 @@ interface MapContainerProps {
    *  a player jumps to wherever he is — "find him for me"). */
   fitToMarkersKey?: string
   /** Double-up overlay — connector lines between paired venues (green ≤45min,
-   *  yellow 46–90min drive, dashed = overnight) and ×2 badges on head-to-head
+   *  yellow 46–90min, orange 91min–2h drive, dashed = overnight) and ×2 badges on head-to-head
    *  venues. Populated only while the Suggestions panel's Double Ups tab is
    *  active so the map stays clean otherwise. */
   doubleUps?: DoubleUp[]
@@ -524,8 +524,9 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
 
   // Double-up overlay — active while the Suggestions panel's Double Ups tab
   // is open. Same-day/stay-over pairs get a connector line (green ≤45min,
-  // yellow 46–90min; dashed = overnight). Head-to-heads/tournaments get a
-  // ×2 badge on the shared venue. Selecting a card zooms to that pair.
+  // yellow 46–90min, orange 91min–2h; dashed = overnight). Head-to-heads/
+  // tournaments get a ×2 badge on the shared venue. Selecting a card zooms
+  // to that pair.
   useEffect(() => {
     if (!loaded || !mapInstance.current || !leafletRef.current) return
     const L = leafletRef.current
@@ -542,7 +543,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
 
     doubleUps.forEach((du, i) => {
       const isSelected = selectedDoubleUp === i
-      const tierColor = du.driveMinutesBetween <= 45 ? '#22c55e' : '#eab308'
+      const tierColor = du.driveMinutesBetween <= 45 ? '#22c55e' : du.driveMinutesBetween <= 90 ? '#eab308' : '#f97316'
       const label = `${esc(du.playerNames.join(' + '))} · ${du.dates.length > 1 ? `${du.dates.length}-game series` : du.date}`
 
       if (du.games.length >= 2 && du.driveMinutesBetween > 0) {
