@@ -83,9 +83,16 @@ interface Props {
   setStrategy: (s: BestWindowStrategy) => void
   /** Set the window's dates, jump to Trip Planner, and generate. */
   onPlanWindow: (w: WindowResult) => void
-  /** True while schedules are still fetching — tabs show a loading row
-   *  instead of a premature empty state (Tom 2026-07-22). */
+  /** True while schedules are still fetching AND nothing is loaded — tabs
+   *  show a loading row instead of a premature empty state (Tom 2026-07-22). */
   loading?: boolean
+  /** True while ANY schedule source is still fetching, even with partial
+   *  data on screen. NCAA/HS bundled data lands instantly, so the panel
+   *  looked "done" (and claimed "no games — try different dates") while the
+   *  pro fetch was still populating the bulk of the map (Tom 2026-07-24). */
+  stillLoading?: boolean
+  /** e.g. "Pro schedules 42/89 teams" — shown in the still-loading strip */
+  progressLabel?: string | null
   // Where
   picks: DestinationPick[]
   // Double ups
@@ -150,8 +157,18 @@ export default function SuggestionsPanel(props: Props) {
             </p>
           ) : (
             <>
+              {/* Partial-load strip — bundled NCAA/HS games land instantly,
+                  so the panel LOOKS done while the pro fetch is still filling
+                  the map. Without this, sparse results read as broken
+                  (Tom 2026-07-24). */}
+              {props.stillLoading && (
+                <p className="mb-2 flex items-center gap-2 rounded-lg bg-accent-blue/10 px-3 py-1.5 text-[11px] text-accent-blue">
+                  <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-[1.5px] border-accent-blue border-t-transparent" />
+                  Schedules still loading{props.progressLabel ? ` — ${props.progressLabel}` : ''} · more games and suggestions will fill in as they arrive
+                </p>
+              )}
               {activeTab === 'when' && <WhenTab {...props} />}
-              {activeTab === 'where' && <WhereTab picks={props.picks} />}
+              {activeTab === 'where' && <WhereTab picks={props.picks} stillLoading={props.stillLoading} />}
               {activeTab === 'doubleups' && <DoubleUpsTab {...props} />}
             </>
           )}
@@ -163,7 +180,7 @@ export default function SuggestionsPanel(props: Props) {
 
 /* ────────────────────────── WHEN ────────────────────────── */
 
-function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onPlanWindow }: Props) {
+function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onPlanWindow, stillLoading }: Props) {
   const topPick = windows[0]
   const currentStrategy = STRATEGY_OPTIONS.find((o) => o.value === strategy) ?? STRATEGY_OPTIONS[0]!
 
@@ -210,10 +227,24 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
 
       {windows.length === 0 ? (
         <div className="rounded-xl bg-gray-900/40 px-3 py-2.5 text-xs">
-          <p className="font-medium text-text">No games in this window</p>
-          <p className="mt-1 text-text-dim/80 leading-relaxed">
-            No SV player has a game in this date range — try different dates.
-          </p>
+          {/* Never claim "no games — try different dates" while schedules
+              are still fetching: the verdict must be honest about WHY it's
+              empty (Tom 2026-07-24). */}
+          {stillLoading ? (
+            <>
+              <p className="font-medium text-text">Nothing here yet</p>
+              <p className="mt-1 text-text-dim/80 leading-relaxed">
+                Schedules are still loading — dates for this area will appear once games arrive.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-medium text-text">No games in this window</p>
+              <p className="mt-1 text-text-dim/80 leading-relaxed">
+                No SV player has a game in this date range — try different dates.
+              </p>
+            </>
+          )}
         </div>
       ) : (
         windows.map((w, i) => (
@@ -301,7 +332,7 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
 
 /* ────────────────────────── WHERE ────────────────────────── */
 
-function WhereTab({ picks }: { picks: DestinationPick[] }) {
+function WhereTab({ picks, stillLoading }: { picks: DestinationPick[]; stillLoading?: boolean }) {
   // Lit-up selection so it's clear which area the map is showing
   const [selectedPick, setSelectedPick] = useState<number | null>(null)
   // Origin scrapped (Tom 2026-07-22) — picks are just the best AREAS.
@@ -332,7 +363,11 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
   return (
     <div className="space-y-2">
       {picks.length === 0 ? (
-        <p className="text-xs text-text-dim">No SV players have games anywhere in this date range. Try a wider window.</p>
+        <p className="text-xs text-text-dim">
+          {stillLoading
+            ? 'Schedules are still loading — the best areas will appear once games arrive.'
+            : 'No SV players have games anywhere in this date range. Try a wider window.'}
+        </p>
       ) : (
         picks.map((p, i) => {
           return (
@@ -414,15 +449,16 @@ function WhereTab({ picks }: { picks: DestinationPick[] }) {
 
 /* ─────────────────────── DOUBLE UPS ─────────────────────── */
 
-function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubleUp, onPlanDoubleUp }: Props) {
+function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubleUp, onPlanDoubleUp, stillLoading }: Props) {
   const [showAll, setShowAll] = useState(false)
   const visible = showAll ? doubleUps : doubleUps.slice(0, 6)
 
   if (doubleUps.length === 0) {
     return (
       <p className="text-xs text-text-dim">
-        No double ups in this date range — no two clients playing each other, or near enough
-        (within a 90-min drive, same day or back-to-back days). Widen the dates to check further out.
+        {stillLoading
+          ? 'Schedules are still loading — double ups will appear once games arrive.'
+          : 'No double ups in this date range — no two clients playing each other, or near enough (within a 2h drive, same day or back-to-back days). Widen the dates to check further out.'}
       </p>
     )
   }

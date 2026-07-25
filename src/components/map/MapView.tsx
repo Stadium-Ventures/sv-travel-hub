@@ -203,8 +203,12 @@ export default function MapView() {
           the namesake feature in view while Kent reads the picks. */}
       {/* Schedule banner — honest about the auto-load in progress. The old
           "Load schedules from the Trip Planner tab" text made a working
-          background fetch look like a required manual step (Tom 2026-07-22). */}
-      {!hasSchedules && (
+          background fetch look like a required manual step (Tom 2026-07-22).
+          Also shown while PRO games specifically haven't landed: bundled
+          NCAA/HS data makes hasSchedules true instantly, and a map missing
+          the bulk of its games with no banner reads as broken
+          (Tom 2026-07-24). */}
+      {(!hasSchedules || (proGames.length === 0 && anyScheduleLoading)) && (
         <div className="rounded-xl bg-surface border border-border/50 px-4 py-3 text-sm text-text-dim">
           {anyScheduleLoading ? (
             <span className="flex items-center gap-2">
@@ -316,6 +320,8 @@ export default function MapView() {
           {(allTierMarkers.length > 0 || anyScheduleLoading) && (
             <SuggestionsPanel
               loading={anyScheduleLoading && allTierMarkers.length === 0}
+              stillLoading={anyScheduleLoading}
+              progressLabel={schedulesProgress ? `Pro schedules ${schedulesProgress.completed}/${schedulesProgress.total} teams` : null}
               windows={bestWindows}
               windowDays={windowDays}
               setWindowDays={setWindowDays}
