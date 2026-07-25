@@ -9,14 +9,16 @@ import { useTimeStore } from '../../store/timeStore'
  * (Kent's west-coast-swing text, 2026-07-24). Display rules (Tom's review,
  * same day):
  * - All windows visible as rows — no expander. The best one carries the stop
- *   list; the rest are one-liners. They are NOT equal options (1h55m hops vs
- *   9h48m), so weight stays with the best.
- * - Once a generated trip below covers every priority player, collapse to a
- *   headline + pointer — the banner restating the trip's games read as a
- *   confusing duplicate.
+ *   list; the rest are one-liners. They are NOT equal options (1h55m vs
+ *   9h48m drives), so weight stays with the best.
+ * - Once a generated trip below covers every priority player, the parent
+ *   renders NO banner at all — the covering trip card carries the swing and
+ *   its Option rows (a headline summarizing the card beneath it was noise).
  * - No doable in-window swing = a muted miss LINE (details behind a toggle),
  *   not a hero itinerary — an infeasible route must not get top billing.
  *   When a feasible swing exists OUTSIDE the dates, say so and offer it.
+ * - Plain English only: "drive between stops", never engine words like
+ *   "hop" (Tom 2026-07-24).
  */
 export default function ConvergenceBanner({
   windows,
@@ -25,7 +27,6 @@ export default function ConvergenceBanner({
   playerMap,
   maxHopMinutes,
   maxSpanDays,
-  coveredByTripNumber,
   outOfWindow,
   onUseDates,
   onPlayerClick,
@@ -36,8 +37,6 @@ export default function ConvergenceBanner({
   playerMap: Map<string, RosterPlayer>
   maxHopMinutes: number
   maxSpanDays: number
-  /** Trip #N below already covers all priority players — render compact */
-  coveredByTripNumber?: number | null
   /** Feasible swing OUTSIDE the selected dates (set when the in-window
    *  result is missing or infeasible) — "widen your dates" pointer */
   outOfWindow?: ConvergenceWindow | null
@@ -112,22 +111,6 @@ export default function ConvergenceBanner({
     </>
   )
 
-  // ── A trip below already covers everyone: headline + pointer, plus the
-  //    date-combo choices (Kent 2026-07-24: "would want choices") ──
-  if (coveredByTripNumber != null) {
-    return (
-      <div className="rounded-xl border border-accent-green/30 bg-accent-green/5 px-4 py-2.5">
-        <p className="text-sm font-semibold text-text">
-          {headline}
-          <span className="ml-2 text-xs font-normal text-text-dim">
-            Trip #{coveredByTripNumber} below has the full itinerary.
-          </span>
-        </p>
-        <VariantRows primary={best} />
-      </div>
-    )
-  }
-
   // ── Full banner: best window with stops, other windows as visible rows ──
   const alternates = windows.slice(1)
   return (
@@ -145,7 +128,7 @@ export default function ConvergenceBanner({
 
       <p className="mt-0.5 text-[11px] text-text-dim">
         {best.spanDays} day{best.spanDays !== 1 ? 's' : ''}
-        {best.stops.length > 1 && <> · longest hop {best.maxHopMinutes === 0 ? 'none — same venue' : `${formatDriveTime(best.maxHopMinutes)} drive`}</>}
+        {best.stops.length > 1 && <> · longest drive between stops {best.maxHopMinutes === 0 ? "none — same venue" : formatDriveTime(best.maxHopMinutes)}</>}
       </p>
 
       <div className="mt-2 space-y-0.5">
@@ -163,7 +146,7 @@ export default function ConvergenceBanner({
               </span>
               <span>{w.stops.map((s) => s.venueName).join(' → ')}</span>
               <span className={w.feasible ? 'text-text-dim/60' : 'text-accent-orange'}>
-                · longest hop {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}
+                · longest drive {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}
               </span>
               <button
                 onClick={() => onUseDates(w)}
@@ -179,9 +162,30 @@ export default function ConvergenceBanner({
   )
 }
 
-/** Same venues, different nights — Kent's "Option A / Option B" choices
- *  (2026-07-24). The primary combo is Option A; each variant is one row
- *  showing which dates shift. */
+/** All the ways to run a swing — Kent's "Option A / Option B" choices
+ *  (2026-07-24), including the primary combo as Option A. Rendered inside
+ *  the covering trip card, so choices live WITH the trip rather than in a
+ *  separate summary up top (Tom 2026-07-24). */
+export function SwingOptions({ swing }: { swing: ConvergenceWindow }) {
+  const combos = [swing, ...(swing.variants ?? [])]
+  if (combos.length < 2) return null
+  const letters = ['A', 'B', 'C', 'D', 'E']
+  return (
+    <div className="mt-2 space-y-1">
+      <p className="text-[10px] uppercase tracking-wide text-text-dim/60">Ways to run it — pick one</p>
+      {combos.map((w, i) => (
+        <p key={w.stops.map((s) => s.gameId).join('|')} className="rounded-lg bg-gray-950/50 px-3 py-1.5 text-[11px] text-text-dim">
+          <span className="font-medium text-text">Option {letters[i] ?? String.fromCharCode(65 + i)}</span>
+          {' · '}{w.stops.map((s) => `${s.playerNames.join(' & ')} ${formatDate(s.date)}`).join(' → ')}
+          <span className="text-text-dim/60"> · longest drive {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}</span>
+        </p>
+      ))}
+    </div>
+  )
+}
+
+/** Same venues, different nights — variant rows for the PRE-generation
+ *  banner (the only place the full banner still renders). */
 function VariantRows({ primary }: { primary: ConvergenceWindow }) {
   const variants = primary.variants ?? []
   if (variants.length === 0) return null
@@ -197,7 +201,7 @@ function VariantRows({ primary }: { primary: ConvergenceWindow }) {
         <p key={w.stops.map((s) => s.gameId).join('|')} className="rounded-lg bg-gray-950/50 px-3 py-1.5 text-[11px] text-text-dim">
           <span className="font-medium text-text">Option {letters[i] ?? String.fromCharCode(66 + i)}</span>
           {' · '}{describe(w)}
-          <span className="text-text-dim/60"> · longest hop {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}</span>
+          <span className="text-text-dim/60"> · longest drive {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}</span>
         </p>
       ))}
     </div>

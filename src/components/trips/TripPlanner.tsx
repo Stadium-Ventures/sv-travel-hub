@@ -802,8 +802,11 @@ export default function TripPlanner() {
 
       {/* Convergence — with 3+ priority players, lead with the all-N answer:
           the tightest window where every one of them has a game (or the
-          closest they come, flagged infeasible). */}
-      {!computing && convergence && (
+          closest they come, flagged infeasible). NOT rendered once a
+          generated trip below covers everyone — the trip card carries the
+          swing + Option rows, and a summary of the card beneath it was
+          noise (Tom 2026-07-24). */}
+      {!computing && convergence && coveredByTripNumber == null && (
         <ConvergenceBanner
           windows={convergence.windows}
           playerNames={priorityPlayers}
@@ -811,7 +814,6 @@ export default function TripPlanner() {
           playerMap={playerMap}
           maxHopMinutes={maxDriveMinutes}
           maxSpanDays={CONVERGENCE_SPAN_DAYS}
-          coveredByTripNumber={coveredByTripNumber}
           outOfWindow={convergence.outOfWindow}
           onUseDates={(w) => {
             setDateRange(w.startDate, w.endDate)
@@ -959,6 +961,7 @@ export default function TripPlanner() {
                       item={primary}
                       tripIndex={tripIndex != null && tripIndex >= 0 ? tripIndex : null}
                       playerMap={playerMap}
+                      swing={group.displayIndex === coveredByTripNumber ? convergence?.windows[0] ?? null : null}
                       onPlayerClick={setSelectedPlayer}
                     />
                   )

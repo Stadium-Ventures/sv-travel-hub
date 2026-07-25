@@ -4,6 +4,8 @@ import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useTimeStore } from '../../store/timeStore'
+import { SwingOptions } from './ConvergenceBanner'
+import type { ConvergenceWindow } from '../../lib/convergence'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 
 // Compact opportunity card — the same visual language as the Double Up
@@ -66,12 +68,18 @@ export default function TripSummaryCard({
   item,
   tripIndex,
   playerMap,
+  swing,
   onPlayerClick,
 }: {
   item: { type: 'road'; trip: TripCandidate } | { type: 'flyin'; visit: FlyInVisit }
   /** Index into tripPlan.trips for road trips — powers Show on Map. */
   tripIndex: number | null
   playerMap: Map<string, RosterPlayer>
+  /** When this trip covers ALL priority players, the matching convergence
+   *  window (with its date-combo variants) renders as "Ways to run it"
+   *  Option rows INSIDE the card — choices live with the trip, not in a
+   *  separate summary above it (Kent + Tom, 2026-07-24). */
+  swing?: ConvergenceWindow | null
   onPlayerClick?: (name: string) => void
 }) {
   const starredTrips = useTripStore((s) => s.starredTrips)
@@ -183,6 +191,8 @@ export default function TripSummaryCard({
           </p>
         ))}
       </div>
+
+      {swing && <SwingOptions swing={swing} />}
     </div>
   )
 }
