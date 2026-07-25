@@ -53,11 +53,17 @@ export function itemPlayerNames(item: UnifiedTripItem): Set<string> {
 }
 
 export function itemHasPriorityPlayer(item: UnifiedTripItem, prioritySet: Set<string>): boolean {
-  if (prioritySet.size === 0) return false
+  return itemPriorityCount(item, prioritySet) > 0
+}
+
+/** How many of the selected priority players this trip covers. */
+export function itemPriorityCount(item: UnifiedTripItem, prioritySet: Set<string>): number {
+  if (prioritySet.size === 0) return 0
+  let n = 0
   for (const name of itemPlayerNames(item)) {
-    if (prioritySet.has(name)) return true
+    if (prioritySet.has(name)) n++
   }
-  return false
+  return n
 }
 
 /** Group signature: type + sorted player names + venue coords (3 decimals). */
@@ -89,14 +95,17 @@ export function groupAndNumberTrips({
     ...flyInVisits.map((visit): UnifiedTripItem => ({ type: 'flyin', visit, sortDate: visit.dates[0] ?? '' })),
   ]
 
-  // Sort: priority-bearing first (when priority set), then by score desc.
-  // Grouping below picks the best-scored variant as each group's primary.
+  // Sort: MORE priority players first (when priority set), then by score
+  // desc. Coverage count, not a has-any flag — a trip with all 3 selected
+  // guys must outrank a 1-priority trip regardless of raw score (Tom
+  // 2026-07-24: "why is it showing Cebert and Dax Kilby above the one with
+  // all 3 guys in it?"). Grouping below picks the best-scored variant as
+  // each group's primary.
   const prioritySet = new Set(priorityPlayers)
   unified.sort((a, b) => {
     if (prioritySet.size > 0) {
-      const ap = itemHasPriorityPlayer(a, prioritySet) ? 0 : 1
-      const bp = itemHasPriorityPlayer(b, prioritySet) ? 0 : 1
-      if (ap !== bp) return ap - bp
+      const diff = itemPriorityCount(b, prioritySet) - itemPriorityCount(a, prioritySet)
+      if (diff !== 0) return diff
     }
     return itemScore(b) - itemScore(a)
   })

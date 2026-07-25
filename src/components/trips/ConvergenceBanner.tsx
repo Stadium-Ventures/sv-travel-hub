@@ -5,10 +5,17 @@ import { formatDate, formatDriveTime, formatGameTime, TIER_DOT_COLORS } from '..
 
 /**
  * The all-N answer to "can I see Tanner, Garrett AND Kellon in one swing?"
- * (Kent's west-coast-swing text, 2026-07-24). Pair verdicts say whether two
- * players double up; this banner says when ALL priority players converge —
- * and per Tom, it surfaces the CLOSEST window even when the hops are too
- * long to call it a doable trip.
+ * (Kent's west-coast-swing text, 2026-07-24). Display rules (Tom's review,
+ * same day):
+ * - All windows visible as rows — no expander. The best one carries the stop
+ *   list; the rest are one-liners. They are NOT equal options (1h55m hops vs
+ *   9h48m), so weight stays with the best.
+ * - Once a generated trip below covers every priority player, collapse to a
+ *   headline + pointer — the banner restating the trip's games read as a
+ *   confusing duplicate.
+ * - No doable in-window swing = a muted miss LINE (details behind a toggle),
+ *   not a hero itinerary — an infeasible route must not get top billing.
+ *   When a feasible swing exists OUTSIDE the dates, say so and offer it.
  */
 export default function ConvergenceBanner({
   windows,
@@ -17,6 +24,8 @@ export default function ConvergenceBanner({
   playerMap,
   maxHopMinutes,
   maxSpanDays,
+  coveredByTripNumber,
+  outOfWindow,
   onUseDates,
   onPlayerClick,
 }: {
@@ -26,14 +35,17 @@ export default function ConvergenceBanner({
   playerMap: Map<string, RosterPlayer>
   maxHopMinutes: number
   maxSpanDays: number
+  /** Trip #N below already covers all priority players — render compact */
+  coveredByTripNumber?: number | null
+  /** Feasible swing OUTSIDE the selected dates (set when the in-window
+   *  result is missing or infeasible) — "widen your dates" pointer */
+  outOfWindow?: ConvergenceWindow | null
   onUseDates: (w: ConvergenceWindow) => void
   onPlayerClick?: (name: string) => void
 }) {
-  const [showAlternates, setShowAlternates] = useState(false)
+  const [showMissDetails, setShowMissDetails] = useState(false)
   const n = playerNames.length
 
-  // A priority player with zero games makes any window impossible — say WHY
-  // instead of rendering nothing.
   if (missingPlayers.length > 0) {
     return (
       <p className="rounded-lg bg-gray-900/40 px-3 py-1.5 text-xs text-text-dim">
@@ -43,36 +55,82 @@ export default function ConvergenceBanner({
     )
   }
 
-  if (windows.length === 0) {
+  const best = windows[0]
+  const feasible = best?.feasible === true
+
+  const widenPointer = outOfWindow ? (
+    <>
+      {' '}They line up{' '}
+      <button
+        onClick={() => onUseDates(outOfWindow)}
+        className="font-semibold text-accent-green hover:underline underline-offset-2"
+        title="Set the planner to these dates and regenerate trips"
+      >
+        {formatDate(outOfWindow.startDate)}{outOfWindow.endDate !== outOfWindow.startDate ? ` – ${formatDate(outOfWindow.endDate)}` : ''}
+      </button>
+      {' '}— widen your dates to catch it.
+    </>
+  ) : null
+
+  // ── No doable swing in the selected dates: one muted miss line ──
+  if (!feasible) {
     return (
-      <p className="rounded-lg bg-gray-900/40 px-3 py-1.5 text-xs text-text-dim">
-        <strong className="text-text">All {n} together:</strong> their schedules never land within one{' '}
-        {maxSpanDays}-day swing in your dates — see the pair verdicts below for the best two-player options.
-      </p>
+      <div className="rounded-lg bg-gray-900/40 px-3 py-1.5 text-xs text-text-dim">
+        <p>
+          <strong className="text-text">All {n} together:</strong>{' '}
+          {best ? (
+            <>
+              no swing with drives under {formatDriveTime(maxHopMinutes)} covers all {n} in your dates
+              (closest needs a {formatDriveTime(best.maxHopMinutes)} drive
+              <button
+                onClick={() => setShowMissDetails((s) => !s)}
+                className="ml-1 text-accent-blue/80 hover:text-accent-blue"
+              >
+                {showMissDetails ? '▾ hide' : '▸ details'}
+              </button>).
+            </>
+          ) : (
+            <>their schedules never land within one {maxSpanDays}-day swing in your dates.</>
+          )}
+          {widenPointer}
+        </p>
+        {showMissDetails && best && (
+          <div className="mt-1.5 space-y-0.5 rounded-lg bg-gray-950/50 px-3 py-2">
+            <StopLines w={best} playerMap={playerMap} maxHopMinutes={maxHopMinutes} onPlayerClick={onPlayerClick} />
+          </div>
+        )}
+      </div>
     )
   }
 
-  const best = windows[0]!
-  const alternates = windows.slice(1)
+  const headline = (
+    <>All {n} in one swing:{' '}
+      <span className="text-accent-green">
+        {formatDate(best.startDate)}{best.endDate !== best.startDate ? ` – ${formatDate(best.endDate)}` : ''}
+      </span>
+    </>
+  )
 
+  // ── A trip below already covers everyone: headline + pointer only ──
+  if (coveredByTripNumber != null) {
+    return (
+      <div className="rounded-xl border border-accent-green/30 bg-accent-green/5 px-4 py-2.5">
+        <p className="text-sm font-semibold text-text">
+          {headline}
+          <span className="ml-2 text-xs font-normal text-text-dim">
+            Trip #{coveredByTripNumber} below has the full itinerary.
+          </span>
+        </p>
+      </div>
+    )
+  }
+
+  // ── Full banner: best window with stops, other windows as visible rows ──
+  const alternates = windows.slice(1)
   return (
-    <div className={`rounded-xl border p-4 ${best.feasible ? 'border-accent-green/30 bg-accent-green/5' : 'border-border bg-surface'}`}>
+    <div className="rounded-xl border border-accent-green/30 bg-accent-green/5 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-text">
-          {best.feasible ? (
-            <>All {n} in one swing:{' '}
-              <span className="text-accent-green">
-                {formatDate(best.startDate)}{best.endDate !== best.startDate ? ` – ${formatDate(best.endDate)}` : ''}
-              </span>
-            </>
-          ) : (
-            <>No swing within {formatDriveTime(maxHopMinutes)} hops covers all {n} — closest they come:{' '}
-              <span className="text-text-dim">
-                {formatDate(best.startDate)}{best.endDate !== best.startDate ? ` – ${formatDate(best.endDate)}` : ''}
-              </span>
-            </>
-          )}
-        </h3>
+        <h3 className="text-sm font-semibold text-text">{headline}</h3>
         <button
           onClick={() => onUseDates(best)}
           className="shrink-0 rounded-lg bg-accent-blue/15 px-2.5 py-1 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
@@ -88,69 +146,72 @@ export default function ConvergenceBanner({
       </p>
 
       <div className="mt-2 space-y-0.5">
-        {best.stops.map((stop, i) => {
-          const hop = i > 0 ? best.hopMinutes[i - 1]! : null
-          const t = stop.source === 'mlb-api' ? formatGameTime(stop.time) : ''
-          return (
-            <p key={stop.gameId} className="flex flex-wrap items-baseline gap-x-2 text-xs text-text-dim">
-              <span className="w-24 shrink-0 font-medium text-text">{formatDate(stop.date)}</span>
-              <span className="flex items-center gap-x-2">
-                {stop.playerNames.map((name) => {
-                  const tier = playerMap.get(name)?.tier ?? 4
-                  return (
-                    <span
-                      key={name}
-                      className={`inline-flex items-center gap-1 font-medium text-text ${onPlayerClick ? 'cursor-pointer hover:text-accent-blue' : ''}`}
-                      onClick={onPlayerClick ? () => onPlayerClick(name) : undefined}
-                    >
-                      <span className={`inline-block h-2 w-2 rounded-full ${TIER_DOT_COLORS[tier] ?? 'bg-gray-500'}`} />
-                      {name}
-                    </span>
-                  )
-                })}
-              </span>
-              <span>{stop.venueName}{t ? ` · ${t}` : ''}</span>
-              {hop != null && hop > 0 && (
-                <span className={hop > maxHopMinutes ? 'text-accent-orange' : 'text-text-dim/60'}>
-                  · {formatDriveTime(hop)} from previous stop
-                </span>
-              )}
-            </p>
-          )
-        })}
+        <StopLines w={best} playerMap={playerMap} maxHopMinutes={maxHopMinutes} onPlayerClick={onPlayerClick} />
       </div>
 
       {alternates.length > 0 && (
-        <div className="mt-2">
-          <button
-            onClick={() => setShowAlternates((s) => !s)}
-            className="text-[11px] font-medium text-accent-blue/80 hover:text-accent-blue transition-colors"
-          >
-            {showAlternates ? '▾' : '▸'} {alternates.length} other window{alternates.length !== 1 ? 's' : ''}
-          </button>
-          {showAlternates && (
-            <div className="mt-1 space-y-1">
-              {alternates.map((w) => (
-                <div key={`${w.startDate}-${w.stops.map((s) => s.gameId).join('|')}`} className="flex flex-wrap items-center gap-x-2 rounded-lg bg-gray-950/50 px-3 py-1.5 text-[11px] text-text-dim">
-                  <span className="font-medium text-text">
-                    {formatDate(w.startDate)}{w.endDate !== w.startDate ? ` – ${formatDate(w.endDate)}` : ''}
-                  </span>
-                  <span>{w.stops.map((s) => s.venueName).join(' → ')}</span>
-                  <span className={w.feasible ? 'text-text-dim/60' : 'text-accent-orange'}>
-                    · longest hop {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}
-                  </span>
-                  <button
-                    onClick={() => onUseDates(w)}
-                    className="ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/10 transition-colors"
-                  >
-                    Plan →
-                  </button>
-                </div>
-              ))}
+        <div className="mt-2 space-y-1">
+          {alternates.map((w) => (
+            <div key={`${w.startDate}-${w.stops.map((s) => s.gameId).join('|')}`} className="flex flex-wrap items-center gap-x-2 rounded-lg bg-gray-950/50 px-3 py-1.5 text-[11px] text-text-dim">
+              <span className="font-medium text-text">
+                {formatDate(w.startDate)}{w.endDate !== w.startDate ? ` – ${formatDate(w.endDate)}` : ''}
+              </span>
+              <span>{w.stops.map((s) => s.venueName).join(' → ')}</span>
+              <span className={w.feasible ? 'text-text-dim/60' : 'text-accent-orange'}>
+                · longest hop {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}
+              </span>
+              <button
+                onClick={() => onUseDates(w)}
+                className="ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/10 transition-colors"
+              >
+                Plan →
+              </button>
             </div>
-          )}
+          ))}
         </div>
       )}
     </div>
+  )
+}
+
+function StopLines({ w, playerMap, maxHopMinutes, onPlayerClick }: {
+  w: ConvergenceWindow
+  playerMap: Map<string, RosterPlayer>
+  maxHopMinutes: number
+  onPlayerClick?: (name: string) => void
+}) {
+  return (
+    <>
+      {w.stops.map((stop, i) => {
+        const hop = i > 0 ? w.hopMinutes[i - 1]! : null
+        const t = stop.source === 'mlb-api' ? formatGameTime(stop.time) : ''
+        return (
+          <p key={stop.gameId} className="flex flex-wrap items-baseline gap-x-2 text-xs text-text-dim">
+            <span className="w-24 shrink-0 font-medium text-text">{formatDate(stop.date)}</span>
+            <span className="flex items-center gap-x-2">
+              {stop.playerNames.map((name) => {
+                const tier = playerMap.get(name)?.tier ?? 4
+                return (
+                  <span
+                    key={name}
+                    className={`inline-flex items-center gap-1 font-medium text-text ${onPlayerClick ? 'cursor-pointer hover:text-accent-blue' : ''}`}
+                    onClick={onPlayerClick ? () => onPlayerClick(name) : undefined}
+                  >
+                    <span className={`inline-block h-2 w-2 rounded-full ${TIER_DOT_COLORS[tier] ?? 'bg-gray-500'}`} />
+                    {name}
+                  </span>
+                )
+              })}
+            </span>
+            <span>{stop.venueName}{t ? ` · ${t}` : ''}</span>
+            {hop != null && hop > 0 && (
+              <span className={hop > maxHopMinutes ? 'text-accent-orange' : 'text-text-dim/60'}>
+                · {formatDriveTime(hop)} from previous stop
+              </span>
+            )}
+          </p>
+        )
+      })}
+    </>
   )
 }

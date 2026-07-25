@@ -14,7 +14,8 @@ import { findDoubleUps, findClosestApproach } from '../../lib/doubleUps'
 import { findConvergenceWindows, playersWithoutGames } from '../../lib/convergence'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
-import { groupAndNumberTrips, itemHasPriorityPlayer, type UnifiedTripItem } from './groupAndNumberTrips'
+import { groupAndNumberTrips, itemHasPriorityPlayer, itemPlayerNames, type UnifiedTripItem } from './groupAndNumberTrips'
+import { estimateDriveMinutes } from '../../lib/tripEngine'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
@@ -373,13 +374,22 @@ export default function TripPlanner() {
     const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
     if (all.length === 0) return null
     const missing = playersWithoutGames(all, priorityPlayers, startDate, endDate)
+    const opts = { maxSpanDays: CONVERGENCE_SPAN_DAYS, maxHopMinutes: maxDriveMinutes }
     const windows = missing.length > 0
       ? []
-      : findConvergenceWindows(all, priorityPlayers, startDate, endDate, {
-          maxSpanDays: CONVERGENCE_SPAN_DAYS,
-          maxHopMinutes: maxDriveMinutes,
-        })
-    return { windows, missing }
+      : findConvergenceWindows(all, priorityPlayers, startDate, endDate, opts)
+    // No doable swing inside the selected dates? Scan the rest of the season
+    // so the banner can say "they DO line up Jul 29–31 — widen your dates"
+    // instead of dead-ending (same shift-your-dates pattern the pair
+    // verdicts already use; Tom 2026-07-24).
+    let outOfWindow: ReturnType<typeof findConvergenceWindows>[number] | null = null
+    if (missing.length === 0 && (windows.length === 0 || !windows[0]!.feasible)) {
+      const today = new Date().toISOString().split('T')[0]!
+      const seasonEnd = `${new Date().getFullYear()}-09-30`
+      outOfWindow = findConvergenceWindows(all, priorityPlayers, today, seasonEnd, opts)
+        .find((w) => w.feasible && !(w.startDate >= startDate && w.endDate <= endDate)) ?? null
+    }
+    return { windows, missing, outOfWindow }
   }, [priorityPlayers, proGames, ncaaGames, hsGames, summerGames, startDate, endDate, maxDriveMinutes])
 
   // All players eligible for priority selection (don't filter by visits remaining)
@@ -431,6 +441,19 @@ export default function TripPlanner() {
       : null,
     [tripPlan, displayedFlyIns, priorityPlayers, sortBy],
   )
+
+  // A generated trip that covers EVERY priority player makes the full
+  // convergence itinerary redundant — the banner collapses to a headline
+  // pointing at that trip ("same result twice, once highlighted", Tom
+  // 2026-07-24). Numbering comes from the shared grouping so "#N" matches.
+  const coveredByTripNumber = useMemo(() => {
+    if (!tripGrouping || priorityPlayers.length < 3) return null
+    for (const g of tripGrouping.groups) {
+      const names = itemPlayerNames(g.primary)
+      if (priorityPlayers.every((p) => names.has(p))) return g.displayIndex
+    }
+    return null
+  }, [tripGrouping, priorityPlayers])
 
   const anyScheduleLoading = schedulesLoading || ncaaLoading || hsLoading
   const allSchedulesLoaded = proGames.length > 0 && ncaaGames.length > 0 && (!hasHsPlayers || hsGames.length > 0)
@@ -776,6 +799,8 @@ export default function TripPlanner() {
           playerMap={playerMap}
           maxHopMinutes={maxDriveMinutes}
           maxSpanDays={CONVERGENCE_SPAN_DAYS}
+          coveredByTripNumber={coveredByTripNumber}
+          outOfWindow={convergence.outOfWindow}
           onUseDates={(w) => {
             setDateRange(w.startDate, w.endDate)
             generateTrips()
@@ -971,10 +996,24 @@ export default function TripPlanner() {
               return 0
             })
             const overlaps: Array<{ idxA: number; idxB: number; tripA: typeof sorted[0]; tripB: typeof sorted[0]; dates: string[]; uniqueA: string[]; uniqueB: string[]; shared: string[] }> = []
+            // Two trips' games on the same date within double-up range are an
+            // OPPORTUNITY (meal + game covers both), not a conflict — calling
+            // them "you can only take one" contradicts the app's own double-up
+            // doctrine (Tom 2026-07-24). Only genuinely-unreachable overlaps warn.
+            const DOUBLE_UP_RANGE_MIN = 120
+            const gamesOn = (t: typeof sorted[0], d: string) =>
+              [t.anchorGame, ...t.nearbyGames].filter((g) => g.date === d)
             for (let a = 0; a < sorted.length; a++) {
               for (let b = a + 1; b < sorted.length; b++) {
                 const daysA = new Set(sorted[a]!.suggestedDays)
-                const sharedDates = sorted[b]!.suggestedDays.filter((d) => daysA.has(d))
+                const sharedDates = sorted[b]!.suggestedDays.filter((d) => daysA.has(d)).filter((d) => {
+                  const ga = gamesOn(sorted[a]!, d)
+                  const gb = gamesOn(sorted[b]!, d)
+                  if (ga.length === 0 || gb.length === 0) return true
+                  const doubleUpPossible = ga.some((x) => gb.some((y) =>
+                    estimateDriveMinutes(x.venue.coords, y.venue.coords) <= DOUBLE_UP_RANGE_MIN))
+                  return !doubleUpPossible
+                })
                 if (sharedDates.length > 0) {
                   const playersA = new Set([...sorted[a]!.anchorGame.playerNames, ...sorted[a]!.nearbyGames.flatMap((g) => g.playerNames)])
                   const playersB = new Set([...sorted[b]!.anchorGame.playerNames, ...sorted[b]!.nearbyGames.flatMap((g) => g.playerNames)])
