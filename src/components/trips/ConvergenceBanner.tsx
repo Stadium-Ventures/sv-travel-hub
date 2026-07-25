@@ -80,8 +80,8 @@ export default function ConvergenceBanner({
           <strong className="text-text">All {n} together:</strong>{' '}
           {best ? (
             <>
-              no swing with drives under {formatDriveTime(maxHopMinutes)} covers all {n} in your dates
-              (closest needs a {formatDriveTime(best.maxHopMinutes)} drive
+              no drivable route covers all {n} in your dates
+              (closest needs a {formatDriveTime(best.maxHopMinutes)} drive; drives are capped at {formatDriveTime(maxHopMinutes)}
               <button
                 onClick={() => setShowMissDetails((s) => !s)}
                 className="ml-1 text-accent-blue/80 hover:text-accent-blue"
@@ -90,7 +90,7 @@ export default function ConvergenceBanner({
               </button>).
             </>
           ) : (
-            <>their schedules never land within one {maxSpanDays}-day swing in your dates.</>
+            <>their games never fall within {maxSpanDays} days of each other in your dates.</>
           )}
           {widenPointer}
         </p>
@@ -104,7 +104,7 @@ export default function ConvergenceBanner({
   }
 
   const headline = (
-    <>All {n} in one swing:{' '}
+    <>All {n} together:{' '}
       <span className="text-accent-green">
         {formatDate(best.startDate)}{best.endDate !== best.startDate ? ` – ${formatDate(best.endDate)}` : ''}
       </span>

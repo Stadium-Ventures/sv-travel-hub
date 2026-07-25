@@ -32,7 +32,7 @@ function daysApartLabel(a: string, b: string): string {
   return days === 1 ? '1 day apart' : `${days} days apart`
 }
 
-export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
+export function PairVerdictBanner({ verdicts, swingTripNumber }: { verdicts: PairVerdict[]; swingTripNumber?: number | null }) {
   // Only MISSES render — pairs that DO double up show it on their card's
   // green badge, so a banner restating "the cards are below" was noise
   // (Tom 2026-07-23). Misses collapse to one muted line with an expander;
@@ -47,7 +47,7 @@ export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
       {v.outsideDates && v.outsideDates.length > 0
         ? <>They double up <strong className="text-accent-green">{formatDate(v.outsideDates[0]!)}</strong>{v.outsideDates.length > 1 ? ` (+${v.outsideDates.length - 1} more date${v.outsideDates.length > 2 ? 's' : ''})` : ''} — shift your dates to catch it.</>
         : v.swingNote
-        ? <>Closest is the swing above: <strong className="text-text">{formatDate(v.swingNote.dateA)}</strong> & <strong className="text-text">{formatDate(v.swingNote.dateB)}</strong> ({daysApartLabel(v.swingNote.dateA, v.swingNote.dateB)}).</>
+        ? <>Closest: <strong className="text-text">{formatDate(v.swingNote.dateA)}</strong> & <strong className="text-text">{formatDate(v.swingNote.dateB)}</strong> ({daysApartLabel(v.swingNote.dateA, v.swingNote.dateB)}){swingTripNumber != null ? <> — see Trip #{swingTripNumber} below</> : null}.</>
         : v.closest
           ? <>Closest: {formatDate(v.closest.dateA)}{v.closest.dateB !== v.closest.dateA ? `/${formatDate(v.closest.dateB)}` : ''} — {v.a} at <span className="text-text">{v.closest.venueA}</span>, {v.b} at <span className="text-text">{v.closest.venueB}</span> ({formatDriveTime(v.closest.driveMinutes)} apart).</>
           : 'Their schedules are never within a day of each other in your dates.'}

@@ -827,7 +827,7 @@ export default function TripPlanner() {
           with double-up dates badged on each card (Tom 2026-07-22). Only the
           pair verdicts remain here: "do my priority players line up?" */}
       {!computing && pairVerdicts.length > 0 && (
-        <PairVerdictBanner verdicts={pairVerdicts} />
+        <PairVerdictBanner verdicts={pairVerdicts} swingTripNumber={coveredByTripNumber} />
       )}
 
       {/* First-time welcome — dismissible */}
