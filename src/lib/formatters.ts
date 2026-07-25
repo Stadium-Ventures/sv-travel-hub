@@ -21,6 +21,40 @@ export function formatGameTime(iso?: string): string {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }) + ' ET'
 }
 
+export type TimeDisplayMode = 'et' | 'local'
+
+/** Coarse US timezone from longitude — the fallback when an event has no
+ *  IANA zone (non-MLB sources, pre-2026-07-24 caches). Boundaries are
+ *  approximate; fresh MLB fetches carry the exact venue zone. */
+export function approxTzFromLng(lng: number): string {
+  if (lng >= -85) return 'America/New_York'
+  if (lng >= -97.5) return 'America/Chicago'
+  if (lng >= -114) return 'America/Denver'
+  return 'America/Los_Angeles'
+}
+
+/** Game time in the chosen display mode: ET (default) or venue-local with
+ *  the zone abbreviation ("6:35 PM PDT"). ET default per Tom 2026-07-24,
+ *  with a header toggle for local. */
+export function formatGameTimeDisplay(
+  iso: string | undefined,
+  mode: TimeDisplayMode,
+  venue?: { coords: { lat: number; lng: number }; tz?: string },
+): string {
+  if (mode === 'et' || !venue) return formatGameTime(iso)
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const tz = venue.tz ?? approxTzFromLng(venue.coords.lng)
+  try {
+    return d.toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz, timeZoneName: 'short',
+    })
+  } catch {
+    return formatGameTime(iso)
+  }
+}
+
 export function formatTimeAgo(ts: number): string {
   const diff = Date.now() - ts
   const mins = Math.floor(diff / 60000)

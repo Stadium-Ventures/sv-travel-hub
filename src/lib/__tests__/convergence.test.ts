@@ -107,6 +107,23 @@ describe('findConvergenceWindows', () => {
     expect(result[0]!.startDate).toBe('2026-08-01')
   })
 
+  it("keeps same-venue date combos as variants (Kent's Option A / Option B)", () => {
+    // A plays SD once; B is home in Ontario three straight nights — the
+    // combos differ only in which B night, and all must surface as choices.
+    const games = [
+      game({ id: 'a1', date: '2026-07-29', playerNames: ['A'], venue: { name: 'Petco Park', coords: SAN_DIEGO } }),
+      game({ id: 'b1', date: '2026-07-29', playerNames: ['B'], venue: { name: 'ONT Field', coords: { lat: 34.0185, lng: -117.6033 } } }),
+      game({ id: 'b2', date: '2026-07-30', playerNames: ['B'], venue: { name: 'ONT Field', coords: { lat: 34.0185, lng: -117.6033 } } }),
+      game({ id: 'b3', date: '2026-07-31', playerNames: ['B'], venue: { name: 'ONT Field', coords: { lat: 34.0185, lng: -117.6033 } } }),
+    ]
+    const result = findConvergenceWindows(games, ['A', 'B'], '2026-07-24', '2026-09-30')
+    expect(result).toHaveLength(1)
+    const variants = result[0]!.variants ?? []
+    expect(variants).toHaveLength(2)
+    const allDates = [result[0]!, ...variants].map((w) => w.stops.find((s) => s.playerNames.includes('B'))!.date).sort()
+    expect(allDates).toEqual(['2026-07-29', '2026-07-30', '2026-07-31'])
+  })
+
   it('ignores cancelled and out-of-range games', () => {
     const games = [
       game({ id: 'a1', date: '2026-08-01', playerNames: ['A'], venue: { name: 'Petco Park', coords: SAN_DIEGO } }),

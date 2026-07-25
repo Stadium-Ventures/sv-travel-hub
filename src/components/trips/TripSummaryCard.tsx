@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 import type { TripCandidate, FlyInVisit, GameEvent } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
-import { formatDate, formatGameTime, TIER_DOT_COLORS } from '../../lib/formatters'
+import { formatDate, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
 import { useTripStore, getTripKey } from '../../store/tripStore'
+import { useTimeStore } from '../../store/timeStore'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 
 // Compact opportunity card — the same visual language as the Double Up
@@ -15,6 +16,7 @@ interface GameLine {
   time?: string
   venue: string
   coords: { lat: number; lng: number }
+  tz?: string
   players: string[]
   source: GameEvent['source']
 }
@@ -31,6 +33,7 @@ function linesForRoadTrip(trip: TripCandidate): GameLine[] {
       time: g.source === 'mlb-api' ? g.time : undefined,
       venue: g.venue.name,
       coords: g.venue.coords,
+      tz: g.venue.tz,
       players: g.playerNames,
       source: g.source,
     })
@@ -73,6 +76,7 @@ export default function TripSummaryCard({
 }) {
   const starredTrips = useTripStore((s) => s.starredTrips)
   const toggleTripStar = useTripStore((s) => s.toggleTripStar)
+  const timeMode = useTimeStore((s) => s.mode)
 
   const lines = useMemo(
     () => (item.type === 'road' ? linesForRoadTrip(item.trip) : linesForFlyIn(item.visit)),
@@ -174,7 +178,7 @@ export default function TripSummaryCard({
           <p key={`${l.date}-${l.venue}-${i}`} className="truncate text-[11px] text-text-dim/70">
             <span className={`inline-block w-24 font-medium ${doubleUpDates.includes(l.date) ? 'text-accent-green' : 'text-text-dim'}`}>{formatDate(l.date)}</span>
             <span className="text-text-dim">{l.venue}</span>
-            {l.time && <span className="text-text-dim/60"> {formatGameTime(l.time)}</span>}
+            {l.time && <span className="text-text-dim/60"> {formatGameTimeDisplay(l.time, timeMode, { coords: l.coords, tz: l.tz })}</span>}
             {l.players.length > 0 && <span> · {l.players.join(', ')}</span>}
           </p>
         ))}

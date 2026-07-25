@@ -69,6 +69,7 @@ export interface MLBGameRaw {
         longitude: number
       }
     }
+    timeZone?: { id?: string }
   }
   status: { detailedState: string }
 }
@@ -97,7 +98,7 @@ export async function fetchSchedule(
   startDate: string, // YYYY-MM-DD
   endDate: string,
 ): Promise<MLBGameRaw[]> {
-  const url = `${MLB_BASE}/schedule?sportId=${sportId}&teamId=${teamId}&startDate=${startDate}&endDate=${endDate}&hydrate=venue(location),probablePitcher`
+  const url = `${MLB_BASE}/schedule?sportId=${sportId}&teamId=${teamId}&startDate=${startDate}&endDate=${endDate}&hydrate=venue(location,timezone),probablePitcher`
   const res = await fetchWithRetry(url)
   if (!res.ok) throw new Error(`MLB schedule fetch failed: ${res.status}`)
   const data = await res.json()

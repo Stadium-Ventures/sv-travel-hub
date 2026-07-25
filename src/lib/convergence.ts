@@ -19,6 +19,7 @@ export interface ConvergenceStop {
   source: GameEvent['source']
   venueName: string
   coords: { lat: number; lng: number }
+  venueTz?: string
   gameId: string
   homeTeam: string
   awayTeam: string
@@ -39,6 +40,11 @@ export interface ConvergenceWindow {
    *  opportunities even if they never overlap" — the UI labels them as the
    *  closest the schedules come, not as a doable swing. */
   feasible: boolean
+  /** Same venues, different date combos (e.g. Kellon's Ontario night on the
+   *  29th vs the 30th) — Kent 2026-07-24: "I would want combinations of
+   *  options. Both of those runs are appealing but would want choices."
+   *  Only same-feasibility combos, capped at 3. */
+  variants?: ConvergenceWindow[]
 }
 
 export interface ConvergenceOptions {
@@ -141,14 +147,30 @@ export function findConvergenceWindows(
       a.totalDriveMinutes - b.totalDriveMinutes ||
       a.startDate.localeCompare(b.startDate),
   )
-  const seen = new Set<string>()
+  const comboKey = (x: ConvergenceWindow) => x.stops.map((s) => `${s.date}|${s.gameId}`).join(',')
+  const MAX_VARIANTS = 3
+  const kept = new Map<string, ConvergenceWindow>()
   const out: ConvergenceWindow[] = []
   for (const w of windows) {
     const key = w.stops.map((s) => s.venueName).sort().join('~')
-    if (seen.has(key)) continue
-    seen.add(key)
+    const existing = kept.get(key)
+    if (existing) {
+      // Same venues, different dates = a CHOICE, not a duplicate (Kent's
+      // Option A / Option B). Keep them on the best-scored window.
+      const variants = existing.variants ?? []
+      if (
+        w.feasible === existing.feasible &&
+        variants.length < MAX_VARIANTS &&
+        comboKey(w) !== comboKey(existing) &&
+        !variants.some((v) => comboKey(v) === comboKey(w))
+      ) {
+        existing.variants = [...variants, w]
+      }
+      continue
+    }
+    if (out.length >= limit) continue
+    kept.set(key, w)
     out.push(w)
-    if (out.length >= limit) break
   }
   return out
 }
@@ -180,6 +202,7 @@ function buildWindow(
       source: game.source,
       venueName: game.venue.name,
       coords: game.venue.coords,
+      venueTz: game.venue.tz,
       gameId: game.id,
       homeTeam: game.homeTeam,
       awayTeam: game.awayTeam,

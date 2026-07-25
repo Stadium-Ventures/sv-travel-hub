@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { ConvergenceWindow } from '../../lib/convergence'
 import type { RosterPlayer } from '../../types/roster'
-import { formatDate, formatDriveTime, formatGameTime, TIER_DOT_COLORS } from '../../lib/formatters'
+import { formatDate, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
+import { useTimeStore } from '../../store/timeStore'
 
 /**
  * The all-N answer to "can I see Tanner, Garrett AND Kellon in one swing?"
@@ -111,7 +112,8 @@ export default function ConvergenceBanner({
     </>
   )
 
-  // ── A trip below already covers everyone: headline + pointer only ──
+  // ── A trip below already covers everyone: headline + pointer, plus the
+  //    date-combo choices (Kent 2026-07-24: "would want choices") ──
   if (coveredByTripNumber != null) {
     return (
       <div className="rounded-xl border border-accent-green/30 bg-accent-green/5 px-4 py-2.5">
@@ -121,6 +123,7 @@ export default function ConvergenceBanner({
             Trip #{coveredByTripNumber} below has the full itinerary.
           </span>
         </p>
+        <VariantRows primary={best} />
       </div>
     )
   }
@@ -149,6 +152,8 @@ export default function ConvergenceBanner({
         <StopLines w={best} playerMap={playerMap} maxHopMinutes={maxHopMinutes} onPlayerClick={onPlayerClick} />
       </div>
 
+      <VariantRows primary={best} />
+
       {alternates.length > 0 && (
         <div className="mt-2 space-y-1">
           {alternates.map((w) => (
@@ -174,17 +179,43 @@ export default function ConvergenceBanner({
   )
 }
 
+/** Same venues, different nights — Kent's "Option A / Option B" choices
+ *  (2026-07-24). The primary combo is Option A; each variant is one row
+ *  showing which dates shift. */
+function VariantRows({ primary }: { primary: ConvergenceWindow }) {
+  const variants = primary.variants ?? []
+  if (variants.length === 0) return null
+  const letters = ['B', 'C', 'D']
+  const describe = (w: ConvergenceWindow) =>
+    w.stops.map((s) => `${s.playerNames.join(' & ')} ${formatDate(s.date)}`).join(' → ')
+  return (
+    <div className="mt-2 space-y-1">
+      <p className="text-[10px] uppercase tracking-wide text-text-dim/60">
+        Other ways to run it (same stops, different nights) — above is Option A
+      </p>
+      {variants.map((w, i) => (
+        <p key={w.stops.map((s) => s.gameId).join('|')} className="rounded-lg bg-gray-950/50 px-3 py-1.5 text-[11px] text-text-dim">
+          <span className="font-medium text-text">Option {letters[i] ?? String.fromCharCode(66 + i)}</span>
+          {' · '}{describe(w)}
+          <span className="text-text-dim/60"> · longest hop {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}</span>
+        </p>
+      ))}
+    </div>
+  )
+}
+
 function StopLines({ w, playerMap, maxHopMinutes, onPlayerClick }: {
   w: ConvergenceWindow
   playerMap: Map<string, RosterPlayer>
   maxHopMinutes: number
   onPlayerClick?: (name: string) => void
 }) {
+  const timeMode = useTimeStore((s) => s.mode)
   return (
     <>
       {w.stops.map((stop, i) => {
         const hop = i > 0 ? w.hopMinutes[i - 1]! : null
-        const t = stop.source === 'mlb-api' ? formatGameTime(stop.time) : ''
+        const t = stop.source === 'mlb-api' ? formatGameTimeDisplay(stop.time, timeMode, { coords: stop.coords, tz: stop.venueTz }) : ''
         return (
           <p key={stop.gameId} className="flex flex-wrap items-baseline gap-x-2 text-xs text-text-dim">
             <span className="w-24 shrink-0 font-medium text-text">{formatDate(stop.date)}</span>

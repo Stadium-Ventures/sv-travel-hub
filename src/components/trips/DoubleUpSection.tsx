@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react'
 import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import type { PairApproach } from '../../lib/doubleUps'
-import { formatDate, formatDriveTime, formatGameTime, TIER_DOT_COLORS } from '../../lib/formatters'
+import { formatDate, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
+import { useTimeStore } from '../../store/timeStore'
 import { findNearestAirport } from '../../data/majorAirports'
 
 /** "Does X double up with Y?" verdict for a pair of priority players —
@@ -18,6 +19,17 @@ export interface PairVerdict {
   outsideDates?: string[] | null
   /** When no double up anywhere: how close their schedules come */
   closest: PairApproach | null
+  /** Both players sit on the feasible all-N swing shown above — say THAT
+   *  is the closest, not a far-future same-day approach (which read as the
+   *  app contradicting its own banner; Tom 2026-07-24). */
+  swingNote?: { dateA: string; dateB: string } | null
+}
+
+function daysApartLabel(a: string, b: string): string {
+  const days = Math.abs(Math.round(
+    (new Date(b + 'T12:00:00Z').getTime() - new Date(a + 'T12:00:00Z').getTime()) / 86400000,
+  ))
+  return days === 1 ? '1 day apart' : `${days} days apart`
 }
 
 export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
@@ -34,6 +46,8 @@ export function PairVerdictBanner({ verdicts }: { verdicts: PairVerdict[] }) {
       <strong className="text-text">{v.a} + {v.b}:</strong> no double up in your dates.{' '}
       {v.outsideDates && v.outsideDates.length > 0
         ? <>They double up <strong className="text-accent-green">{formatDate(v.outsideDates[0]!)}</strong>{v.outsideDates.length > 1 ? ` (+${v.outsideDates.length - 1} more date${v.outsideDates.length > 2 ? 's' : ''})` : ''} — shift your dates to catch it.</>
+        : v.swingNote
+        ? <>Closest is the swing above: <strong className="text-text">{formatDate(v.swingNote.dateA)}</strong> & <strong className="text-text">{formatDate(v.swingNote.dateB)}</strong> ({daysApartLabel(v.swingNote.dateA, v.swingNote.dateB)}).</>
         : v.closest
           ? <>Closest: {formatDate(v.closest.dateA)}{v.closest.dateB !== v.closest.dateA ? `/${formatDate(v.closest.dateB)}` : ''} — {v.a} at <span className="text-text">{v.closest.venueA}</span>, {v.b} at <span className="text-text">{v.closest.venueB}</span> ({formatDriveTime(v.closest.driveMinutes)} apart).</>
           : 'Their schedules are never within a day of each other in your dates.'}
@@ -312,6 +326,7 @@ function DoubleUpCard({
  *  each date's start times per venue and its own feasibility verdict. */
 export function DatesAndTimes({ du, compact = false }: { du: DoubleUp; compact?: boolean }) {
   const [expanded, setExpanded] = useState(false)
+  const timeMode = useTimeStore((s) => s.mode)
   const occurrences = du.occurrences ?? []
   if (occurrences.length === 0) return null
 
@@ -329,7 +344,7 @@ export function DatesAndTimes({ du, compact = false }: { du: DoubleUp; compact?:
             <p key={occ.date} className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-text-dim">
               <span className="w-24 shrink-0 font-medium text-text">{formatDate(occ.date)}</span>
               {byStartTime(occ.games).map((g, gi) => {
-                const t = g.source === 'mlb-api' ? formatGameTime(g.time) : ''
+                const t = g.source === 'mlb-api' ? formatGameTimeDisplay(g.time, timeMode, g.venue) : ''
                 return (
                   <span key={g.id} className="whitespace-nowrap">
                     {gi > 0 && <span className="text-text-dim/40">→ </span>}

@@ -145,6 +145,7 @@ function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[])
     venue: {
       name: game.venue.name,
       coords,
+      tz: game.venue.timeZone?.id,
     },
     source: 'mlb-api',
     // MUST be a copy — callers pass a shared per-team array, and

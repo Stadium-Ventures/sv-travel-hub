@@ -2,6 +2,30 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { addMapEventListener } from '../../lib/mapEvents'
 import StatusPill from './StatusPill'
 import HeaderPlayerSearch from './HeaderPlayerSearch'
+import { useTimeStore } from '../../store/timeStore'
+
+/** ET / venue-local game-time switch — in the header so it's on every page
+ *  (Tom 2026-07-24: "all times can be ET but I wouldn't mind a button on
+ *  each page to switch to local time"). */
+function TimeToggle() {
+  const mode = useTimeStore((s) => s.mode)
+  const setMode = useTimeStore((s) => s.setMode)
+  return (
+    <div className="flex items-center rounded-lg border border-border bg-surface p-0.5" title="How game times are shown everywhere: Eastern, or each venue's local time">
+      {([['et', 'ET'], ['local', 'Local']] as const).map(([value, label]) => (
+        <button
+          key={value}
+          onClick={() => setMode(value)}
+          className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+            mode === value ? 'bg-accent-blue/20 text-accent-blue' : 'text-text-dim hover:text-text'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export type TabId = 'roster' | 'trips' | 'map' | 'data'
 
@@ -40,6 +64,7 @@ export default function AppShell({ children }: AppShellProps) {
         </div>
         <div className="flex items-center gap-2">
           <HeaderPlayerSearch />
+          <TimeToggle />
           <StatusPill />
         </div>
       </header>

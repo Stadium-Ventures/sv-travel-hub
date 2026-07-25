@@ -12,6 +12,8 @@ import { useRosterStore } from '../../store/rosterStore'
 import { useSummerStore } from '../../store/summerStore'
 import { useTripStore } from '../../store/tripStore'
 import { dispatchMapEvent } from '../../lib/mapEvents'
+import { formatGameTimeDisplay } from '../../lib/formatters'
+import { useTimeStore } from '../../store/timeStore'
 import type { GameEvent } from '../../types/schedule'
 import type { PlayerLevel } from '../../types/roster'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
@@ -25,6 +27,8 @@ interface Row {
   date: string
   time?: string
   venueName: string
+  venueCoords: { lat: number; lng: number }
+  venueTz?: string
   city: string
   opponent: string
   isHome: boolean
@@ -55,6 +59,7 @@ const SOURCE_LABELS: Record<GameEvent['source'], string> = {
 }
 
 export default function DataTab() {
+  const timeMode = useTimeStore((s) => s.mode)
   const proGames = useScheduleStore((s) => s.proGames)
   const ncaaGames = useScheduleStore((s) => s.ncaaGames)
   const hsGames = useScheduleStore((s) => s.hsGames)
@@ -111,6 +116,8 @@ export default function DataTab() {
           date: g.date,
           time: g.time,
           venueName: g.venue.name,
+          venueCoords: g.venue.coords,
+          venueTz: g.venue.tz,
           city: cityFor(),
           opponent: opponentFor(g),
           isHome: g.isHome,
@@ -327,7 +334,7 @@ export default function DataTab() {
                   <span className={`text-[11px] font-medium ${LEVEL_COLORS[r.level] ?? 'text-text-dim'}`}>{r.level}</span>
                 </td>
                 <td className="px-3 py-1.5 text-text-dim whitespace-nowrap">{r.date}</td>
-                <td className="px-3 py-1.5 text-text-dim whitespace-nowrap text-[11px]">{formatTime(r.time)}</td>
+                <td className="px-3 py-1.5 text-text-dim whitespace-nowrap text-[11px]">{formatGameTimeDisplay(r.time, timeMode, { coords: r.venueCoords, tz: r.venueTz })}</td>
                 <td className="px-3 py-1.5">
                   <button
                     onClick={jumpToVenueOnMap}
@@ -392,9 +399,3 @@ export default function DataTab() {
   )
 }
 
-function formatTime(iso?: string): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }) + ' ET'
-}

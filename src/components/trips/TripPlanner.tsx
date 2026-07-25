@@ -328,46 +328,11 @@ export default function TripPlanner() {
     return findDoubleUps(all, players, today, endDate > horizon ? endDate : horizon)
   }, [proGames, ncaaGames, hsGames, summerGames, players, DOUBLE_UP_WINDOW_DAYS, endDate])
 
-  // "Does X double up with Y?" — Tom's 2026-07-21 read of the priority
-  // pickers as a player-combo double-up filter. For each pair of selected
-  // priority players, state the verdict explicitly: dates when they double
-  // up, or how close their schedules come (silence read as noise before).
-  const pairVerdicts = useMemo<PairVerdict[]>(() => {
-    if (priorityPlayers.length < 2) return []
-    const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
-    const out: PairVerdict[] = []
-    for (let i = 0; i < priorityPlayers.length; i++) {
-      for (let j = i + 1; j < priorityPlayers.length; j++) {
-        const a = priorityPlayers[i]!
-        const b = priorityPlayers[j]!
-        const dus = upcomingDoubleUps.filter((du) => du.playerNames.includes(a) && du.playerNames.includes(b))
-        const allDates = [...new Set(dus.flatMap((d) => d.dates))].sort()
-        // A verdict that says "in this window" must actually mean the
-        // planner's selected dates — the fixed 30-day horizon claimed
-        // "3 of 6 pairs double up" for an Aug 9–11 plan whose double ups
-        // were on Aug 18 (Tom 2026-07-23).
-        const inWindow = allDates.filter((d) => d >= startDate && d <= endDate)
-        if (inWindow.length > 0) {
-          out.push({ a, b, doubleUpDates: inWindow, closest: null })
-        } else if (allDates.length > 0) {
-          out.push({ a, b, doubleUpDates: null, outsideDates: allDates, closest: null })
-        } else {
-          // Scan the planner's SELECTED dates, not a fixed 30-day horizon —
-          // "closest" must mean closest within the window Kent is looking at
-          // (a 2-month range was reporting only next-30-day approaches).
-          out.push({ a, b, doubleUpDates: null, closest: findClosestApproach(all, a, b, startDate, endDate) })
-        }
-      }
-    }
-    return out
-  }, [priorityPlayers, upcomingDoubleUps, proGames, ncaaGames, hsGames, summerGames, DOUBLE_UP_WINDOW_DAYS, startDate, endDate])
-
-
   // Convergence scan — the all-N answer to Kent's "west coast swing" text
   // (2026-07-24): with 3+ priority players, when do ALL of them land within
-  // one multi-stop swing? Scans the planner's full selected range (set a
-  // season-long range to search "soon" without knowing dates). 2 players
-  // stay the pair verdicts' job.
+  // one multi-stop swing? Scans the planner's full selected range. Computed
+  // BEFORE pairVerdicts so a pair on the feasible swing can say "closest is
+  // the swing above" instead of a misleading far-future approach.
   const CONVERGENCE_SPAN_DAYS = 5
   const convergence = useMemo(() => {
     if (priorityPlayers.length < 3) return null
@@ -391,6 +356,53 @@ export default function TripPlanner() {
     }
     return { windows, missing, outOfWindow }
   }, [priorityPlayers, proGames, ncaaGames, hsGames, summerGames, startDate, endDate, maxDriveMinutes])
+
+  // "Does X double up with Y?" — Tom's 2026-07-21 read of the priority
+  // pickers as a player-combo double-up filter. For each pair of selected
+  // priority players, state the verdict explicitly: dates when they double
+  // up, or how close their schedules come (silence read as noise before).
+  const pairVerdicts = useMemo<PairVerdict[]>(() => {
+    if (priorityPlayers.length < 2) return []
+    const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
+    const bestSwing = convergence?.windows[0]?.feasible ? convergence.windows[0] : null
+    const out: PairVerdict[] = []
+    for (let i = 0; i < priorityPlayers.length; i++) {
+      for (let j = i + 1; j < priorityPlayers.length; j++) {
+        const a = priorityPlayers[i]!
+        const b = priorityPlayers[j]!
+        const dus = upcomingDoubleUps.filter((du) => du.playerNames.includes(a) && du.playerNames.includes(b))
+        const allDates = [...new Set(dus.flatMap((d) => d.dates))].sort()
+        // A verdict that says "in this window" must actually mean the
+        // planner's selected dates — the fixed 30-day horizon claimed
+        // "3 of 6 pairs double up" for an Aug 9–11 plan whose double ups
+        // were on Aug 18 (Tom 2026-07-23).
+        const inWindow = allDates.filter((d) => d >= startDate && d <= endDate)
+        if (inWindow.length > 0) {
+          out.push({ a, b, doubleUpDates: inWindow, closest: null })
+          continue
+        }
+        if (allDates.length > 0) {
+          out.push({ a, b, doubleUpDates: null, outsideDates: allDates, closest: null })
+          continue
+        }
+        // Both players sit on the feasible swing above? Then "closest" IS
+        // the swing — a far-future same-day approach (Sep at Yankee/Fenway)
+        // under a banner showing them 2 days apart in LA read as the app
+        // contradicting itself (Tom 2026-07-24).
+        const stopA = bestSwing?.stops.find((s) => s.playerNames.includes(a))
+        const stopB = bestSwing?.stops.find((s) => s.playerNames.includes(b))
+        if (stopA && stopB) {
+          out.push({ a, b, doubleUpDates: null, closest: null, swingNote: { dateA: stopA.date, dateB: stopB.date } })
+          continue
+        }
+        // Scan the planner's SELECTED dates, not a fixed 30-day horizon —
+        // "closest" must mean closest within the window Kent is looking at
+        // (a 2-month range was reporting only next-30-day approaches).
+        out.push({ a, b, doubleUpDates: null, closest: findClosestApproach(all, a, b, startDate, endDate) })
+      }
+    }
+    return out
+  }, [priorityPlayers, upcomingDoubleUps, proGames, ncaaGames, hsGames, summerGames, convergence, startDate, endDate])
 
   // All players eligible for priority selection (don't filter by visits remaining)
   const eligibleForPriority = useMemo(

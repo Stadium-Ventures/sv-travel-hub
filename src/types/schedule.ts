@@ -16,6 +16,11 @@ export interface GameEvent {
   venue: {
     name: string
     coords: Coordinates
+    /** IANA zone (e.g. "America/Los_Angeles") from the MLB API — used for
+     *  the venue-local time display. Absent on non-MLB sources and on
+     *  events cached before 2026-07-24; display falls back to a
+     *  longitude-based approximation. */
+    tz?: string
   }
   source: ScheduleSource
   playerNames: string[]

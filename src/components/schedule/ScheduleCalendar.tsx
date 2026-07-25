@@ -1,18 +1,14 @@
 import { useState, useMemo } from 'react'
 import type { GameEvent } from '../../types/schedule'
 import Term from '../ui/Term'
+import { formatGameTimeDisplay } from '../../lib/formatters'
+import { useTimeStore } from '../../store/timeStore'
 
 interface Props {
   games: GameEvent[]
 }
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-function formatTime(timeStr: string): string {
-  const d = new Date(timeStr)
-  if (isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })
-}
 
 const SOURCE_COLORS: Record<string, string> = {
   'mlb-api': 'border-accent-blue/30 bg-accent-blue/5',
@@ -33,6 +29,8 @@ const SOURCE_LABELS: Record<string, string> = {
 }
 
 export default function ScheduleCalendar({ games }: Props) {
+  const timeMode = useTimeStore((s) => s.mode)
+  const formatTime = (g: GameEvent) => formatGameTimeDisplay(g.time, timeMode, g.venue)
   const [currentMonth, setCurrentMonth] = useState(() => {
     // Start at the month of the first game
     if (games.length > 0) {
@@ -207,10 +205,10 @@ export default function ScheduleCalendar({ games }: Props) {
                           <span className="text-text-dim">{g.venue.name}</span>
                           <span className="text-text-dim/40">|</span>
                           <span className="text-text-dim">{g.isHome ? 'Home' : 'Away'}</span>
-                          {formatTime(g.time) && (
+                          {formatTime(g) && (
                             <>
                               <span className="text-text-dim/40">|</span>
-                              <span className="text-text-dim">{formatTime(g.time)}</span>
+                              <span className="text-text-dim">{formatTime(g)}</span>
                             </>
                           )}
                           {g.sourceUrl && (
