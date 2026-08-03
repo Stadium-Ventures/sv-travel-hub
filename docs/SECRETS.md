@@ -19,6 +19,14 @@ visible in the shipped bundle — treat them as public.
 | `VITE_ORS_API_KEY` | openrouteservice routing (drive times) | https://openrouteservice.org → dashboard → API keys. Ends up in the client bundle; use a free-tier key. |
 | `VITE_EVENTS_CSV_URL`, `VITE_ROSTER_CSV_URL`, `VITE_SCHEDULE_CSV_URL`, `VITE_SUMMER_CSV_URL`, `VITE_SUMMER_MANUAL_CSV_URL` | Published-CSV URLs of source Google Sheets | Google Sheets → File → Share → Publish to web → CSV. Unlisted but not truly secret. |
 
+GitHub Actions secrets (repo → Settings → Secrets and variables → Actions),
+used by `.github/workflows/health-deadman.yml`:
+
+| Name | What it's for | Where the value comes from |
+|---|---|---|
+| `TRAVEL_HUB_CRON_SECRET` | Lets the dead-man probe call `/api/health-monitor` | Same value as the Vercel `CRON_SECRET` env — copy from https://vercel.com/stadium-ventures/sv-travel-hub/settings/environment-variables (👤 not yet set as of 2026-08-03; the probe is inert until it is) |
+| `SV_AUTOMATION_WEBHOOK_URL` | Probe-failure alerts → #sv-automation | Slack app → Incoming Webhooks (set 2026-08-03) |
+
 ## Conventions
 
 - To hand a secret to a teammate, set it where they need it (Vercel env or

@@ -105,20 +105,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: false, findings, posted })
     }
 
-    // Dead-man's switch: silent-when-healthy means a dead cron looks identical
-    // to a healthy one. Once a week (Mondays, UTC) post a one-line heartbeat
-    // even with zero findings, so a stopped monitor becomes visible within a
-    // week. Every other day stays silent-unless-actionable.
-    if (new Date().getUTCDay() === 1) {
-      const posted = await notifyAutomation(
-        '✅ Travel Hub (sv-travel-hub) — weekly check-in: all monitors ran, no issues',
-      )
-      if (!posted) {
-        return res.status(500).json({ ok: true, findings, heartbeat: false, error: WEBHOOK_DOWN_ERROR })
-      }
-      return res.status(200).json({ ok: true, findings, heartbeat: true })
-    }
-
+    // Silent when healthy — always. The old Monday "all monitors ran" post
+    // was this endpoint's dead-man's switch; Tom killed all-clear posts
+    // 2026-08-03. Liveness is covered instead by the health-deadman GitHub
+    // Actions workflow, which probes this endpoint from independent
+    // infrastructure and alerts #sv-automation ONLY when the probe fails.
     return res.status(200).json({ ok: true, findings, posted: false })
   } catch (e) {
     // The monitor itself failing shouldn't be silent — but only alert on REAL

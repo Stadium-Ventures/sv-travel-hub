@@ -1,0 +1,53 @@
+# Dead-man's switch for the Travel Hub health monitor.
+#
+# The daily Vercel cron (vercel.json → /api/health-monitor, 13:00 UTC) posts
+# to #sv-automation when something breaks and stays silent when healthy.
+# Blind spot: if the Vercel cron itself dies, silence looks identical to
+# health. This workflow closes it from independent infrastructure — it
+# probes the same endpoint daily and posts a plain-English alert ONLY when
+# the probe fails. No all-clear posts, ever (Tom, 2026-08-03 — replaced the
+# old Monday "all monitors ran" heartbeat).
+#
+# INERT UNTIL CONFIGURED: needs two repo Actions secrets
+# (Settings → Secrets and variables → Actions):
+#   TRAVEL_HUB_CRON_SECRET     — same value as the Vercel CRON_SECRET env
+#     (https://vercel.com/stadium-ventures/sv-travel-hub/settings/environment-variables)
+#   SV_AUTOMATION_WEBHOOK_URL  — #sv-automation incoming webhook
+name: Health dead-man probe
+
+on:
+  schedule:
+    # 17:00 UTC daily — 4h after the Vercel cron, so a same-day failure
+    # window is caught without the two ever racing.
+    - cron: "0 17 * * *"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe /api/health-monitor
+        env:
+          CRON_SECRET: ${{ secrets.TRAVEL_HUB_CRON_SECRET }}
+          WEBHOOK: ${{ secrets.SV_AUTOMATION_WEBHOOK_URL }}
+        run: |
+          if [ -z "$CRON_SECRET" ] || [ -z "$WEBHOOK" ]; then
+            echo "Secrets not configured — probe inert. Set TRAVEL_HUB_CRON_SECRET and SV_AUTOMATION_WEBHOOK_URL."
+            exit 0
+          fi
+          # dryRun: the probe verifies the checks RUN; findings-posting stays
+          # the Vercel cron's job, so a real finding isn't double-posted.
+          status=$(curl -sS -o /tmp/body.json -w "%{http_code}" -m 60 --retry 2 --retry-delay 10 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "https://sv-travel-hub.vercel.app/api/health-monitor?dryRun=1" || echo "000")
+          echo "HTTP $status"
+          cat /tmp/body.json 2>/dev/null || true
+          if [ "$status" = "200" ]; then
+            echo "Health monitor alive — checks ran. Staying silent."
+            exit 0
+          fi
+          curl -fsS -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"🔴 *Travel Hub (sv-travel-hub)* — health monitoring is down 🛠️\\nWhat broke: the daily health monitor can't run — /api/health-monitor returned HTTP ${status} to the dead-man probe, so schedule-feed and API problems are currently going undetected.\\nHow we know: the independent GitHub Actions probe (this workflow) failed after retries.\\nWhat to do: check the Vercel deployment and cron: https://vercel.com/stadium-ventures/sv-travel-hub — run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            "$WEBHOOK"
+          exit 1
