@@ -96,6 +96,20 @@ export const NCAA_ALIASES: Record<string, string[]> = {
   'Sacramento State': ['Sac State', 'Sacramento State Hornets'],
   'Saint Josephs': ["Saint Joseph's", "St. Joseph's", "St. Josephs", 'Hawks'],
   'Tulane': ['Tulane University', 'Tulane Green Wave', 'Green Wave'],
+  'Tennessee': ['University of Tennessee', 'Tennessee Volunteers', 'Vols', 'UT Knoxville'],
+  'Hawaii': ["Hawai'i", 'University of Hawaii', "University of Hawai'i", 'Hawaii Rainbow Warriors', 'Rainbow Warriors', 'UH Manoa'],
+  'Clemson': ['Clemson University', 'Clemson Tigers'],
+  'Dartmouth': ['Dartmouth College', 'Dartmouth Big Green'],
+  'Houston': ['University of Houston', 'Houston Cougars'],
+  'Notre Dame': ['University of Notre Dame', 'Notre Dame Fighting Irish'],
+  'Ole Miss': ['Mississippi', 'University of Mississippi', 'Ole Miss Rebels'],
+  'Stetson': ['Stetson University', 'Stetson Hatters'],
+  'Texas A&M': ['Texas A&M University', 'TAMU', 'Texas A&M Aggies'],
+  'UCLA': ['University of California Los Angeles', 'UCLA Bruins'],
+  'Georgia': ['University of Georgia', 'UGA', 'Georgia Bulldogs'],
+  'Kentucky': ['University of Kentucky', 'Kentucky Wildcats'],
+  'Miami': ['University of Miami', 'Miami (FL)', 'Miami Hurricanes'],
+  'Portland': ['University of Portland', 'Portland Pilots'],
 }
 
 // Reverse lookup: alias → canonical name

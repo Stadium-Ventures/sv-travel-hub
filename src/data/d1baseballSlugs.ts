@@ -29,4 +29,18 @@ export const D1_BASEBALL_SLUGS: Record<string, string> = {
   'Sacramento State': 'sacstate',
   'Saint Josephs': 'stjosephs',
   'Tulane': 'tulane',
+  'Tennessee': 'tennessee',
+  'Hawaii': 'hawaii',
+  'Clemson': 'clemson',
+  'Dartmouth': 'dartmouth',
+  'Houston': 'houston',
+  'Notre Dame': 'notredame',
+  'Ole Miss': 'olemiss',
+  'Stetson': 'stetson',
+  'Texas A&M': 'texasam',
+  'UCLA': 'ucla',
+  'Georgia': 'georgia',
+  'Kentucky': 'kentucky',
+  'Miami': 'miamifl', // bare "miami" 404s on D1Baseball
+  'Portland': 'portland',
 }

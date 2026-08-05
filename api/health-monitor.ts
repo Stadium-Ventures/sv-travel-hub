@@ -1,4 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+// Pure data/lookup modules shared with the app — imported (not copied) so the
+// monitor can never drift from the alias table the app actually resolves with.
+import { resolveNcaaName } from '../src/data/aliases'
+import { D1_BASEBALL_SLUGS } from '../src/data/d1baseballSlugs'
 
 // SV Travel Hub — self health check.
 //
@@ -38,6 +42,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 //   GET /api/health-monitor            (daily cron / manual)
 //   GET /api/health-monitor?dryRun=1   (compute findings, do NOT post)
 //   GET /api/health-monitor?test=1     (post a harmless test finding — verifies wiring)
+//   GET /api/health-monitor?force=1    (run the Monday-only + seasonal checks now)
 
 export const config = { maxDuration: 60 }
 
@@ -73,6 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true'
+  const force = req.query.force === '1' || req.query.force === 'true'
 
   // ?test=1 → post one harmless finding so we can confirm the #sv-automation
   // wiring end-to-end without waiting for a real outage. Never fires on cron.
@@ -90,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const findings = await runChecks()
+    const findings = await runChecks(force)
     if (dryRun) {
       return res.status(200).json({ ok: findings.length === 0, findings, posted: false, dryRun: true })
     }
@@ -134,7 +140,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 // ─── Checks ──────────────────────────────────────────────────────────────────
 
-async function runChecks(): Promise<Finding[]> {
+async function runChecks(force = false): Promise<Finding[]> {
   const findings: Finding[] = []
 
   // 1. Config the Monday recap can't run without.
@@ -289,12 +295,199 @@ async function runChecks(): Promise<Finding[]> {
     }
   }
 
+  // 4. Weekly data-hygiene + seasonal checks (Mondays, or ?force=1). These are
+  //    stateless, so they re-alert every Monday until fixed — deliberate: each
+  //    one is a client whose games are invisible in the app. Daily would be
+  //    noise; silence would recreate the exact gap they close.
+  const now = new Date()
+  if (force || now.getUTCDay() === 1) {
+    const seasonMonth = now.getUTCMonth() // 0=Jan
+
+    if (roster.ok && roster.text) {
+      findings.push(...checkNcaaSchoolCoverage(roster.text))
+
+      // NCAA schedules for the upcoming season publish Sept–Dec; from December
+      // on, a client school with still nothing on D1Baseball is worth flagging.
+      if (force || seasonMonth === 11 || seasonMonth === 0) {
+        findings.push(...await checkNcaaNextSeasonPublished(roster.text, now))
+      }
+    }
+
+    // HS/JUCO schedules are hand-entered from state releases (Nov–Feb):
+    // remind Dec–Feb while the sheet still only has last season's games.
+    if (force || seasonMonth === 11 || seasonMonth === 0 || seasonMonth === 1) {
+      if (schedule.ok && schedule.text) {
+        findings.push(...checkHsSheetSeason(schedule.text, now))
+      }
+    }
+  }
+
   return findings
+}
+
+// ─── Weekly data-hygiene + seasonal checks ───────────────────────────────────
+
+/** The season runs Feb–Jun, so "the upcoming season" is next calendar year
+ *  during Oct–Dec and the current year during Jan–Feb. */
+function upcomingSeasonYear(now: Date): number {
+  return now.getUTCMonth() >= 9 ? now.getUTCFullYear() + 1 : now.getUTCFullYear()
+}
+
+/** NCAA roster rows (name + school), excluding JUCO (not on D1Baseball) and
+ *  blank schools (sv-scouting-data's daily roster-sync already alerts those —
+ *  don't double-report). */
+function parseRosterNcaa(rosterCsv: string): Array<{ name: string; org: string }> {
+  const rows = parseCsv(rosterCsv)
+  if (rows.length < 2) return []
+  const header = rows[0]!.map((h) => h.trim().toLowerCase())
+  const col = (names: string[]) => names.map((n) => header.indexOf(n)).find((i) => i >= 0) ?? -1
+  const iName = col(['name', 'player name', 'player'])
+  const iLevel = col(['level', 'player level'])
+  const iOrg = col(['org', 'organization', 'team', 'school'])
+  if (iName < 0 || iLevel < 0 || iOrg < 0) return []
+  const out: Array<{ name: string; org: string }> = []
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r]!
+    const name = (row[iName] ?? '').trim()
+    const level = (row[iLevel] ?? '').toLowerCase().trim()
+    const org = (row[iOrg] ?? '').trim()
+    if (!name || !org) continue
+    const isNcaa =
+      (level.includes('ncaa') || level.includes('college')) &&
+      !level.includes('juco') && !level.includes('junior')
+    if (isNcaa) out.push({ name, org })
+  }
+  return out
+}
+
+/** A roster school that resolveNcaaName can't match is silently skipped by the
+ *  app's NCAA fetch — the client just has no games, and only the in-browser
+ *  Diagnostics panel would ever say so. Surface it in Slack instead. (In-app
+ *  custom aliases are per-browser and can only map to schools already in the
+ *  table, so an unmatched school here is always worth a durable fix.) */
+function checkNcaaSchoolCoverage(rosterCsv: string): Finding[] {
+  const unmatched = new Map<string, string[]>()
+  for (const p of parseRosterNcaa(rosterCsv)) {
+    if (resolveNcaaName(p.org)) continue
+    const list = unmatched.get(p.org)
+    if (list) list.push(p.name)
+    else unmatched.set(p.org, [p.name])
+  }
+  if (unmatched.size === 0) return []
+  const detail = [...unmatched.entries()].map(([org, names]) => `"${org}" (${names.join(', ')})`).join('; ')
+  const n = unmatched.size
+  return [{
+    severity: 'warning',
+    code: true,
+    what: `${n} roster school${n === 1 ? '' : 's'} can't be matched to an NCAA program — ${n === 1 ? 'that client’s' : 'those clients’'} games are invisible in the Travel Hub.`,
+    how: `The roster sheet lists ${detail}, and none match NCAA_ALIASES — the app silently skips unmatched schools when pulling D1Baseball schedules.`,
+    todo: 'Add the school to NCAA_ALIASES + D1_BASEBALL_SLUGS in src/data/ (check NCAA_VENUES has it too), or fix the Org spelling in the roster sheet. Re-alerts every Monday until resolved.',
+  }]
+}
+
+/** Dec–Jan: flag client schools whose upcoming-season schedule still isn't on
+ *  D1Baseball. The app scrapes those pages live, so it picks new schedules up
+ *  automatically the moment they post — this check exists to catch the ones
+ *  that HAVEN'T posted by the time trips need planning. */
+async function checkNcaaNextSeasonPublished(rosterCsv: string, now: Date): Promise<Finding[]> {
+  const schools = new Map<string, string>() // canonical name → D1Baseball slug
+  for (const p of parseRosterNcaa(rosterCsv)) {
+    const canonical = resolveNcaaName(p.org)
+    if (!canonical) continue // unmatched schools have their own finding above
+    const slug = D1_BASEBALL_SLUGS[canonical]
+    if (slug) schools.set(canonical, slug)
+  }
+  if (schools.size === 0) return []
+
+  const seasonYear = upcomingSeasonYear(now)
+  const missing: string[] = []
+  const unreachable: string[] = []
+
+  await Promise.all([...schools.entries()].map(async ([school, slug]) => {
+    try {
+      const res = await fetch(`https://d1baseball.com/team/${slug}/schedule/`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SVTravelHub/HealthMonitor)' },
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (!res.ok) { unreachable.push(school); return }
+      const html = await res.text()
+      // Game dates appear in score-link hrefs as date=YYYYMMDD — no DOM needed.
+      const years = new Set<string>()
+      for (const m of html.matchAll(/date=(\d{4})\d{4}/g)) years.add(m[1]!)
+      if (!years.has(String(seasonYear))) missing.push(school)
+    } catch {
+      unreachable.push(school)
+    }
+  }))
+
+  const findings: Finding[] = []
+  if (missing.length > 0) {
+    missing.sort()
+    findings.push({
+      severity: 'warning',
+      code: false,
+      what: `${missing.length} client school${missing.length === 1 ? ' has' : 's have'} no ${seasonYear} schedule on D1Baseball yet: ${missing.join(', ')}.`,
+      how: `Weekly Dec–Jan check: the D1Baseball team page shows no games dated in ${seasonYear}. The app scrapes those pages, so these schools show no games until the schedule posts.`,
+      todo: 'Usually the school just hasn’t published yet — the recheck is automatic next Monday. If it persists into late January, verify the school’s D1Baseball page by hand; the slug or page format may have changed (code fix).',
+    })
+  }
+  // Individual fetch failures are transient noise, but ALL failing means the
+  // check itself is blind (likely D1Baseball blocking Vercel egress) — say so
+  // rather than silently reporting nothing all winter.
+  if (unreachable.length === schools.size) {
+    findings.push({
+      severity: 'warning',
+      code: true,
+      what: 'The NCAA schedule-publication check couldn’t reach D1Baseball for any school — it’s blind, not clean.',
+      how: `All ${schools.size} D1Baseball team-page fetches from the health monitor failed or returned non-200.`,
+      todo: 'D1Baseball may be blocking Vercel egress IPs — open `sv-travel-hub` in Claude Code and rework checkNcaaNextSeasonPublished in api/health-monitor.ts (e.g. route via the CORS proxy fallbacks).',
+    })
+  }
+  return findings
+}
+
+/** Dec–Feb: the HS/JUCO sheet is hand-entered, so a sheet that still only has
+ *  last spring's games passes every plumbing check while HS clients silently
+ *  show nothing. Flag until someone enters upcoming-season games. */
+function checkHsSheetSeason(scheduleCsv: string, now: Date): Finding[] {
+  const rows = parseCsv(scheduleCsv)
+  if (rows.length < 2) return []
+  const header = rows[0]!.map((h) => h.trim().toLowerCase())
+  const col = (names: string[]) => names.map((n) => header.indexOf(n)).find((i) => i >= 0) ?? -1
+  const iDate = col(['date', 'game date'])
+  const iLevel = col(['level', 'player level'])
+  if (iDate < 0 || iLevel < 0) return []
+
+  const seasonYear = upcomingSeasonYear(now)
+  let hsRows = 0
+  let latest = ''
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r]!
+    const level = (row[iLevel] ?? '').toLowerCase().trim()
+    const isHs = level.includes('hs') || level.includes('high school') ||
+      level.includes('juco') || level.includes('junior college')
+    if (!isHs) continue
+    hsRows++
+    const d = normalizeIsoDate((row[iDate] ?? '').trim())
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d > latest) latest = d
+  }
+  // A sheet with zero HS rows at all is a plumbing problem the existing
+  // schedule-CSV probe and in-app checks already own.
+  if (hsRows === 0) return []
+  if (latest >= `${seasonYear}-01-01`) return []
+
+  return [{
+    severity: 'warning',
+    code: false,
+    what: `The HS/JUCO schedule sheet has no ${seasonYear}-season games yet — HS clients show nothing in the Travel Hub.`,
+    how: `Weekly Dec–Feb check: all ${hsRows} HS/JUCO rows in the Client Game Schedule sheet are from last season (newest game: ${latest || 'no parseable date'}).`,
+    todo: `State associations release HS schedules Nov–Feb — enter the new season's HS/JUCO games into the Client Game Schedule sheet. Re-alerts every Monday until the sheet has ${seasonYear} rows.`,
+  }]
 }
 
 // ─── Probes ──────────────────────────────────────────────────────────────────
 
-interface ProbeResult { ok: boolean; reason?: string; skipped?: boolean }
+interface ProbeResult { ok: boolean; reason?: string; skipped?: boolean; text?: string }
 
 /** A source is "ok" only if it responds 2xx AND returns a non-trivial body —
  *  a published sheet that got unshared often 200s with an HTML error page or an
@@ -312,7 +505,7 @@ async function probeCsv(url: string): Promise<ProbeResult> {
     if (dataRows.length < 2) return { ok: false, reason: 'an empty response' }
     // Google serves an HTML page (not CSV) when a sheet is unpublished/private.
     if (/^\s*<(!doctype|html)/i.test(text)) return { ok: false, reason: 'HTML instead of CSV (sheet may be unpublished)' }
-    return { ok: true }
+    return { ok: true, text }
   } catch (e) {
     return { ok: false, reason: describeErr(e) }
   }
@@ -439,6 +632,43 @@ async function fetchRecapDryRun(): Promise<DryRunResult> {
   } catch (e) {
     return { ok: false, reason: describeErr(e), body: {} }
   }
+}
+
+/** Tiny RFC-4180-ish CSV parser — same one api/slack-recap.ts uses. Handles
+ *  quoted fields with commas and doubled-quote escapes; skips empty rows. */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cur = ''
+  let inQuote = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (inQuote) {
+      if (c === '"' && text[i + 1] === '"') { cur += '"'; i++ }
+      else if (c === '"') { inQuote = false }
+      else { cur += c }
+    } else {
+      if (c === '"') { inQuote = true }
+      else if (c === ',') { row.push(cur); cur = '' }
+      else if (c === '\r') { /* skip */ }
+      else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = '' }
+      else { cur += c }
+    }
+  }
+  if (cur.length > 0 || row.length > 0) { row.push(cur); rows.push(row) }
+  return rows.filter((r) => r.some((cell) => cell.trim() !== ''))
+}
+
+function normalizeIsoDate(s: string): string {
+  // Accepts YYYY-MM-DD, M/D/YYYY, MM/DD/YYYY → YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  if (m) {
+    const mm = m[1]!.padStart(2, '0')
+    const dd = m[2]!.padStart(2, '0')
+    return `${m[3]}-${mm}-${dd}`
+  }
+  return s
 }
 
 function describeErr(e: unknown): string {

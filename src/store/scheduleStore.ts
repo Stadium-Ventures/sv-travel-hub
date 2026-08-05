@@ -950,12 +950,39 @@ export const useScheduleStore = create<ScheduleState>()(
         // Resolve each player's org to a canonical NCAA school name
         const customNcaa = get().customNcaaAliases
         const schoolToPlayers = new Map<string, string[]>()
+        const unresolvedOrgs = new Map<string, string[]>()
         for (const { playerName, org } of playerOrgs) {
           const canonical = resolveNcaaName(org, customNcaa)
-          if (!canonical) continue
+          if (!canonical) {
+            const key = org.trim() || '(blank)'
+            const misses = unresolvedOrgs.get(key)
+            if (misses) misses.push(playerName)
+            else unresolvedOrgs.set(key, [playerName])
+            continue
+          }
           const existing = schoolToPlayers.get(canonical)
           if (existing) existing.push(playerName)
           else schoolToPlayers.set(canonical, [playerName])
+        }
+
+        // Clear stale ncaa diagnostics BEFORE filing this run's issues —
+        // d1baseball.ts pushes more (stale-bundle fallbacks, 0-game parses)
+        // during the fetch and they must survive.
+        useDiagnosticsStore.getState().clearSource('ncaa')
+
+        // A school that resolves to nothing used to be dropped with no trace —
+        // a transfer to a school missing from NCAA_ALIASES (Kersey→Tennessee,
+        // 2026-08) just silently lost coverage. File each one.
+        if (unresolvedOrgs.size > 0) {
+          useDiagnosticsStore.getState().addIssues(
+            [...unresolvedOrgs.entries()].map(([org, players]) => ({
+              level: 'warning' as const,
+              source: 'ncaa' as const,
+              message: `"${org}" (${players.join(', ')}) doesn't match any known NCAA school — no schedule fetched`,
+              details:
+                'Map it under Unknown Team Names on the Roster tab, or add the school to NCAA_ALIASES + D1_BASEBALL_SLUGS in src/data/ so it works for everyone.',
+            })),
+          )
         }
 
         if (schoolToPlayers.size === 0) {
@@ -975,11 +1002,6 @@ export const useScheduleStore = create<ScheduleState>()(
           ncaaFailedSchools: merge ? prevState.ncaaFailedSchools : [],
           ncaaDroppedAwayGames: merge ? prevState.ncaaDroppedAwayGames : 0,
         })
-
-        // Clear stale ncaa diagnostics BEFORE fetching — d1baseball.ts pushes
-        // issues (stale-bundle fallbacks, 0-game parses) during the fetch and
-        // they must survive.
-        useDiagnosticsStore.getState().clearSource('ncaa')
 
         try {
           const { schedules, failedSchools } = await fetchAllD1Schedules(
