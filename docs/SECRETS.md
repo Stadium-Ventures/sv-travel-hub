@@ -24,7 +24,7 @@ used by `.github/workflows/health-deadman.yml`:
 
 | Name | What it's for | Where the value comes from |
 |---|---|---|
-| `TRAVEL_HUB_CRON_SECRET` | Lets the dead-man probe call `/api/health-monitor` | Same value as the Vercel `CRON_SECRET` env — copy from https://vercel.com/stadium-ventures/sv-travel-hub/settings/environment-variables (👤 not yet set as of 2026-08-03; the probe is inert until it is) |
+| `TRAVEL_HUB_CRON_SECRET` | Lets the dead-man probe call `/api/health-monitor` | Same value as the Vercel `CRON_SECRET` env (set 2026-08-05, probe armed). CRON_SECRET is flagged Sensitive in Vercel so it can never be viewed again — to re-sync, rotate: generate a new random value, overwrite CRON_SECRET (Production) in Vercel, redeploy, and `gh secret set TRAVEL_HUB_CRON_SECRET` with the same value. |
 | `SV_AUTOMATION_WEBHOOK_URL` | Probe-failure alerts → #sv-automation | Slack app → Incoming Webhooks (set 2026-08-03) |
 
 ## Conventions

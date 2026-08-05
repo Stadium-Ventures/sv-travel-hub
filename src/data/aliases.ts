@@ -67,71 +67,10 @@ export const MLB_ORG_IDS: Record<string, number> = {
 // All unique parent team IDs
 export const MLB_PARENT_IDS = [...new Set(Object.values(MLB_ORG_IDS))]
 
-// NCAA school aliases for matching roster "Org" field
-export const NCAA_ALIASES: Record<string, string[]> = {
-  'Texas': ['University of Texas', 'UT Austin', 'Texas Longhorns'],
-  'Coastal Carolina': ['CCU', 'Coastal', 'Chanticleers'],
-  'Florida': ['University of Florida', 'UF', 'Florida Gators'],
-  'Florida State': ['FSU', 'Florida State Seminoles', 'Seminoles'],
-  'Georgia Tech': ['GT', 'Georgia Tech Yellow Jackets'],
-  'Virginia': ['UVA', 'University of Virginia', 'Cavaliers'],
-  'South Carolina': ['USC', 'University of South Carolina', 'Gamecocks'],
-  'Alabama': ['University of Alabama', 'Bama', 'Crimson Tide'],
-  'Vanderbilt': ['Vandy', 'Vanderbilt Commodores'],
-  'Dallas Baptist': ['DBU', 'Dallas Baptist Patriots'],
-  'Wake Forest': ['Wake', 'Demon Deacons'],
-  'SE Louisiana': ['Southeastern Louisiana', 'SELA', 'SELA Lions'],
-  'Mercer': ['Mercer Bears', 'Mercer University'],
-  'FIU': ['Florida International', 'Florida International University', 'FIU Panthers'],
-  'UCF': ['University of Central Florida', 'UCF Knights', 'Central Florida'],
-  'Auburn': ['Auburn University', 'Auburn Tigers'],
-  'Ohio State': ['OSU', 'The Ohio State University', 'Buckeyes'],
-  'Southern Miss': ['USM', 'University of Southern Mississippi', 'Golden Eagles'],
-  'Fordham': ['Fordham University', 'Fordham Rams'],
-  'Michigan': ['University of Michigan', 'Michigan Wolverines'],
-  'USF': ['University of South Florida', 'South Florida', 'USF Bulls'],
-  'Duke': ['Duke University', 'Blue Devils'],
-  'North Carolina': ['UNC', 'University of North Carolina', 'Tar Heels'],
-  'Rutgers': ['Rutgers University', 'Scarlet Knights'],
-  'Sacramento State': ['Sac State', 'Sacramento State Hornets'],
-  'Saint Josephs': ["Saint Joseph's", "St. Joseph's", "St. Josephs", 'Hawks'],
-  'Tulane': ['Tulane University', 'Tulane Green Wave', 'Green Wave'],
-  'Tennessee': ['University of Tennessee', 'Tennessee Volunteers', 'Vols', 'UT Knoxville'],
-  'Hawaii': ["Hawai'i", 'University of Hawaii', "University of Hawai'i", 'Hawaii Rainbow Warriors', 'Rainbow Warriors', 'UH Manoa'],
-  'Clemson': ['Clemson University', 'Clemson Tigers'],
-  'Dartmouth': ['Dartmouth College', 'Dartmouth Big Green'],
-  'Houston': ['University of Houston', 'Houston Cougars'],
-  'Notre Dame': ['University of Notre Dame', 'Notre Dame Fighting Irish'],
-  'Ole Miss': ['Mississippi', 'University of Mississippi', 'Ole Miss Rebels'],
-  'Stetson': ['Stetson University', 'Stetson Hatters'],
-  'Texas A&M': ['Texas A&M University', 'TAMU', 'Texas A&M Aggies'],
-  'UCLA': ['University of California Los Angeles', 'UCLA Bruins'],
-  'Georgia': ['University of Georgia', 'UGA', 'Georgia Bulldogs'],
-  'Kentucky': ['University of Kentucky', 'Kentucky Wildcats'],
-  'Miami': ['University of Miami', 'Miami (FL)', 'Miami Hurricanes'],
-  'Portland': ['University of Portland', 'Portland Pilots'],
-}
-
-// Reverse lookup: alias → canonical name
-export function resolveNcaaName(orgName: string, customAliases?: Record<string, string>): string | null {
-  // Check custom aliases first (raw name → canonical name)
-  if (customAliases) {
-    const mapped = customAliases[orgName]
-    if (mapped) return mapped
-    // Case-insensitive custom check
-    const lower = orgName.toLowerCase().trim()
-    for (const [raw, canonical] of Object.entries(customAliases)) {
-      if (raw.toLowerCase().trim() === lower) return canonical
-    }
-  }
-
-  const lower = orgName.toLowerCase().trim()
-  for (const [canonical, aliases] of Object.entries(NCAA_ALIASES)) {
-    if (canonical.toLowerCase() === lower) return canonical
-    if (aliases.some((a) => a.toLowerCase() === lower)) return canonical
-  }
-  return null
-}
+// NCAA aliases + resolver moved to api/_data/ncaaSchools.ts so the serverless
+// health monitor can use the same table (Vercel functions can't import from
+// src/). Re-exported here so app imports keep working unchanged.
+export { NCAA_ALIASES, resolveNcaaName } from '../../api/_data/ncaaSchools'
 
 // Resolve any org name to an MLB team ID (or null)
 export function resolveMLBTeamId(orgName: string, customAliases?: Record<string, string>): number | null {

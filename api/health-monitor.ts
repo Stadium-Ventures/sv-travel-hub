@@ -1,8 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-// Pure data/lookup modules shared with the app — imported (not copied) so the
-// monitor can never drift from the alias table the app actually resolves with.
-import { resolveNcaaName } from '../src/data/aliases'
-import { D1_BASEBALL_SLUGS } from '../src/data/d1baseballSlugs'
+// Shared NCAA tables — same module the app resolves with (src/data re-exports
+// it), so the monitor can never drift from the app. Lives under api/ because
+// Vercel only compiles api/**/*.ts for functions; an import into src/ ships
+// uncompiled and crashes at runtime (ERR_MODULE_NOT_FOUND, 2026-08-05).
+import { resolveNcaaName, D1_BASEBALL_SLUGS } from './_data/ncaaSchools'
 
 // SV Travel Hub — self health check.
 //
