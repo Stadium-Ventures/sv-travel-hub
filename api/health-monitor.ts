@@ -3,7 +3,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 // it), so the monitor can never drift from the app. Lives under api/ because
 // Vercel only compiles api/**/*.ts for functions; an import into src/ ships
 // uncompiled and crashes at runtime (ERR_MODULE_NOT_FOUND, 2026-08-05).
-import { resolveNcaaName, D1_BASEBALL_SLUGS } from './_data/ncaaSchools'
+// The .js extension is required: Vercel runs functions as strict node ESM,
+// which never resolves extensionless specifiers (ERR_MODULE_NOT_FOUND).
+import { resolveNcaaName, D1_BASEBALL_SLUGS } from './_data/ncaaSchools.js'
 
 // SV Travel Hub — self health check.
 //
