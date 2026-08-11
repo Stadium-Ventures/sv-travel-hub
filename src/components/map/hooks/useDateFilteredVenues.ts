@@ -1,10 +1,7 @@
 import { useMemo } from 'react'
 import { useScheduleStore } from '../../../store/scheduleStore'
 import { useVenueStore } from '../../../store/venueStore'
-
-// Spring training runs roughly mid-February through the end of March.
-const ST_WINDOW_START = '02-14'
-const ST_WINDOW_END = '03-31'
+import { SPRING_TRAINING_START, SPRING_TRAINING_END } from '../../../data/springTraining'
 
 function rangeOverlapsSpringTraining(start: string, end: string): boolean {
   if (!start && !end) return true
@@ -12,8 +9,8 @@ function rangeOverlapsSpringTraining(start: string, end: string): boolean {
   const endYear = parseInt((end || start).slice(0, 4), 10)
   if (Number.isNaN(startYear) || Number.isNaN(endYear)) return true
   for (let y = startYear; y <= endYear; y++) {
-    const stStart = `${y}-${ST_WINDOW_START}`
-    const stEnd = `${y}-${ST_WINDOW_END}`
+    const stStart = `${y}-${SPRING_TRAINING_START}`
+    const stEnd = `${y}-${SPRING_TRAINING_END}`
     if ((!start || start <= stEnd) && (!end || end >= stStart)) return true
   }
   return false
@@ -67,9 +64,11 @@ export function useDateFilteredVenues(filterStart: string, filterEnd: string) {
     }
 
     // ST venues have no per-game schedule data, so gate them on the season
-    // instead: only show complexes when the range overlaps spring training.
-    // Otherwise empty Cactus/Grapefruit sites flood "Where to go" with
-    // players who have no games (Tom 2026-08-11, the Myles Bailey case).
+    // instead: only show complexes when the range overlaps spring training —
+    // the SAME window tripEngine uses for its synthetic camp-visit events,
+    // so a visible complex is always plannable. Otherwise empty complexes
+    // flood "Where to go" with players who have no games (Tom 2026-08-11,
+    // the Myles Bailey case).
     if (rangeOverlapsSpringTraining(filterStart, filterEnd)) {
       for (const vk of Object.keys(venues)) {
         if (vk.startsWith('st-')) keys.add(vk)
