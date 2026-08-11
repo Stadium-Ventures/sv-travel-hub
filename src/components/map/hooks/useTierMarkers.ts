@@ -45,8 +45,10 @@ export function useTierMarkers(
       // Skip venues not in date filter
       if (dateFilteredVenues && !dateFilteredVenues.has(key)) continue
 
-      // Collect game dates in window for this venue
+      // Collect game dates in window for this venue, plus which players
+      // actually appear in those games.
       const gameDates = new Set<string>()
+      const namesInRange = new Set<string>()
       const allGames = [...proGames, ...ncaaGames, ...hsGames]
       for (const game of allGames) {
         // Filter to date range
@@ -57,6 +59,7 @@ export function useTierMarkers(
         const dLng = venueInfo.coords.lng - game.venue.coords.lng
         if (dLat * dLat + dLng * dLng < 0.00002) {
           gameDates.add(game.date)
+          for (const n of game.playerNames) namesInRange.add(n)
         }
       }
       // Also match pro venues by key pattern
@@ -65,19 +68,34 @@ export function useTierMarkers(
           if (filterStart && game.date < filterStart) continue
           if (filterEnd && game.date > filterEnd) continue
           const gameKey = `pro-${game.venue.name.toLowerCase().replace(/\s+/g, '-')}`
-          if (gameKey === key) gameDates.add(game.date)
+          if (gameKey === key) {
+            gameDates.add(game.date)
+            for (const n of game.playerNames) namesInRange.add(n)
+          }
         }
       }
 
-      const bestTier = Math.min(...playerList.map((p) => p.tier))
+      // Pro venue player lists are a union over the WHOLE loaded schedule,
+      // so with a date filter active, keep only players who actually have a
+      // game here in the window — otherwise a player whose team visited in
+      // May haunts an August marker (and "Where to go" inherits the ghost).
+      // NCAA/HS/ST venues keep their roster-based lists: a school venue with
+      // games in range means its roster players are playing.
+      let visiblePlayers = playerList
+      if (key.startsWith('pro-') && (filterStart || filterEnd)) {
+        visiblePlayers = playerList.filter((p) => namesInRange.has(p.name))
+        if (visiblePlayers.length === 0) continue
+      }
+
+      const bestTier = Math.min(...visiblePlayers.map((p) => p.tier))
 
       markers.push({
         key,
         coords: { lat: venueInfo.coords.lat, lng: venueInfo.coords.lng },
         venueName: venueInfo.name,
         bestTier,
-        playerCount: playerList.length,
-        players: playerList.map((p) => ({ name: p.name, tier: p.tier, level: p.level })),
+        playerCount: visiblePlayers.length,
+        players: visiblePlayers.map((p) => ({ name: p.name, tier: p.tier, level: p.level })),
         gameDates: [...gameDates].sort(),
       })
     }
