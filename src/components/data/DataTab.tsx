@@ -368,6 +368,10 @@ export default function DataTab() {
                       // attend → build me a trip" loop in one click.
                       const store = useTripStore.getState()
                       store.setPriorityPlayers([r.playerName])
+                      // Pin THIS game — the engine guarantees the clicked
+                      // date/venue anchors a trip instead of substituting a
+                      // "better" (Tuesday/dedup-preferred) date nearby.
+                      store.setPinnedGame({ playerName: r.playerName, date: r.date, venueName: r.venueName })
                       const d = new Date(r.date + 'T12:00:00Z')
                       const start = new Date(d); start.setUTCDate(start.getUTCDate() - 2)
                       const end = new Date(d); end.setUTCDate(end.getUTCDate() + 5)

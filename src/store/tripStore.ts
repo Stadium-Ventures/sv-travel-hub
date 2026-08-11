@@ -5,7 +5,7 @@ import type { TripPlan } from '../types/schedule'
 import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, DEFAULT_HOME_BASE } from '../lib/tripEngine'
 import { findDoubleUps } from '../lib/doubleUps'
 import { debugLog } from '../lib/debugLog'
-import type { UrgencyMap } from '../lib/tripEngine'
+import type { UrgencyMap, PinnedGame } from '../lib/tripEngine'
 import type { WorkerParams, WorkerMessage } from '../lib/tripEngine.worker'
 import { useRosterStore } from './rosterStore'
 import { useScheduleStore } from './scheduleStore'
@@ -56,6 +56,9 @@ interface TripState {
    *  starring survives regenerations and sessions. */
   starredTrips: Record<string, boolean>
   selectedTripIndex: number | null // For map preview highlighting
+  /** One-shot: a specific game (Schedule tab "Plan trip") the next
+   *  generation must build a trip around. Consumed by generateTrips. */
+  pinnedGame: PinnedGame | null
 
   setDateRange: (start: string, end: string) => void
   setMaxDriveMinutes: (minutes: number) => void
@@ -63,6 +66,7 @@ interface TripState {
   setPriorityPlayers: (players: string[]) => void
   setHomeBase: (coords: Coordinates, name: string) => void
   setMaxNights: (n: number) => void
+  setPinnedGame: (pin: PinnedGame | null) => void
   generateTrips: () => Promise<void>
   clearTrips: () => void
   setTripStatus: (tripKey: string, status: TripStatus | null) => void
@@ -93,6 +97,7 @@ export const useTripStore = create<TripState>()(
   tripStatuses: {},
   starredTrips: {},
   selectedTripIndex: null,
+  pinnedGame: null,
 
   setDateRange: (startDate, endDate) => set({ startDate, endDate }),
   setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes }),
@@ -101,6 +106,7 @@ export const useTripStore = create<TripState>()(
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
   setHomeBase: (homeBase, homeBaseName) => set({ homeBase, homeBaseName }),
   setMaxNights: (maxNights: number) => set({ maxNights }),
+  setPinnedGame: (pinnedGame) => set({ pinnedGame }),
   clearTrips: () => set({ tripPlan: null, selectedTripIndex: null }),
   setSelectedTripIndex: (selectedTripIndex) => set({ selectedTripIndex }),
   setTripStatus: (tripKey, status) => set((state) => {
@@ -121,19 +127,28 @@ export const useTripStore = create<TripState>()(
 
   generateTrips: async () => {
     if (get().computing) return
-    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers, useHeartbeatBoost, maxNights } = get()
+    const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers, useHeartbeatBoost, maxNights, pinnedGame } = get()
     let { homeBase, homeBaseName } = get()
 
     // Origin scrapped (Tom 2026-07-22): with priority players set, anchor
     // the engine at the FIRST priority player's earliest in-range game —
     // trips are built around where the games are, and the user handles
-    // getting to the area themselves.
+    // getting to the area themselves. A pinned game (Schedule tab "Plan
+    // trip" on a specific row) overrides that: anchor at the PINNED game's
+    // venue so the clicked game is always inside the drive radius.
     if (priorityPlayers.length > 0) {
       const ss = useScheduleStore.getState()
       const pool = [...ss.proGames, ...ss.ncaaGames, ...ss.hsGames]
-      const anchorGame = pool
-        .filter((g) => g.date >= startDate && g.date <= endDate && g.playerNames.includes(priorityPlayers[0]!))
-        .sort((a, b) => a.date.localeCompare(b.date))[0]
+      const anchorGame =
+        (pinnedGame
+          ? pool.find((g) =>
+              g.date === pinnedGame.date &&
+              g.venue.name === pinnedGame.venueName &&
+              g.playerNames.includes(pinnedGame.playerName))
+          : undefined) ??
+        pool
+          .filter((g) => g.date >= startDate && g.date <= endDate && g.playerNames.includes(priorityPlayers[0]!))
+          .sort((a, b) => a.date.localeCompare(b.date))[0]
       if (anchorGame) {
         homeBase = anchorGame.venue.coords
         homeBaseName = anchorGame.venue.name
@@ -363,6 +378,7 @@ export const useTripStore = create<TripState>()(
       playerTeamAssignments: scheduleState.playerTeamAssignments,
       homeBase,
       maxTripDays: maxNights + 1,
+      pinnedGame: pinnedGame ?? undefined,
     }
 
     const worker = new Worker(
@@ -390,7 +406,9 @@ export const useTripStore = create<TripState>()(
           if (currentKeys.has(key)) prunedStatuses[key] = status
         }
 
-        set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '', tripStatuses: prunedStatuses })
+        // pinnedGame is one-shot: consumed by this run so later manual
+        // Generate presses aren't silently steered by a stale pin.
+        set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '', tripStatuses: prunedStatuses, pinnedGame: null })
         worker.terminate()
         activeWorker = null
       } else if (msg.type === 'error') {

@@ -707,7 +707,9 @@ export default function TripPlanner() {
             the map's strategy dropdown, and trip length is fixed at Kent's
             3-day rule. One static line keeps the drive setting visible. */}
         <p className="mt-3 text-xs text-text-dim/60">
-          Trips assume up to {Math.floor(maxDriveMinutes / 60)}h driving within the area (set with the Drive chip on the Map) · 3 days max
+          {priorityPlayers.length > 0
+            ? <>Trips assume up to {Math.floor(maxDriveMinutes / 60)}h driving around {priorityPlayers[0]}&rsquo;s games (radius set with the Drive chip on the Map) · 3 days max</>
+            : <>Trips assume up to {Math.floor(maxDriveMinutes / 60)}h driving from {homeBaseName} (Trip Origin + Drive chip on the Map) · 3 days max</>}
         </p>
 
         {/* Priority players — selected names as chips + ONE add picker

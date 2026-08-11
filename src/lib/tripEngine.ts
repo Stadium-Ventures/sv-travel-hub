@@ -555,6 +555,14 @@ export function getNearbyVenueKeys(coords: Coordinates, maxMinutes: number): Set
 }
 
 // Main trip generation algorithm
+/** A specific game the user asked to build a trip around — guaranteed to
+ *  anchor a trip when it's inside the drive radius. */
+export interface PinnedGame {
+  playerName: string
+  date: string
+  venueName: string
+}
+
 export async function generateTrips(
   games: GameEvent[],
   players: RosterPlayer[],
@@ -568,7 +576,16 @@ export async function generateTrips(
   playerTeamAssignments?: Record<string, { teamId: number; sportId: number; teamName: string }>,
   homeBase: Coordinates = DEFAULT_HOME_BASE,
   maxTripDays: number = 3,
+  pinnedGame?: PinnedGame,
 ): Promise<TripPlan> {
+  // A pinned game (Schedule tab "Plan trip" on a specific row) must survive
+  // every noise-reduction heuristic — the user asked for THAT game, so it
+  // bypasses the venue-week dedup and is force-preferred during selection.
+  const matchesPin = (g: { date: string; venue: { name: string }; playerNames: string[] }): boolean =>
+    !!pinnedGame &&
+    g.date === pinnedGame.date &&
+    g.venue.name === pinnedGame.venueName &&
+    g.playerNames.includes(pinnedGame.playerName)
   onProgress?.('Preparing', 'Filtering eligible players...')
 
   // Load the pre-computed venue proximity dataset (lazy chunk — see note at top)
@@ -718,12 +735,13 @@ export async function generateTrips(
   for (const anchorDay of anchorDays) {
     if (candidateCount >= MAX_CANDIDATES) break
     const weekNum = getWeekNumber(anchorDay)
-    if ((weekCandidateCounts.get(weekNum) ?? 0) >= MAX_CANDIDATES_PER_WEEK) continue
+    const weekIsFull = () => (weekCandidateCounts.get(weekNum) ?? 0) >= MAX_CANDIDATES_PER_WEEK
     const anchorGames = gamesByDate.get(anchorDay) ?? []
 
     for (const anchor of anchorGames) {
-      if (candidateCount >= MAX_CANDIDATES) break
-      if ((weekCandidateCounts.get(weekNum) ?? 0) >= MAX_CANDIDATES_PER_WEEK) break
+      const isPinnedAnchor = matchesPin(anchor)
+      if (candidateCount >= MAX_CANDIDATES && !isPinnedAnchor) break
+      if (weekIsFull() && !isPinnedAnchor) continue
       if (anchor.venue.coords.lat === 0 && anchor.venue.coords.lng === 0) continue
 
       const anchorKey = coordKey(anchor.venue.coords)
@@ -749,10 +767,12 @@ export async function generateTrips(
       }
 
       // Deduplicate: limit to 2 candidates per venue per week to reduce noise
-      // while still allowing Tuesday vs non-Tuesday options at the same venue
+      // while still allowing Tuesday vs non-Tuesday options at the same venue.
+      // A pinned anchor is exempt — a mid-series game the user explicitly
+      // clicked must not lose its slot to earlier dates in the same series.
       const venueWeekKey = `${anchorKey}-w${weekNum}`
       const venueWeekCount = seenVenueWeeks.get(venueWeekKey) ?? 0
-      if (venueWeekCount >= 2) continue
+      if (venueWeekCount >= 2 && !isPinnedAnchor) continue
       seenVenueWeeks.set(venueWeekKey, venueWeekCount + 1)
 
       const window = getTripWindow(anchorDay, maxTripDays)
@@ -962,6 +982,10 @@ export async function generateTrips(
           return allNames.includes(name)
         })
         .sort((a, b) => {
+          // A pinned game outranks everything — the user asked for that date
+          const aPin = matchesPin(a.anchorGame) ? 1 : 0
+          const bPin = matchesPin(b.anchorGame) ? 1 : 0
+          if (aPin !== bPin) return bPin - aPin
           // Prefer trips where the priority player is on the anchor game
           const aOnAnchor = a.anchorGame.playerNames.includes(name) ? 1 : 0
           const bOnAnchor = b.anchorGame.playerNames.includes(name) ? 1 : 0
@@ -991,7 +1015,12 @@ export async function generateTrips(
     })
 
     if (allPriorityCandidates.length > 0) {
-      allPriorityCandidates.sort((a, b) => b.visitValue - a.visitValue)
+      allPriorityCandidates.sort((a, b) => {
+        const aPin = matchesPin(a.anchorGame) ? 1 : 0
+        const bPin = matchesPin(b.anchorGame) ? 1 : 0
+        if (aPin !== bPin) return bPin - aPin
+        return b.visitValue - a.visitValue
+      })
       const best = allPriorityCandidates[0]!
       selectedTrips.push(best)
       recordTripPlayers(best)

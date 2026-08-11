@@ -1,7 +1,7 @@
 import { generateTrips } from './tripEngine'
 import type { GameEvent } from '../types/schedule'
 import type { RosterPlayer } from '../types/roster'
-import type { UrgencyMap } from './tripEngine'
+import type { UrgencyMap, PinnedGame } from './tripEngine'
 
 export interface WorkerParams {
   games: GameEvent[]
@@ -15,6 +15,7 @@ export interface WorkerParams {
   playerTeamAssignments?: Record<string, { teamId: number; sportId: number; teamName: string }>
   homeBase?: { lat: number; lng: number }
   maxTripDays?: number
+  pinnedGame?: PinnedGame
 }
 
 export type WorkerMessage =
@@ -47,6 +48,7 @@ self.onmessage = async (e: MessageEvent<WorkerParams>) => {
       params.playerTeamAssignments,
       params.homeBase,
       params.maxTripDays,
+      params.pinnedGame,
     )
     self.postMessage({ type: 'result', plan } satisfies WorkerMessage)
   } catch (err) {
