@@ -331,21 +331,35 @@ async function loadRoster(): Promise<RosterPlayer[]> {
   return out
 }
 
+// Retried once at a cold-start-sized timeout — see the note on probeJson() in
+// api/health-monitor.ts. sv-heartbeat's summary endpoint needs ~11s cold and
+// ~0.15s warm; this runs once a day, so it always pays the cold start. Against
+// the old 12s timeout it intermittently returned an EMPTY map, and an empty map
+// here silently drops the recap's "overdue T1/T2" section rather than failing —
+// the recap just goes out missing a section, which is the harder failure to
+// notice. The 2026-08-10 #sv-automation finding described exactly that symptom.
 async function loadHeartbeat(): Promise<Map<string, HeartbeatPlayer>> {
   const map = new Map<string, HeartbeatPlayer>()
-  try {
-    const res = await fetch('https://sv-heartbeat.vercel.app/api/heartbeat/summary', {
-      headers: { 'User-Agent': 'SVTravelHub/Slack-Recap' },
-      signal: AbortSignal.timeout(12_000),
-    })
-    if (!res.ok) return map
-    const data = await res.json() as { players?: HeartbeatPlayer[] }
-    for (const p of data.players ?? []) {
-      map.set(p.name.trim().toLowerCase(), p)
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch('https://sv-heartbeat.vercel.app/api/heartbeat/summary', {
+        headers: { 'User-Agent': 'SVTravelHub/Slack-Recap' },
+        signal: AbortSignal.timeout(25_000),
+      })
+      if (!res.ok) {
+        console.warn(`[slack-recap] heartbeat returned HTTP ${res.status} — overdue section will be empty`)
+        return map
+      }
+      const data = await res.json() as { players?: HeartbeatPlayer[] }
+      for (const p of data.players ?? []) {
+        map.set(p.name.trim().toLowerCase(), p)
+      }
+      return map
+    } catch (e) {
+      console.warn(`[slack-recap] heartbeat fetch attempt ${attempt} failed:`, e)
     }
-  } catch (e) {
-    console.warn('[slack-recap] heartbeat fetch failed:', e)
   }
+  console.warn('[slack-recap] heartbeat unreachable after 2 attempts — overdue section will be empty')
   return map
 }
 
