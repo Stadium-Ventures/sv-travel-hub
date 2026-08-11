@@ -514,18 +514,40 @@ async function probeCsv(url: string): Promise<ProbeResult> {
   }
 }
 
+// Probed twice, with a cold-start-sized timeout (2026-08-11).
+//
+// sv-heartbeat's /api/heartbeat/summary is a serverless function that takes
+// ~11s on a COLD start and ~0.15s warm (measured: 10.98s, then 0.13s / 0.21s /
+// 0.14s back-to-back). The health monitor and the Slack recap each hit it once a
+// day, so they always pay the cold start — against a 12s timeout, i.e. under a
+// second of headroom. That is what posted "Travel Hub — degraded · the recap
+// can't tell who's overdue for a visit · the Heartbeat summary API returned a
+// timeout" to #sv-automation on 2026-08-10 while the endpoint was perfectly
+// healthy.
+//
+// One retry is what separates the two cases: a cold start answers the second
+// call in milliseconds, while a genuinely down endpoint fails both. Reporting a
+// single cold start as "down" is how a monitor teaches its readers to ignore it.
 async function probeJson(url: string): Promise<ProbeResult> {
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
-      signal: AbortSignal.timeout(12_000),
-    })
-    if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` }
-    await res.json()
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, reason: describeErr(e) }
+  let last: ProbeResult = { ok: false, reason: 'not attempted' }
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
+        signal: AbortSignal.timeout(25_000),
+      })
+      if (!res.ok) {
+        // An HTTP status is a real answer from a live server — retrying a 404 or
+        // a 500 just doubles the wait for the same result.
+        return { ok: false, reason: `HTTP ${res.status}` }
+      }
+      await res.json()
+      return { ok: true }
+    } catch (e) {
+      last = { ok: false, reason: describeErr(e) }
+    }
   }
+  return last
 }
 
 /** Verify the recap's Slack credentials actually WORK: auth.test proves the
