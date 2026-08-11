@@ -9,6 +9,10 @@ interface CitySuggestion {
   display: string // full display_name from Nominatim
 }
 
+function todayISO(): string {
+  return new Date().toISOString().split('T')[0]!
+}
+
 // Same presets as TripPlanner — keep in sync
 const STARTING_LOCATIONS = [
   { name: 'Orlando, FL', coords: { lat: 28.5383, lng: -81.3792 } },
@@ -51,6 +55,10 @@ export default function DateRangeBar({
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const setHomeBase = useTripStore((s) => s.setHomeBase)
   const isPresetCity = STARTING_LOCATIONS.some((l) => l.name === homeBaseName)
+
+  // In-progress typing for the date inputs — see the comment at the inputs.
+  const [draftStart, setDraftStart] = useState<string | null>(null)
+  const [draftEnd, setDraftEnd] = useState<string | null>(null)
 
   const [customCity, setCustomCity] = useState('')
   const [cityLoading, setCityLoading] = useState(false)
@@ -183,31 +191,44 @@ export default function DateRangeBar({
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-surface border border-border/50 px-3 py-2">
-      {/* Date range */}
-      {(() => {
-        return (
-          <>
-            {/* NOTE: no `min` clamp and an empty-value guard — with min set,
-                typing a month digit-by-digit produced transient out-of-range
-                values that the browser reported as "", which our onChange
-                wrote back and wiped the field (couldn't type "10", Tom
-                2026-07-22). Past dates are self-healed on reload instead. */}
-            <input
-              type="date"
-              value={filterStart}
-              onChange={(e) => { if (e.target.value) setFilterStart(e.target.value) }}
-              className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
-            />
-            <span className="text-text-dim text-xs">to</span>
-            <input
-              type="date"
-              value={filterEnd}
-              onChange={(e) => { if (e.target.value) setFilterEnd(e.target.value) }}
-              className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
-            />
-          </>
-        )
-      })()}
+      {/* Date range.
+          Draft-buffered: the store setters clamp past dates to today on
+          EVERY change, but typing "10"/"11"/"12" in the month segment
+          passes through a past month on the first keystroke ("1" = Jan),
+          and the clamp re-rendered the input back to today, wiping the
+          second digit (couldn't reach Oct–Dec, Tom 2026-08-11 — same
+          family as the 2026-07-22 `min`-clamp wipe). So while typing, the
+          input shows the raw draft; the store only receives valid non-past
+          dates live, and blur commits (and clamps) whatever is left. */}
+      <input
+        type="date"
+        value={draftStart ?? filterStart}
+        onChange={(e) => {
+          const v = e.target.value
+          setDraftStart(v || null)
+          if (v && v >= todayISO()) setFilterStart(v)
+        }}
+        onBlur={() => {
+          if (draftStart) setFilterStart(draftStart)
+          setDraftStart(null)
+        }}
+        className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
+      />
+      <span className="text-text-dim text-xs">to</span>
+      <input
+        type="date"
+        value={draftEnd ?? filterEnd}
+        onChange={(e) => {
+          const v = e.target.value
+          setDraftEnd(v || null)
+          if (v && v >= todayISO()) setFilterEnd(v)
+        }}
+        onBlur={() => {
+          if (draftEnd) setFilterEnd(draftEnd)
+          setDraftEnd(null)
+        }}
+        className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
+      />
 
       <div className="flex gap-1">
         <button
