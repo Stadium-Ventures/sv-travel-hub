@@ -300,6 +300,7 @@ export default function TripPlanner() {
   const [showAllTrips, setShowAllTrips] = useState(false)
   // tierFilter removed — was adding clutter to the results toolbar
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
+  const [showPickLogic, setShowPickLogic] = useState(false)
 
 
 
@@ -932,15 +933,51 @@ export default function TripPlanner() {
             <div id="section-road-trips">
               <div className="mb-3">
                 {/* Honest count: say what's SHOWN, and why the rest isn't
-                    (Tom 2026-07-22: "why does it say 7 trips and show 3?") */}
+                    (Tom 2026-07-22: "why does it say 7 trips and show 3?").
+                    The full why lives in the "How these were picked"
+                    explainer below (Tom 2026-08-11 — the old "N without
+                    your priority players hidden" fragment read as noise). */}
                 <h3 className="text-sm font-semibold text-text">
                   Your Trips
                   <span className="ml-2 text-xs font-normal text-text-dim">
                     {relevantToFilters.length} option{relevantToFilters.length !== 1 ? 's' : ''}
-                    {prioritySet.size > 0 && numbered.length > relevantToFilters.length &&
-                      ` · ${numbered.length - relevantToFilters.length} without your priority players hidden`}
                   </span>
+                  <button
+                    onClick={() => setShowPickLogic((v) => !v)}
+                    className="ml-3 text-xs font-normal text-accent-blue/80 hover:text-accent-blue hover:underline"
+                  >
+                    {showPickLogic ? 'Hide' : 'How these were picked'}
+                  </button>
                 </h3>
+                {showPickLogic && (
+                  <div className="mt-2 rounded-xl bg-gray-900/40 px-3 py-2.5 text-xs leading-relaxed text-text-dim">
+                    <ul className="list-disc space-y-1 pl-4">
+                      {prioritySet.size > 0 ? (
+                        <>
+                          <li>
+                            Every trip shown includes {priorityPlayers.length === 1 ? priorityPlayers[0] : 'at least one of your priority players'}.
+                            {numbered.length > relevantToFilters.length && (
+                              <> The planner also found {numbered.length - relevantToFilters.length} good trip{numbered.length - relevantToFilters.length !== 1 ? 's' : ''} with other clients — those are hidden while priority players are set.</>
+                            )}
+                          </li>
+                          <li>
+                            Trips are anchored where {priorityPlayers[0]}&rsquo;s games are — each one stays within a {Math.floor(maxDriveMinutes / 60)}h drive of its anchor game (the Map&rsquo;s Drive chip).
+                          </li>
+                        </>
+                      ) : (
+                        <li>
+                          Trips stay within a {Math.floor(maxDriveMinutes / 60)}h drive of {homeBaseName} (Trip Origin + Drive chip on the Map).
+                        </li>
+                      )}
+                      <li>
+                        When a player has several games in a week, the best one wins: Tuesdays score higher for pro position players, and so do outings that catch multiple clients or players overdue for a visit. At most 2 trips per ballpark per week.
+                      </li>
+                      <li>
+                        Trips never overlap dates, and a player stops being suggested once the suggested trips cover the visits they still need this year — so you see their best few dates, not every game on their schedule.
+                      </li>
+                    </ul>
+                  </div>
+                )}
               </div>
 
 
