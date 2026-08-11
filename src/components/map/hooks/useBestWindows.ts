@@ -80,14 +80,15 @@ export function useBestWindows(
 
     // Star-scoped (Tom 2026-07-22 course-correct): "when should I travel to
     // the starred spot" — only venues within the drive radius count.
-    const reachableMarkers = tierMarkers.filter((tm) => {
+    function driveMinutesFromHome(coords: { lat: number; lng: number }): number {
       const km = 6371 * 2 * Math.asin(Math.sqrt(
-        Math.sin(((tm.coords.lat - homeBase.lat) * Math.PI / 180) / 2) ** 2 +
-        Math.cos(homeBase.lat * Math.PI / 180) * Math.cos(tm.coords.lat * Math.PI / 180) *
-        Math.sin(((tm.coords.lng - homeBase.lng) * Math.PI / 180) / 2) ** 2,
+        Math.sin(((coords.lat - homeBase.lat) * Math.PI / 180) / 2) ** 2 +
+        Math.cos(homeBase.lat * Math.PI / 180) * Math.cos(coords.lat * Math.PI / 180) *
+        Math.sin(((coords.lng - homeBase.lng) * Math.PI / 180) / 2) ** 2,
       ))
-      return (km * 1.2 / 95) * 60 <= maxDriveMinutes
-    })
+      return (km * 1.2 / 95) * 60
+    }
+    const reachableMarkers = tierMarkers.filter((tm) => driveMinutesFromHome(tm.coords) <= maxDriveMinutes)
     if (reachableMarkers.length === 0) return []
 
     // Quick lookups
@@ -112,7 +113,13 @@ export function useBestWindows(
       arr.push({ venueKey, hour })
       dateVenueStartHours.set(g.date, arr)
     }
-    const reachableDoubleUps = doubleUps
+    // A double up only counts toward a window if the WHOLE thing is doable
+    // from the starred area — every game's venue inside the drive radius.
+    // Unfiltered, a same-date double up across the country inflated windows
+    // (the "1 player · 1 double up" Whitlock card, Tom 2026-08-11).
+    const reachableDoubleUps = doubleUps.filter((du) =>
+      du.games.every((g) => driveMinutesFromHome(g.venue.coords) <= maxDriveMinutes),
+    )
     function countDoubleUpsInWindow(start: string, end: string): number {
       let n = 0
       for (const du of reachableDoubleUps) {
