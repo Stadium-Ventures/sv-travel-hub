@@ -9,7 +9,7 @@ export type MapEventMap = {
   'app:switch-tab': { tab: 'roster' | 'trips' | 'map' | 'data' }
   /** Filter the Map to a specific player and zoom to them. Fired by
    *  the global header player search. MapView listens and sets the
-   *  filterState.selectedPlayer + zooms via fitToMarkersKey. */
+   *  filterState.selectedPlayers (accumulates) + zooms via fitToMarkersKey. */
   'map:select-player': { playerName: string }
   /** Fit the map viewport to a set of points (e.g. a destination pick's
    *  cluster venues after "Go here"). */

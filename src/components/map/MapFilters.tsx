@@ -21,10 +21,11 @@ export interface MapFilterState {
   levels: Set<MapLevelFilter>
   /** Free-text venue search (still useful for finding a specific stadium). */
   search: string
-  /** Affirmatively picked player — narrows the map to only this player's
+  /** Affirmatively picked players — narrows the map to only these players'
    *  venues. Kent's 2026-06-08 feedback: "should feel like I am SELECTING
-   *  him instead of raw text." */
-  selectedPlayer: string
+   *  him instead of raw text." Multiple accumulate, each removable via its
+   *  chip's ✕ (Tom 2026-08-11: "add another player, keep both"). */
+  selectedPlayers: string[]
   colorBy: MapColorMode
   /** When true, only show venues with at least one overdue (>90d) or
    *  never-visited player. Kent interview ask: "guys we need to see." */
@@ -35,7 +36,7 @@ export const DEFAULT_MAP_FILTERS: MapFilterState = {
   tiers: new Set([1, 2, 3, 4]),
   levels: new Set<MapLevelFilter>(['Pro', 'NCAA', 'HS']),
   search: '',
-  selectedPlayer: '',
+  selectedPlayers: [],
   colorBy: 'tier',
   overdueOnly: false,
 }
@@ -81,7 +82,7 @@ export function countActiveFilters(s: MapFilterState): number {
   if (s.levels.size < 3) n++
   if (s.overdueOnly) n++
   if (s.search.trim() !== '') n++
-  if (s.selectedPlayer !== '') n++
+  if (s.selectedPlayers.length > 0) n++
   return n
 }
 
@@ -260,16 +261,37 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
             })}
           </div>
 
-          {/* Player picker (affirmative selection — Kent's 2026-06-08 ask) */}
-          <div className="flex items-center gap-1.5">
-            <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Player</span>
-            <PlayerSearchPicker
-              value={state.selectedPlayer}
-              players={players}
-              placeholder="Find player..."
-              onChange={(name) => setState({ ...state, selectedPlayer: name })}
-              compact
-            />
+          {/* Player picker (affirmative selection — Kent's 2026-06-08 ask).
+              Selected players stack as removable chips; the picker stays
+              open for adding more (Tom 2026-08-11). */}
+          <div className="flex items-start gap-1.5">
+            <span className="w-16 shrink-0 pt-1 text-[10px] uppercase tracking-wide text-text-dim/60">Player</span>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+              {state.selectedPlayers.map((name) => (
+                <span key={name} className="flex items-center gap-1 rounded-lg bg-accent-blue/15 px-2 py-0.5 text-[11px] font-medium text-accent-blue">
+                  {name}
+                  <button
+                    onClick={() => setState({ ...state, selectedPlayers: state.selectedPlayers.filter((n) => n !== name) })}
+                    className="text-accent-blue/60 hover:text-accent-blue"
+                    title={`Remove ${name} from the map filter`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              <PlayerSearchPicker
+                value=""
+                players={players}
+                excludeNames={state.selectedPlayers}
+                placeholder={state.selectedPlayers.length === 0 ? 'Find player...' : '+ Add another...'}
+                onChange={(name) => {
+                  if (name && !state.selectedPlayers.includes(name)) {
+                    setState({ ...state, selectedPlayers: [...state.selectedPlayers, name] })
+                  }
+                }}
+                compact
+              />
+            </div>
           </div>
 
           {/* Venue text search with typeahead over loaded venue names */}
@@ -335,7 +357,7 @@ export function applyMapFilters(
   daysByPlayerKey?: Map<string, number | null>,
 ): TierMarker[] {
   const search = state.search.trim().toLowerCase()
-  const selectedPlayer = state.selectedPlayer.trim().toLowerCase()
+  const selectedPlayers = new Set(state.selectedPlayers.map((n) => n.trim().toLowerCase()))
   return markers
     .map((m) => {
       // Venue-name search: when set, only keep markers whose venue matches.
@@ -343,8 +365,8 @@ export function applyMapFilters(
       const survivors = m.players.filter((p) => {
         if (!state.tiers.has(p.tier)) return false
         if (!state.levels.has(p.level as MapLevelFilter)) return false
-        // Affirmative player selection: keep only this exact player.
-        if (selectedPlayer !== '' && p.name.toLowerCase() !== selectedPlayer) return false
+        // Affirmative player selection: keep only the picked players.
+        if (selectedPlayers.size > 0 && !selectedPlayers.has(p.name.toLowerCase())) return false
         if (state.overdueOnly) {
           if (!daysByPlayerKey) return false
           const days = daysByPlayerKey.get(p.name.trim().toLowerCase())

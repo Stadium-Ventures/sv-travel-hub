@@ -174,7 +174,10 @@ export default function MapView() {
   useEffect(() => {
     return addMapEventListener('map:select-player', (detail) => {
       if (!detail.playerName) return
-      setFilterState((s) => ({ ...s, selectedPlayer: detail.playerName }))
+      setFilterState((s) =>
+        s.selectedPlayers.includes(detail.playerName)
+          ? s
+          : { ...s, selectedPlayers: [...s.selectedPlayers, detail.playerName] })
     })
   }, [])
 
@@ -274,6 +277,30 @@ export default function MapView() {
         <MapHelp />
       </DateRangeBar>
 
+      {/* Player-schedule chips — always visible while the map is narrowed
+          to specific players, so a filtered map is never a mystery with the
+          Filters popover closed. Each ✕ removes just that player
+          (Tom 2026-08-11). */}
+      {filterState.selectedPlayers.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-1 text-[11px]">
+          <span className="text-text-dim/60">
+            Showing schedule{filterState.selectedPlayers.length !== 1 ? 's' : ''} for
+          </span>
+          {filterState.selectedPlayers.map((name) => (
+            <span key={name} className="flex items-center gap-1 rounded-lg bg-accent-blue/15 px-2 py-0.5 font-medium text-accent-blue">
+              {name}
+              <button
+                onClick={() => setFilterState((s) => ({ ...s, selectedPlayers: s.selectedPlayers.filter((n) => n !== name) }))}
+                className="text-accent-blue/60 hover:text-accent-blue"
+                title={`Remove ${name} — show the full map again`}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Heartbeat color key — the only time a legend needs to be visible
           outside the Filters popover is when the dots aren't tier-colored. */}
       {filterState.colorBy === 'heartbeat' && (
@@ -370,7 +397,7 @@ export default function MapView() {
               tierMarkers={tierMarkers}
               colorBy={filterState.colorBy}
               eventMarkers={eventMarkers}
-              fitToMarkersKey={filterState.selectedPlayer || undefined}
+              fitToMarkersKey={filterState.selectedPlayers.join('|') || undefined}
               doubleUps={
                 // Only the SELECTED pair draws on the map — all 30 at once
                 // was a spaghetti of triangles (Tom 2026-07-22)
