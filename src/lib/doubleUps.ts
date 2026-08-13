@@ -31,7 +31,14 @@ export function findDoubleUps(
   endDate: string,
   filterPlayerNames?: string[],
   filterTiers?: number[],
+  /** "Acceptable drive" for pairing games. Defaults to the classic 2h cap;
+   *  callers pass the user's Drive-radius slider so widening the radius
+   *  widens what counts as a double/triple up (Tom 2026-08-12). Never
+   *  BELOW 120 — shrinking the slider under 2h shouldn't hide classic
+   *  double ups Kent already relies on. */
+  maxPairDriveMinutes?: number,
 ): DoubleUp[] {
+  const drivePairCap = Math.max(MAX_DRIVE_MINUTES, maxPairDriveMinutes ?? MAX_DRIVE_MINUTES)
   const playerMap = new Map(players.map((p) => [p.playerName, p]))
 
   // A player counts toward a double-up if they pass the same rules used for
@@ -136,7 +143,7 @@ export function findDoubleUps(
         const distKm = haversineKm(g1.venue.coords, g2.venue.coords)
         // Same complex (< 1km): a doubleheader-style pair — zero drive
         const driveMin = distKm < 1 ? 0 : estimateDriveMinutes(g1.venue.coords, g2.venue.coords)
-        if (driveMin > MAX_DRIVE_MINUTES) continue
+        if (driveMin > drivePairCap) continue
 
         // Informational only — an overlap downgrades the badge ("split
         // innings or game + meal"), it never disqualifies the double up
@@ -152,6 +159,67 @@ export function findDoubleUps(
           timeFeasible,
           combinedValue: scoreGames([g1, g2], playerMap),
           playerNames: allPlayerNames,
+        })
+      }
+    }
+
+    // Triple ups (Tom 2026-08-12): 3+ clients seeable in ONE day, chaining
+    // games that sit within the acceptable drive of each other (you drive
+    // stop to stop, so chain reach — not pairwise-all — is what matters).
+    // Connected components over same-day games with edges ≤ drivePairCap.
+    {
+      const n = games.length
+      const parent = Array.from({ length: n }, (_, k) => k)
+      const find = (x: number): number => (parent[x] === x ? x : (parent[x] = find(parent[x]!)))
+      const linkDrive = (a: GameEvent, b: GameEvent): number => {
+        const km = haversineKm(a.venue.coords, b.venue.coords)
+        return km < 1 ? 0 : estimateDriveMinutes(a.venue.coords, b.venue.coords)
+      }
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          if (linkDrive(games[i]!, games[j]!) <= drivePairCap) {
+            const ri = find(i), rj = find(j)
+            if (ri !== rj) parent[ri] = rj
+          }
+        }
+      }
+      const components = new Map<number, GameEvent[]>()
+      for (let i = 0; i < n; i++) {
+        const root = find(i)
+        const arr = components.get(root) ?? []
+        arr.push(games[i]!)
+        components.set(root, arr)
+      }
+      // Don't re-list a group the tournament pass already covers verbatim
+      const tournamentKeys = new Set(
+        clusters.map((c) => c.map((g) => g.id).sort().join('|')),
+      )
+      for (const component of components.values()) {
+        const names = [...new Set(component.flatMap((g) => g.playerNames))].filter(isEligiblePlayer)
+        if (names.length < 3) continue
+        if (tournamentKeys.has(component.map((g) => g.id).sort().join('|'))) continue
+        // Longest unavoidable single drive: each stop's shortest link into
+        // the rest of the group, take the worst one. Colors the drive tier.
+        let maxLink = 0
+        if (component.length > 1) {
+          for (const g of component) {
+            let minToOther = Infinity
+            for (const other of component) {
+              if (other === g) continue
+              minToOther = Math.min(minToOther, linkDrive(g, other))
+            }
+            maxLink = Math.max(maxLink, minToOther)
+          }
+        }
+        doubleUps.push({
+          date,
+          dates: [date],
+          games: component,
+          type: 'triple-up',
+          driveMinutesBetween: Math.round(maxLink),
+          timeFeasible: null,
+          combinedValue: scoreGames(component, playerMap),
+          playerNames: names,
         })
       }
     }
@@ -178,7 +246,7 @@ export function findDoubleUps(
 
         const distKm = haversineKm(g1.venue.coords, g2.venue.coords)
         const driveMin = distKm < 1 ? 0 : estimateDriveMinutes(g1.venue.coords, g2.venue.coords)
-        if (driveMin > MAX_DRIVE_MINUTES) continue
+        if (driveMin > drivePairCap) continue
 
         const allPlayerNames = [...new Set([...p1, ...p2])]
         const playersKey = [...allPlayerNames].sort().join(',')

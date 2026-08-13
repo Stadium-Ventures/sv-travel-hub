@@ -66,6 +66,13 @@ export function useBestWindows(
   topN = 5,
   strategy: BestWindowStrategy = 'impact',
   doubleUps: DoubleUp[] = [],
+  /** When the map is filtered to specific PLAYERS, "when should I go" means
+   *  those players' games wherever they play — a stale star three states
+   *  away must not blank the answer (Tom 2026-08-12: two FL players filtered,
+   *  star left in NC, panel claimed "no games"). Skips the drive-radius
+   *  scoping; double-up chips then count pairs involving the scoped players
+   *  instead of radius-reachable ones. */
+  ignoreRadius = false,
 ): WindowResult[] {
   // Pull all games + heartbeat data so we can detect time conflicts and
   // weight overdue players. Subscribing here means Best Windows updates
@@ -88,7 +95,9 @@ export function useBestWindows(
       ))
       return (km * 1.2 / 95) * 60
     }
-    const reachableMarkers = tierMarkers.filter((tm) => driveMinutesFromHome(tm.coords) <= maxDriveMinutes)
+    const reachableMarkers = ignoreRadius
+      ? tierMarkers
+      : tierMarkers.filter((tm) => driveMinutesFromHome(tm.coords) <= maxDriveMinutes)
     if (reachableMarkers.length === 0) return []
 
     // Quick lookups
@@ -117,9 +126,16 @@ export function useBestWindows(
     // from the starred area — every game's venue inside the drive radius.
     // Unfiltered, a same-date double up across the country inflated windows
     // (the "1 player · 1 double up" Whitlock card, Tom 2026-08-11).
-    const reachableDoubleUps = doubleUps.filter((du) =>
-      du.games.every((g) => driveMinutesFromHome(g.venue.coords) <= maxDriveMinutes),
-    )
+    // Player-scoped mode has no radius, so count the pairs that involve one
+    // of the scoped players instead — those are the ones worth flagging.
+    const scopedNames = ignoreRadius
+      ? new Set(tierMarkers.flatMap((tm) => tm.players.map((p) => p.name)))
+      : null
+    const reachableDoubleUps = scopedNames
+      ? doubleUps.filter((du) => du.playerNames.some((n) => scopedNames.has(n)))
+      : doubleUps.filter((du) =>
+          du.games.every((g) => driveMinutesFromHome(g.venue.coords) <= maxDriveMinutes),
+        )
     function countDoubleUpsInWindow(start: string, end: string): number {
       let n = 0
       for (const du of reachableDoubleUps) {
@@ -356,5 +372,5 @@ export function useBestWindows(
     }
 
     return picked
-  }, [tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, topN, strategy, doubleUps, proGames, ncaaGames, hsGames, heartbeatPlayers])
+  }, [tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, topN, strategy, doubleUps, ignoreRadius, proGames, ncaaGames, hsGames, heartbeatPlayers])
 }

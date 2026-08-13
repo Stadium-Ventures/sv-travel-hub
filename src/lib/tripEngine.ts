@@ -770,9 +770,16 @@ export async function generateTrips(
       // while still allowing Tuesday vs non-Tuesday options at the same venue.
       // A pinned anchor is exempt — a mid-series game the user explicitly
       // clicked must not lose its slot to earlier dates in the same series.
+      // Multi-client anchors (2+ eligible players on one game — a head-to-
+      // head series) are exempt too: when the same two clients face each
+      // other all week, every date is a real option and capping to 2 made
+      // one date look like the only choice (Tom 2026-08-12, Hagaman/Riemer
+      // at Hodgetown). These variants collapse into ONE card with "Other
+      // dates that work" via altDates below, so no card-list noise.
+      const eligibleOnAnchor = anchor.playerNames.filter((n) => eligiblePlayers.has(n)).length
       const venueWeekKey = `${anchorKey}-w${weekNum}`
       const venueWeekCount = seenVenueWeeks.get(venueWeekKey) ?? 0
-      if (venueWeekCount >= 2 && !isPinnedAnchor) continue
+      if (venueWeekCount >= 2 && !isPinnedAnchor && eligibleOnAnchor < 2) continue
       seenVenueWeeks.set(venueWeekKey, venueWeekCount + 1)
 
       const window = getTripWindow(anchorDay, maxTripDays)
@@ -812,12 +819,16 @@ export async function generateTrips(
       }
 
       // Use Haversine for nearby game distance estimation (cached, no API)
-      // Inter-venue distance capped at MAX_INTER_VENUE_MINUTES (reasonable detour)
-      // Also verify the nearby venue is reachable from home
+      // Inter-venue reach honors the user's Drive radius: "set a drive
+      // you're willing to do... every possible drive to see someone else
+      // within that radius" (Tom 2026-08-12). The old fixed 2h detour cap
+      // silently hid reachable clients when the radius was set to 3h+ —
+      // while the planner's own assumptions line promised the full radius.
+      const interVenueCap = Math.max(MAX_INTER_VENUE_MINUTES, maxDriveMinutes)
       const nearbyGames = windowGames
         .map((g) => ({ ...g, driveMinutes: lookupDriveMinutes(anchor.venue.coords, g.venue.coords) }))
         .filter((g) => {
-          if (g.driveMinutes < 0 || g.driveMinutes > MAX_INTER_VENUE_MINUTES) return false
+          if (g.driveMinutes < 0 || g.driveMinutes > interVenueCap) return false
           // Also check that the nearby venue itself is reachable from home
           const nearbyHomeKey = coordKey(g.venue.coords)
           const homeToNearby = homeToVenue.get(nearbyHomeKey) ?? Infinity
@@ -836,11 +847,12 @@ export async function generateTrips(
           return true
         })
 
-      // Cap nearby games to prevent memory explosion in route optimization
-      // Keep the closest venues — more distant ones add little trip value
-      if (nearbyGames.length > 6) {
+      // Cap nearby games to prevent memory explosion in route optimization.
+      // Keep the closest venues — raised 6 → 12 (Tom 2026-08-12: with a
+      // wide radius, "every possible drive" matters more than trimming).
+      if (nearbyGames.length > 12) {
         nearbyGames.sort((a, b) => a.driveMinutes - b.driveMinutes)
-        nearbyGames.length = 6
+        nearbyGames.length = 12
       }
 
       // Collect all unique players visited
@@ -990,17 +1002,21 @@ export async function generateTrips(
           const aOnAnchor = a.anchorGame.playerNames.includes(name) ? 1 : 0
           const bOnAnchor = b.anchorGame.playerNames.includes(name) ? 1 : 0
           if (aOnAnchor !== bOnAnchor) return bOnAnchor - aOnAnchor
+          // Then prefer trips that catch MORE clients. Tuesday used to rank
+          // here, above value — which surfaced isolated solo Tuesday games
+          // over multi-player days ("feels random", Tom 2026-08-12).
+          // Tuesday is a fallback among otherwise-equal options: it still
+          // gets its 20% score multiplier inside visitValue, so between two
+          // solo options the Tuesday one wins — it just can't trump a day
+          // that catches another client.
+          if (a.totalPlayersVisited !== b.totalPlayersVisited) {
+            return b.totalPlayersVisited - a.totalPlayersVisited
+          }
           // Then prefer higher confidence
           const aConf = CONFIDENCE_MULTIPLIER[a.anchorGame.confidence ?? 'high'] ?? 1
           const bConf = CONFIDENCE_MULTIPLIER[b.anchorGame.confidence ?? 'high'] ?? 1
           if (aConf !== bConf) return bConf - aConf
-          // Then prefer Tuesday anchors
-          const aDay = new Date(a.anchorGame.date + 'T12:00:00Z').getUTCDay()
-          const bDay = new Date(b.anchorGame.date + 'T12:00:00Z').getUTCDay()
-          const aTue = aDay === ANCHOR_DAY ? 1 : 0
-          const bTue = bDay === ANCHOR_DAY ? 1 : 0
-          if (aTue !== bTue) return bTue - aTue
-          // Then by value
+          // Then by value (Tuesday's boost lives in here)
           return b.visitValue - a.visitValue
         })
     }
@@ -1200,6 +1216,24 @@ export async function generateTrips(
     if (allCovered && trip.visitValue < 5) {
       selectedTrips.splice(i, 1)
     }
+  }
+
+  // --- Date alternatives for series trips ---
+  // A selected trip whose anchor is part of a series (same venue, same
+  // clients, other dates in range) should SAY the other dates work instead
+  // of presenting one date as the only option (Tom 2026-08-12: two clients
+  // facing each other all week showed a single day). Display-only: the
+  // card shows "Other dates that work", selection itself is unchanged.
+  const anchorSig = (g: GameEvent) =>
+    `${coordKey(g.venue.coords)}|${g.playerNames.filter((n) => eligiblePlayers.has(n)).sort().join(',')}`
+  for (const trip of selectedTrips) {
+    const sig = anchorSig(trip.anchorGame)
+    const alts = new Set<string>()
+    for (const c of candidates) {
+      if (c.anchorGame.date === trip.anchorGame.date) continue
+      if (anchorSig(c.anchorGame) === sig) alts.add(c.anchorGame.date)
+    }
+    if (alts.size > 0) trip.altDates = [...alts].sort()
   }
 
   // --- Fly-in visits for players beyond driving range ---

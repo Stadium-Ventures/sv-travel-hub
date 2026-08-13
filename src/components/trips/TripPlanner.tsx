@@ -298,6 +298,7 @@ export default function TripPlanner() {
   const [tripFilter] = useState<'all' | 'drive' | 'fly' | 'multi' | 'anchor' | 'starred'>('all') // filter chips removed 2026-07-22
   const [tripLengthFilter] = useState<'all' | '1' | '2' | '3'>('all') // length chips removed 2026-07-22 (simplify)
   const [showAllTrips, setShowAllTrips] = useState(false)
+  const [showAllOtherTrips, setShowAllOtherTrips] = useState(false)
   // tierFilter removed — was adding clutter to the results toolbar
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null)
   const [showPickLogic, setShowPickLogic] = useState(false)
@@ -326,8 +327,8 @@ export default function TripPlanner() {
     // Horizon covers at least the planner's selected end date so in-window
     // verdicts don't miss double ups late in a long range.
     const horizon = addDaysISO(today, DOUBLE_UP_WINDOW_DAYS)
-    return findDoubleUps(all, players, today, endDate > horizon ? endDate : horizon)
-  }, [proGames, ncaaGames, hsGames, summerGames, players, DOUBLE_UP_WINDOW_DAYS, endDate])
+    return findDoubleUps(all, players, today, endDate > horizon ? endDate : horizon, undefined, undefined, maxDriveMinutes)
+  }, [proGames, ncaaGames, hsGames, summerGames, players, DOUBLE_UP_WINDOW_DAYS, endDate, maxDriveMinutes])
 
   // Convergence scan — the all-N answer to Kent's "west coast swing" text
   // (2026-07-24): with 3+ priority players, when do ALL of them land within
@@ -703,15 +704,33 @@ export default function TripPlanner() {
           </span>
         </div>
 
-        {/* Trip options panel removed (Tom 2026-07-23): Max Drive is the
-            map's Drive chip (same shared value), overdue priority lives in
-            the map's strategy dropdown, and trip length is fixed at Kent's
-            3-day rule. One static line keeps the drive setting visible. */}
-        <p className="mt-3 text-xs text-text-dim/60">
-          {priorityPlayers.length > 0
-            ? <>Trips assume up to {Math.floor(maxDriveMinutes / 60)}h driving around {priorityPlayers[0]}&rsquo;s games (radius set with the Drive chip on the Map) · 3 days max</>
-            : <>Trips assume up to {Math.floor(maxDriveMinutes / 60)}h driving from {homeBaseName} (Trip Origin + Drive chip on the Map) · 3 days max</>}
-        </p>
+        {/* Max drive is adjustable HERE too (Tom 2026-08-12) — same shared
+            value as the map's Drive chip, so changing either updates both.
+            Trip length stays fixed at Kent's 3-day rule. */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-text-dim/60">
+          <label className="flex items-center gap-2" title="How far you'll drive within a trip's area. Shared with the Drive chip on the Map.">
+            <span className="text-text-dim">Max drive</span>
+            <input
+              type="range"
+              min={120}
+              max={480}
+              step={30}
+              value={maxDriveMinutes}
+              onChange={(e) => useTripStore.getState().setMaxDriveMinutes(Number(e.target.value))}
+              className="w-32 accent-blue-500"
+            />
+            <span className="font-medium text-text">
+              {maxDriveMinutes % 60 > 0
+                ? `${Math.floor(maxDriveMinutes / 60)}h ${maxDriveMinutes % 60}m`
+                : `${Math.floor(maxDriveMinutes / 60)}h`}
+            </span>
+          </label>
+          <span>
+            {priorityPlayers.length > 0
+              ? <>· trips stay within this drive of {priorityPlayers[0]}&rsquo;s games · 3 days max</>
+              : <>· trips stay within this drive of {homeBaseName} (Trip Origin on the Map) · 3 days max</>}
+          </span>
+        </div>
 
         {/* Priority players — selected names as chips + ONE add picker
             (2026-07-21 apple-fy: five empty search boxes read as a form). */}
@@ -914,13 +933,18 @@ export default function TripPlanner() {
 
             const filtered = numbered.filter((group) => passesFilters(group.primary))
 
-            // When priority players are set, also hide trips that don't
-            // include any of them. Kent's principle 2026-06-08: "fewer
-            // options and just make sure the ones we suggest are good and
-            // relevant to the filters."
+            // When priority players are set, priority-bearing trips lead the
+            // list — but other clients reachable in these dates are still
+            // WORTH SEEING, listed separately below (Tom 2026-08-12: "want
+            // to also be shown... the priority should always be those first
+            // players being most convenient, granted"). Previously the
+            // non-priority trips were hidden outright.
             const relevantToFilters = prioritySet.size > 0
               ? filtered.filter((g) => itemHasPriorityPlayer(g.primary, prioritySet))
               : filtered
+            const otherClientGroups = prioritySet.size > 0
+              ? filtered.filter((g) => !itemHasPriorityPlayer(g.primary, prioritySet))
+              : []
 
             // Cap displayed trips (default 5) with a Show all expander —
             // fewer options surfaced by default. Kent's principle: quality
@@ -955,9 +979,9 @@ export default function TripPlanner() {
                       {prioritySet.size > 0 ? (
                         <>
                           <li>
-                            Every trip shown includes {priorityPlayers.length === 1 ? priorityPlayers[0] : 'at least one of your priority players'}.
-                            {numbered.length > relevantToFilters.length && (
-                              <> The planner also found {numbered.length - relevantToFilters.length} good trip{numbered.length - relevantToFilters.length !== 1 ? 's' : ''} with other clients — those are hidden while priority players are set.</>
+                            Trips with {priorityPlayers.length === 1 ? priorityPlayers[0] : 'your priority players'} come first.
+                            {otherClientGroups.length > 0 && (
+                              <> {otherClientGroups.length} more trip{otherClientGroups.length !== 1 ? 's' : ''} with other clients in range {otherClientGroups.length !== 1 ? 'are' : 'is'} listed under &ldquo;Other clients in range&rdquo; below.</>
                             )}
                           </li>
                           <li>
@@ -1037,6 +1061,45 @@ export default function TripPlanner() {
                   </button>
                 )}
               </div>
+
+              {/* Other clients reachable in these dates — priority trips
+                  lead, but these are still opportunities worth seeing
+                  (Tom 2026-08-12). Collapsed to 3 by default. */}
+              {otherClientGroups.length > 0 && (
+                <div className="mt-6">
+                  <h3 className="mb-3 text-sm font-semibold text-text">
+                    Other clients in range
+                    <span className="ml-2 text-xs font-normal text-text-dim">
+                      {otherClientGroups.length} option{otherClientGroups.length !== 1 ? 's' : ''} without your priority players
+                    </span>
+                  </h3>
+                  <div className="space-y-4">
+                    {(showAllOtherTrips ? otherClientGroups : otherClientGroups.slice(0, 3)).map((group) => {
+                      const { primary } = group
+                      const tripIndex = primary.type === 'road' && tripPlan
+                        ? tripPlan.trips.indexOf(primary.trip)
+                        : null
+                      return (
+                        <TripSummaryCard
+                          key={`other-${primary.type}-${group.displayIndex}`}
+                          item={primary}
+                          tripIndex={tripIndex != null && tripIndex >= 0 ? tripIndex : null}
+                          playerMap={playerMap}
+                          onPlayerClick={setSelectedPlayer}
+                        />
+                      )
+                    })}
+                    {otherClientGroups.length > 3 && !showAllOtherTrips && (
+                      <button
+                        onClick={() => setShowAllOtherTrips(true)}
+                        className="w-full rounded-lg border border-border bg-surface/40 px-4 py-2 text-xs text-text-dim hover:text-text hover:border-accent-blue/40 transition-colors"
+                      >
+                        Show all {otherClientGroups.length} other-client trips
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             )
           })()}

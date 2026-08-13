@@ -21,6 +21,7 @@ import SummerCoverageNotice from './SummerCoverageNotice'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { useSummerStore } from '../../store/summerStore'
 import { findDoubleUps } from '../../lib/doubleUps'
+import { formatDate } from '../../lib/formatters'
 import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import { useMemo } from 'react'
@@ -70,6 +71,7 @@ export default function MapView() {
   // Best window recommender (uses filtered markers — Kent's filters should
   // drive the recommendations too)
   const homeBase = useTripStore((s) => s.homeBase)
+  const homeBaseName = useTripStore((s) => s.homeBaseName)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const [windowDays, setWindowDays] = useState(3)
   const [bestWindowStrategy, setBestWindowStrategy] = useState<BestWindowStrategy>('impact')
@@ -82,14 +84,22 @@ export default function MapView() {
     if (players.length === 0) return []
     const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
     if (all.length === 0) return []
-    return findDoubleUps(all, players, filterStart, filterEnd)
-  }, [proGames, ncaaGames, hsGames, summerGames, players, filterStart, filterEnd])
+    // Pair cap follows the Drive-radius slider — widening the radius widens
+    // what counts as a double/triple up (Tom 2026-08-12)
+    return findDoubleUps(all, players, filterStart, filterEnd, undefined, undefined, maxDriveMinutes)
+  }, [proGames, ncaaGames, hsGames, summerGames, players, filterStart, filterEnd, maxDriveMinutes])
 
-  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, doubleUps)
+  // Filtering to specific players re-scopes the question: "when/where can I
+  // see THEM", not "what's near my star". The drive radius is skipped so a
+  // stale origin can't blank the answer (Tom 2026-08-12: two FL players
+  // filtered, star still in NC, panel claimed "no games in this range").
+  const playerScoped = filterState.selectedPlayers.length > 0
+  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, doubleUps, playerScoped)
 
   // Destination picks — scans ALL tier markers (not drive-filtered) because
   // the whole point of "Where to go?" is to look beyond the current radius.
-  const destinationPicks = useDestinationPicks(allTierMarkers, 180, 5)
+  // With a player filter active, scan only THOSE players' markers.
+  const destinationPicks = useDestinationPicks(playerScoped ? tierMarkers : allTierMarkers, 180, 5)
   const playerMap = useMemo(() => {
     const m = new Map<string, RosterPlayer>()
     for (const p of players) m.set(p.playerName, p)
@@ -195,6 +205,18 @@ export default function MapView() {
     setFilterStart(days[0]!)
     setFilterEnd(days[days.length - 1]!)
   }, [selectedTripIndex, tripPlan, setFilterStart, setFilterEnd])
+
+  // "Show on map" from ANY trip card (road or fly-in) — narrow the visible
+  // date range to exactly that trip's game dates so the map isolates the
+  // trip instead of showing seven weeks of markers (Tom 2026-08-12). The
+  // focus lives in the store because this component isn't mounted when the
+  // click happens on the Trip Planner tab.
+  const mapFocus = useTripStore((s) => s.mapFocus)
+  useEffect(() => {
+    if (!mapFocus) return
+    setFilterStart(mapFocus.startDate)
+    setFilterEnd(mapFocus.endDate)
+  }, [mapFocus, setFilterStart, setFilterEnd])
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
@@ -320,18 +342,31 @@ export default function MapView() {
               non-live summer league (e.g. PGCBL, NECBL, Northwoods). */}
           <SummerCoverageNotice />
 
-          {/* Trip preview banner — shown when a Trip Card highlighted itself on the map */}
-          {selectedTripIndex != null && tripPlan && tripPlan.trips[selectedTripIndex] && (
-            <div className="flex items-center justify-between rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs">
-              <span className="text-yellow-200">
-                Previewing <strong>Trip #{selectedTripIndex + 1}</strong>
-                {tripPlan.trips[selectedTripIndex]!.anchorGame.venue.name && (
-                  <span className="text-yellow-200/70"> · {tripPlan.trips[selectedTripIndex]!.anchorGame.venue.name}</span>
+          {/* Trip preview banner — shown when a trip card put itself on the
+              map ("Show on map"). Covers fly-ins too via mapFocus, and says
+              the dates so the narrowed date range isn't a mystery. */}
+          {(mapFocus || (selectedTripIndex != null && tripPlan && tripPlan.trips[selectedTripIndex])) && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs">
+              <span className="min-w-0 truncate text-yellow-200">
+                Previewing{' '}
+                <strong>
+                  {mapFocus?.label ??
+                    (selectedTripIndex != null ? `Trip #${selectedTripIndex + 1}` : '')}
+                </strong>
+                {mapFocus && (
+                  <span className="text-yellow-200/70">
+                    {' '}· {mapFocus.startDate === mapFocus.endDate
+                      ? formatDate(mapFocus.startDate)
+                      : `${formatDate(mapFocus.startDate)} – ${formatDate(mapFocus.endDate)}`} · dates narrowed to this trip
+                  </span>
                 )}
               </span>
               <button
-                onClick={() => useTripStore.getState().setSelectedTripIndex(null)}
-                className="text-yellow-200/80 hover:text-yellow-200 underline-offset-2 hover:underline"
+                onClick={() => {
+                  useTripStore.getState().setSelectedTripIndex(null)
+                  useTripStore.getState().setMapFocus(null)
+                }}
+                className="shrink-0 text-yellow-200/80 hover:text-yellow-200 underline-offset-2 hover:underline"
               >
                 clear preview
               </button>
@@ -372,6 +407,10 @@ export default function MapView() {
               picks={destinationPicks}
               doubleUps={doubleUps}
               playerMap={playerMap}
+              scopedPlayers={filterState.selectedPlayers}
+              originName={homeBaseName}
+              driveHours={Math.round(maxDriveMinutes / 60)}
+              gamesBeyondRadius={!playerScoped && bestWindows.length === 0 && tierMarkers.length > 0}
               activeTab={suggestTab}
               setActiveTab={(t) => {
                 setSuggestTab(t)

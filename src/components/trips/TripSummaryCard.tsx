@@ -1,7 +1,9 @@
 import { useMemo } from 'react'
 import type { TripCandidate, FlyInVisit, GameEvent } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
-import { formatDate, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
+import { formatDate, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
+import { haversineKm } from '../../lib/tripEngine'
+import { driveTierClass, driveTierTitle } from './DoubleUpSection'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useTimeStore } from '../../store/timeStore'
 import { SwingOptions } from './ConvergenceBanner'
@@ -117,11 +119,21 @@ export default function TripSummaryCard({
   const starred = tripKey ? !!starredTrips[tripKey] : false
 
   function showOnMap() {
-    if (item.type === 'road' && tripIndex != null) {
-      useTripStore.getState().setSelectedTripIndex(tripIndex)
-    } else {
-      dispatchMapEvent('map:fit-points', { points: lines.map((l) => l.coords) })
-    }
+    // Focus goes through the STORE, not a map event: the Map tab is only
+    // mounted while active, so an event dispatched from here evaporated
+    // before any listener existed — fly-in "Show on map" did nothing
+    // (Tom 2026-08-12). MapView narrows its dates to this and MapContainer
+    // fits the viewport to these venues once mounted.
+    const dates = lines.map((l) => l.date).sort()
+    useTripStore.getState().setMapFocus({
+      points: lines.map((l) => l.coords),
+      startDate: dates[0]!,
+      endDate: dates[dates.length - 1]!,
+      label: playerNames.join(' + '),
+    })
+    useTripStore.getState().setSelectedTripIndex(
+      item.type === 'road' && tripIndex != null ? tripIndex : null,
+    )
     dispatchMapEvent('app:switch-tab', { tab: 'map' })
     window.scrollTo({ top: 0 })
   }
@@ -180,17 +192,42 @@ export default function TripSummaryCard({
         )}
       </p>
 
-      {/* Games in relation to each other — no itinerary assumptions */}
+      {/* Games in relation to each other — no itinerary assumptions.
+          Each line after the first shows the estimated drive from the
+          PREVIOUS stop, so Kent can read the distances without leaving the
+          card (Tom 2026-08-12: "include the est driving time"). */}
       <div className="mt-1 space-y-0.5">
-        {lines.map((l, i) => (
-          <p key={`${l.date}-${l.venue}-${i}`} className="truncate text-[11px] text-text-dim/70">
-            <span className={`inline-block w-24 font-medium ${doubleUpDates.includes(l.date) ? 'text-accent-green' : 'text-text-dim'}`}>{formatDate(l.date)}</span>
-            <span className="text-text-dim">{l.venue}</span>
-            {l.time && <span className="text-text-dim/60"> {formatGameTimeDisplay(l.time, timeMode, { coords: l.coords, tz: l.tz })}</span>}
-            {l.players.length > 0 && <span> · {l.players.join(', ')}</span>}
-          </p>
-        ))}
+        {lines.map((l, i) => {
+          const prev = i > 0 ? lines[i - 1]! : null
+          const driveMin = prev ? Math.round((haversineKm(prev.coords, l.coords) * 1.2 / 95) * 60) : 0
+          return (
+            <p key={`${l.date}-${l.venue}-${i}`} className="truncate text-[11px] text-text-dim/70">
+              <span className={`inline-block w-24 font-medium ${doubleUpDates.includes(l.date) ? 'text-accent-green' : 'text-text-dim'}`}>{formatDate(l.date)}</span>
+              <span className="text-text-dim">{l.venue}</span>
+              {l.time && <span className="text-text-dim/60"> {formatGameTimeDisplay(l.time, timeMode, { coords: l.coords, tz: l.tz })}</span>}
+              {l.players.length > 0 && <span> · {l.players.join(', ')}</span>}
+              {driveMin >= 10 && (
+                <span
+                  className={`font-medium ${driveTierClass(driveMin)}`}
+                  title={`${driveTierTitle(driveMin)} — estimated drive from ${prev!.venue}`}
+                >
+                  {' '}· {formatDriveTime(driveMin)} drive
+                </span>
+              )}
+            </p>
+          )
+        })}
       </div>
+
+      {/* A series where the same players line up on other dates too — say
+          so instead of presenting one date as the only option (Tom
+          2026-08-12: Hagaman/Riemer play each other all week). */}
+      {item.type === 'road' && (item.trip.altDates?.length ?? 0) > 0 && (
+        <p className="mt-1.5 text-[11px] text-text-dim/70">
+          <span className="text-text-dim">Other dates that work:</span>{' '}
+          {item.trip.altDates!.map((d) => formatDate(d)).join(' · ')}
+        </p>
+      )}
 
       {swing && <SwingOptions swing={swing} />}
     </div>

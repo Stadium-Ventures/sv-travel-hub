@@ -56,6 +56,17 @@ interface TripState {
    *  starring survives regenerations and sessions. */
   starredTrips: Record<string, boolean>
   selectedTripIndex: number | null // For map preview highlighting
+  /** "Show on map" focus — works for BOTH road trips and fly-ins. Set
+   *  BEFORE switching to the Map tab: the map mounts only when its tab is
+   *  active, so a dispatched map event from the Trip Planner is lost, but
+   *  store state survives the tab switch. MapView narrows the date range
+   *  to it; MapContainer fits the viewport to its points. Not persisted. */
+  mapFocus: {
+    points: Coordinates[]
+    startDate: string
+    endDate: string
+    label: string
+  } | null
   /** One-shot: a specific game (Schedule tab "Plan trip") the next
    *  generation must build a trip around. Consumed by generateTrips. */
   pinnedGame: PinnedGame | null
@@ -73,6 +84,7 @@ interface TripState {
   toggleTripStar: (tripKey: string) => void
   setUseHeartbeatBoost: (v: boolean) => void
   setSelectedTripIndex: (index: number | null) => void
+  setMapFocus: (focus: TripState['mapFocus']) => void
 }
 
 // Track active worker for cancel support
@@ -97,6 +109,7 @@ export const useTripStore = create<TripState>()(
   tripStatuses: {},
   starredTrips: {},
   selectedTripIndex: null,
+  mapFocus: null,
   pinnedGame: null,
 
   setDateRange: (startDate, endDate) => set({ startDate, endDate }),
@@ -107,8 +120,9 @@ export const useTripStore = create<TripState>()(
   setHomeBase: (homeBase, homeBaseName) => set({ homeBase, homeBaseName }),
   setMaxNights: (maxNights: number) => set({ maxNights }),
   setPinnedGame: (pinnedGame) => set({ pinnedGame }),
-  clearTrips: () => set({ tripPlan: null, selectedTripIndex: null }),
+  clearTrips: () => set({ tripPlan: null, selectedTripIndex: null, mapFocus: null }),
   setSelectedTripIndex: (selectedTripIndex) => set({ selectedTripIndex }),
+  setMapFocus: (mapFocus) => set({ mapFocus }),
   setTripStatus: (tripKey, status) => set((state) => {
     const next = { ...state.tripStatuses }
     if (status === null) {
@@ -395,8 +409,9 @@ export const useTripStore = create<TripState>()(
         set({ progressStep: msg.step, progressDetail: msg.detail ?? '' })
       } else if (msg.type === 'result') {
         const plan = msg.plan
-        // Detect double-up opportunities across all games
-        plan.doubleUps = findDoubleUps(allGames, players, startDate, endDate)
+        // Detect double-up opportunities across all games — pair cap follows
+        // the Drive-radius setting, same as the Map tab
+        plan.doubleUps = findDoubleUps(allGames, players, startDate, endDate, undefined, undefined, get().maxDriveMinutes)
 
         // Prune stale tripStatuses — only keep keys that match current trips
         const currentKeys = new Set(plan.trips.map(getTripKey))

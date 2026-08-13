@@ -18,7 +18,7 @@ const TIER_DOT_COLORS: Record<number, string> = { 1: 'bg-[#ef4444]', 2: 'bg-[#f9
 const TAB_SUBTITLES: Record<SuggestTab, string> = {
   when: 'The best dates to visit the starred area, within your drive radius.',
   where: 'The best areas in the US for this date range.',
-  doubleups: 'See 2+ clients in one outing — head-to-heads, same-day doubles, stay-overs.',
+  doubleups: 'See 2+ clients in one outing — head-to-heads, same-day doubles, triple ups, stay-overs. Reach follows your Drive radius.',
 }
 
 // Trimmed to the strategies that give DIFFERENT answers (Tom 2026-07-23:
@@ -72,6 +72,7 @@ const DU_TYPE_LABELS: Record<string, { label: string; hint: string }> = {
   'same-venue-matchup': { label: 'Head-to-Head', hint: 'Clients on opposing teams — one game covers both visits' },
   'tournament-cluster': { label: 'Tournament', hint: '3+ games at the same complex on the same day' },
   'stay-over': { label: 'Stay-Over', hint: 'Back-to-back days a short drive apart — one hotel covers both' },
+  'triple-up': { label: 'Triple Up', hint: '3+ clients reachable in one day, driving stop to stop within your drive radius' },
 }
 
 interface Props {
@@ -98,6 +99,15 @@ interface Props {
   // Double ups
   doubleUps: DoubleUp[]
   playerMap: Map<string, RosterPlayer>
+  /** Players the map is filtered to. Non-empty = suggestions are scoped to
+   *  their games wherever they play (drive radius skipped). */
+  scopedPlayers?: string[]
+  /** Trip origin name + radius — used to say WHY "When to go" is empty. */
+  originName?: string
+  driveHours?: number
+  /** True when games exist in the date range but all sit outside the drive
+   *  radius — the empty state must not claim "no games" (honesty rule). */
+  gamesBeyondRadius?: boolean
   activeTab: SuggestTab
   setActiveTab: (t: SuggestTab) => void
   selectedDoubleUp: number | null
@@ -107,6 +117,15 @@ interface Props {
 
 export default function SuggestionsPanel(props: Props) {
   const { activeTab, setActiveTab, doubleUps } = props
+  const scoped = (props.scopedPlayers?.length ?? 0) > 0
+  // Player-scoped subtitles — the star/radius no longer bounds the answer
+  const subtitle = scoped
+    ? {
+        when: `The best dates to see ${props.scopedPlayers!.join(' + ')} — wherever they play.`,
+        where: `The best areas to see ${props.scopedPlayers!.join(' + ')} in this date range.`,
+        doubleups: TAB_SUBTITLES.doubleups,
+      }[activeTab]
+    : TAB_SUBTITLES[activeTab]
   // Open by default on desktop; collapsed on small screens so the map
   // (rendered first there) stays the star of the tab.
   const [open, setOpen] = useState(() => {
@@ -146,7 +165,7 @@ export default function SuggestionsPanel(props: Props) {
         </div>
       </div>
 
-      <p className="mt-1.5 text-[10px] text-text-dim/60">{TAB_SUBTITLES[activeTab]}</p>
+      <p className="mt-1.5 text-[10px] text-text-dim/60">{subtitle}</p>
 
       {open && (
         <div className="mt-3">
@@ -180,9 +199,10 @@ export default function SuggestionsPanel(props: Props) {
 
 /* ────────────────────────── WHEN ────────────────────────── */
 
-function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onPlanWindow, stillLoading }: Props) {
+function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onPlanWindow, stillLoading, scopedPlayers, originName, driveHours, gamesBeyondRadius }: Props) {
   const topPick = windows[0]
   const currentStrategy = STRATEGY_OPTIONS.find((o) => o.value === strategy) ?? STRATEGY_OPTIONS[0]!
+  const scoped = (scopedPlayers?.length ?? 0) > 0
 
   return (
     <div className="space-y-2">
@@ -219,7 +239,9 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
       {windows.length > 0 && (
         <p className="text-[10px] text-text-dim/70">{strategyImplication(strategy, windows)}</p>
       )}
-      {topPick && topPick.uniquePlayerCount <= 2 && (
+      {/* "Only N players" is noise when the user deliberately narrowed the
+          map to N players — suppress it while player-scoped. */}
+      {topPick && topPick.uniquePlayerCount <= 2 && !scoped && (
         <p className="text-[10px] text-accent-orange/80 leading-relaxed">
           Only {topPick.uniquePlayerCount} player{topPick.uniquePlayerCount === 1 ? '' : 's'} in this window — try a different date range.
         </p>
@@ -235,6 +257,28 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
               <p className="font-medium text-text">Nothing here yet</p>
               <p className="mt-1 text-text-dim/80 leading-relaxed">
                 Schedules are still loading — dates for this area will appear once games arrive.
+              </p>
+            </>
+          ) : gamesBeyondRadius ? (
+            // Games EXIST in this range — they're just outside the drive
+            // radius from the star. Claiming "no games" here sent Tom
+            // hunting a data bug that didn't exist (2026-08-12).
+            <>
+              <p className="font-medium text-text">
+                No games within {driveHours ?? '?'}h of {originName ?? 'your trip origin'}
+              </p>
+              <p className="mt-1 text-text-dim/80 leading-relaxed">
+                Players do have games in this date range, just farther out — drag the star,
+                pick a different Trip origin, widen the Drive radius, or filter to a player
+                to see their dates wherever they play.
+              </p>
+            </>
+          ) : scoped ? (
+            <>
+              <p className="font-medium text-text">No games in this window</p>
+              <p className="mt-1 text-text-dim/80 leading-relaxed">
+                {scopedPlayers!.join(' + ')} {scopedPlayers!.length === 1 ? 'has' : 'have'} no
+                games in this date range — try different dates.
               </p>
             </>
           ) : (
@@ -449,7 +493,7 @@ function WhereTab({ picks, stillLoading }: { picks: DestinationPick[]; stillLoad
 
 /* ─────────────────────── DOUBLE UPS ─────────────────────── */
 
-function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubleUp, onPlanDoubleUp, stillLoading }: Props) {
+function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubleUp, onPlanDoubleUp, stillLoading, driveHours }: Props) {
   const [showAll, setShowAll] = useState(false)
   const visible = showAll ? doubleUps : doubleUps.slice(0, 6)
 
@@ -458,7 +502,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
       <p className="text-xs text-text-dim">
         {stillLoading
           ? 'Schedules are still loading — double ups will appear once games arrive.'
-          : 'No double ups in this date range — no two clients playing each other, or near enough (within a 2h drive, same day or back-to-back days). Widen the dates to check further out.'}
+          : `No double ups in this date range — no two clients playing each other, or near enough (within your ${driveHours ?? 2}h drive radius, same day or back-to-back days). Widen the dates or raise the Drive radius to check further out.`}
       </p>
     )
   }

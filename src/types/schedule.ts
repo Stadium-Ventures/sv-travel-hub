@@ -57,6 +57,10 @@ export interface TripCandidate {
   totalDriveMinutes: number // estimated total driving (round trip)
   venueCount: number // number of distinct venues visited
   scoreBreakdown?: ScoreBreakdown
+  /** Other anchor dates at the same venue with the same players — a series
+   *  where several dates work equally well (e.g. a week-long head-to-head).
+   *  Display-only; computed after trip selection. */
+  altDates?: string[]
 }
 
 export interface PriorityResult {
@@ -111,7 +115,7 @@ export interface UnvisitablePlayer {
   reason: string
 }
 
-export type DoubleUpType = 'nearby-venues' | 'same-venue-matchup' | 'tournament-cluster' | 'stay-over'
+export type DoubleUpType = 'nearby-venues' | 'same-venue-matchup' | 'tournament-cluster' | 'stay-over' | 'triple-up'
 
 export interface DoubleUp {
   date: string

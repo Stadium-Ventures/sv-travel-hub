@@ -121,6 +121,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const selectedTripIndex = useTripStore((s) => s.selectedTripIndex)
   const tripPlan = useTripStore((s) => s.tripPlan)
+  const mapFocus = useTripStore((s) => s.mapFocus)
   // Heartbeat-driven coloring requires looking up each marker's players'
   // days-since-visit values. Subscribing to .players ensures the map repaints
   // when heartbeat data refreshes.
@@ -593,6 +594,19 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     }
   }, [loaded, doubleUps, selectedDoubleUp])
 
+  // "Show on map" focus — fit the viewport to the trip's own venues. Store-
+  // driven (not a map event) because this component mounts AFTER the click
+  // on the Trip Planner tab; fly-in cards' fit-points events used to be
+  // dispatched into the void (Tom 2026-08-12). Runs for road trips too:
+  // isolating the trip's AREA means its venues, never the trip origin.
+  useEffect(() => {
+    if (!loaded || !mapInstance.current || !leafletRef.current || !mapFocus) return
+    if (mapFocus.points.length === 0) return
+    const L = leafletRef.current
+    const bounds = L.latLngBounds(mapFocus.points.map((p) => L.latLng(p.lat, p.lng)))
+    mapInstance.current.fitBounds(bounds, { padding: [70, 70], maxZoom: 10, animate: true })
+  }, [loaded, mapFocus])
+
   // Highlight the currently selected trip — draws a yellow polyline through
   // its venues and zooms the map to fit them. Driven by tripStore.selectedTripIndex
   // which TripCard's "Show on Map" button sets.
@@ -626,17 +640,19 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
 
     const highlight = L.layerGroup()
 
-    // Polyline from home base through each stop (Maptive-style route)
-    const linePoints: Array<[number, number]> = [
-      [homeBase.lat, homeBase.lng],
-      ...stops.map((s) => [s.lat, s.lng] as [number, number]),
-    ]
-    L.polyline(linePoints, {
-      color: '#fbbf24',
-      weight: 3,
-      opacity: 0.85,
-      dashArray: '4,6',
-    }).addTo(highlight)
+    // Polyline through the STOPS only. The old home-base leg (Maptive relic)
+    // meant previewing a DC trip from a Phoenix origin drew a cross-country
+    // line and the fit-bounds below showed the whole US instead of the
+    // trip's area (Tom 2026-08-12). No return-home assumptions.
+    const linePoints: Array<[number, number]> = stops.map((s) => [s.lat, s.lng] as [number, number])
+    if (linePoints.length >= 2) {
+      L.polyline(linePoints, {
+        color: '#fbbf24',
+        weight: 3,
+        opacity: 0.85,
+        dashArray: '4,6',
+      }).addTo(highlight)
+    }
 
     // Numbered halo on each stop
     stops.forEach((s, i) => {
@@ -654,10 +670,10 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     map.addLayer(highlight)
     tripHighlightRef.current = highlight
 
-    // Fit bounds to home + all stops with some padding
+    // Fit bounds to the stops only — the trip's area, not origin-to-area
     const bounds = L.latLngBounds(linePoints.map(([lat, lng]) => L.latLng(lat, lng)))
     map.fitBounds(bounds, { padding: [60, 60], maxZoom: 10 })
-  }, [loaded, selectedTripIndex, tripPlan, homeBase])
+  }, [loaded, selectedTripIndex, tripPlan])
 
   return (
     <div className="relative h-full w-full rounded-lg border border-border" style={{ minHeight: '500px' }}>

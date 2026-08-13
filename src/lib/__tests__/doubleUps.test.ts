@@ -246,3 +246,55 @@ describe('findDoubleUps — stay-over doubles', () => {
     expect(result.filter((r) => r.type === 'stay-over')).toHaveLength(0)
   })
 })
+
+describe('findDoubleUps — triple ups (Tom 2026-08-12)', () => {
+  const MADISON = { lat: 43.0731, lng: -89.4012 } // ~1h from Beloit, ~2.5h from Peoria
+
+  it('detects 3 clients seeable in one day by chaining venues within the drive cap', () => {
+    const players = [player('A', 'Sky Carp'), player('B', 'Chiefs'), player('C', 'Mallards')]
+    const g1 = game({ id: 't1', date: '2026-08-18', playerNames: ['A'] })
+    const g2 = game({
+      id: 't2', date: '2026-08-18', playerNames: ['B'],
+      venue: { name: 'Dozer Park', coords: PEORIA }, homeTeam: 'Peoria Chiefs', awayTeam: 'X',
+    })
+    const g3 = game({
+      id: 't3', date: '2026-08-18', playerNames: ['C'],
+      venue: { name: 'Warner Park', coords: MADISON }, homeTeam: 'Madison Mallards', awayTeam: 'Y',
+    })
+    // With a 4h pair cap (Drive slider at 4h): Beloit–Madison ~55min and
+    // Beloit–Peoria ~150min both link; the chain covers all three clients.
+    const result = findDoubleUps([g1, g2, g3], players, '2026-08-17', '2026-08-19', undefined, undefined, 240)
+    const triples = result.filter((r) => r.type === 'triple-up')
+    expect(triples).toHaveLength(1)
+    expect(triples[0]!.playerNames.sort()).toEqual(['A', 'B', 'C'])
+    expect(triples[0]!.games).toHaveLength(3)
+  })
+
+  it('widening the pair cap via maxPairDriveMinutes links venues a fixed 2h cap would not', () => {
+    const players = [player('A', 'Sky Carp'), player('B', 'Chiefs')]
+    // Peoria–Madison alone: too far for the classic 120-min cap
+    const g2 = game({
+      id: 'w2', date: '2026-08-18', playerNames: ['B'],
+      venue: { name: 'Dozer Park', coords: PEORIA }, homeTeam: 'Peoria Chiefs', awayTeam: 'X',
+    })
+    const g3 = game({
+      id: 'w3', date: '2026-08-18', playerNames: ['A'],
+      venue: { name: 'Warner Park', coords: MADISON }, homeTeam: 'Madison Mallards', awayTeam: 'Y',
+    })
+    const strict = findDoubleUps([g2, g3], players, '2026-08-17', '2026-08-19')
+    expect(strict.filter((r) => r.type === 'nearby-venues')).toHaveLength(0)
+    const wide = findDoubleUps([g2, g3], players, '2026-08-17', '2026-08-19', undefined, undefined, 360)
+    expect(wide.filter((r) => r.type === 'nearby-venues')).toHaveLength(1)
+  })
+
+  it('does not report a triple up for only 2 eligible clients', () => {
+    const players = [player('A', 'Sky Carp'), player('B', 'Chiefs')]
+    const g1 = game({ id: 'd1', date: '2026-08-18', playerNames: ['A'] })
+    const g2 = game({
+      id: 'd2', date: '2026-08-18', playerNames: ['B'],
+      venue: { name: 'Dozer Park', coords: PEORIA }, homeTeam: 'Peoria Chiefs', awayTeam: 'X',
+    })
+    const result = findDoubleUps([g1, g2], players, '2026-08-17', '2026-08-19')
+    expect(result.filter((r) => r.type === 'triple-up')).toHaveLength(0)
+  })
+})

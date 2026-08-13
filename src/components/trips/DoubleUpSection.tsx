@@ -98,6 +98,7 @@ const TYPE_LABELS: Record<string, { label: string; hint: string }> = {
   'same-venue-matchup': { label: 'Head-to-Head', hint: 'Clients on opposing teams — one game covers both visits' },
   'tournament-cluster': { label: 'Tournament', hint: '3+ games at the same complex on the same day' },
   'stay-over': { label: 'Stay-Over Double', hint: 'Games on back-to-back days a short drive apart — one hotel covers both visits' },
+  'triple-up': { label: 'Triple Up', hint: '3+ clients reachable in one day, driving stop to stop within your drive radius' },
 }
 
 /** Kent's proximity tiers (2026-07-21): green within 45 min, yellow 46–90,
