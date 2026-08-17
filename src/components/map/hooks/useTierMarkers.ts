@@ -3,6 +3,20 @@ import { useVenueStore } from '../../../store/venueStore'
 import { useScheduleStore } from '../../../store/scheduleStore'
 import type { VenuePlayer } from './useVenuePlayerMap'
 
+/** One game at a marker's venue, for the popup's drill-in list — the
+ *  Maptive-style "click the count, see the underlying games" view Mike D
+ *  uses as his core workflow (2026-08-17). */
+export interface MarkerGame {
+  id: string
+  date: string
+  /** ISO time — only set for real (mlb-api) times */
+  time?: string
+  /** "vs X" (home) / "@ X" (away) */
+  opponent?: string
+  players: string[]
+  tz?: string
+}
+
 export interface TierMarker {
   key: string
   coords: { lat: number; lng: number }
@@ -11,6 +25,7 @@ export interface TierMarker {
   playerCount: number
   players: Array<{ name: string; tier: number; level: string }>
   gameDates: string[]
+  games: MarkerGame[]
 }
 
 export const TIER_COLORS: Record<number, string> = {
@@ -46,9 +61,27 @@ export function useTierMarkers(
       if (dateFilteredVenues && !dateFilteredVenues.has(key)) continue
 
       // Collect game dates in window for this venue, plus which players
-      // actually appear in those games.
+      // actually appear in those games — and the games themselves, so the
+      // popup can list them (Mike D's drill-in, 2026-08-17).
       const gameDates = new Set<string>()
       const namesInRange = new Set<string>()
+      const gamesById = new Map<string, MarkerGame>()
+      const addGame = (game: typeof proGames[number]) => {
+        gameDates.add(game.date)
+        for (const n of game.playerNames) namesInRange.add(n)
+        if (!gamesById.has(game.id)) {
+          gamesById.set(game.id, {
+            id: game.id,
+            date: game.date,
+            time: game.source === 'mlb-api' && game.time ? game.time : undefined,
+            opponent: game.isHome
+              ? (game.awayTeam ? `vs ${game.awayTeam}` : undefined)
+              : (game.homeTeam ? `@ ${game.homeTeam}` : undefined),
+            players: [...game.playerNames],
+            tz: game.venue.tz,
+          })
+        }
+      }
       const allGames = [...proGames, ...ncaaGames, ...hsGames]
       for (const game of allGames) {
         // Filter to date range
@@ -58,8 +91,7 @@ export function useTierMarkers(
         const dLat = venueInfo.coords.lat - game.venue.coords.lat
         const dLng = venueInfo.coords.lng - game.venue.coords.lng
         if (dLat * dLat + dLng * dLng < 0.00002) {
-          gameDates.add(game.date)
-          for (const n of game.playerNames) namesInRange.add(n)
+          addGame(game)
         }
       }
       // Also match pro venues by key pattern
@@ -69,8 +101,7 @@ export function useTierMarkers(
           if (filterEnd && game.date > filterEnd) continue
           const gameKey = `pro-${game.venue.name.toLowerCase().replace(/\s+/g, '-')}`
           if (gameKey === key) {
-            gameDates.add(game.date)
-            for (const n of game.playerNames) namesInRange.add(n)
+            addGame(game)
           }
         }
       }
@@ -97,6 +128,9 @@ export function useTierMarkers(
         playerCount: visiblePlayers.length,
         players: visiblePlayers.map((p) => ({ name: p.name, tier: p.tier, level: p.level })),
         gameDates: [...gameDates].sort(),
+        games: [...gamesById.values()].sort(
+          (a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''),
+        ),
       })
     }
 

@@ -114,7 +114,7 @@ export default function NearbyGamesFacts({
         </span>
         <span
           className={`ml-auto shrink-0 font-medium ${driveTierClass(driveMinutes)}`}
-          title={`Estimated drive from ${homeBaseName} (straight-line based — real traffic can add time)`}
+          title={`Estimated drive from ${homeBaseName} (straight-line based; real traffic can add time)`}
         >
           {formatDriveTime(driveMinutes)} from {homeBaseName}
         </span>
@@ -159,7 +159,7 @@ export default function NearbyGamesFacts({
       {inRange.length === 0 ? (
         <p className="px-4 py-3 text-xs text-text-dim">
           No client games within {driveHoursLabel} of {homeBaseName} on these dates.
-          {beyond.length > 0 && <> {beyond.length} game{beyond.length !== 1 ? 's are' : ' is'} beyond that drive — widen the Max drive slider or expand below.</>}
+          {beyond.length > 0 && <> {beyond.length} game{beyond.length !== 1 ? 's are' : ' is'} beyond that drive: widen the Max drive slider or expand below.</>}
         </p>
       ) : (
         <div className="divide-y divide-border/20">
@@ -192,7 +192,7 @@ export default function NearbyGamesFacts({
                 <Row key={`b-${row.game.id}-${i}`} row={row} />
               ))}
               {beyond.length > 25 && (
-                <p className="px-4 py-1.5 text-[10px] text-text-dim/50">…and {beyond.length - 25} more — narrow the dates to see them all.</p>
+                <p className="px-4 py-1.5 text-[10px] text-text-dim/50">…and {beyond.length - 25} more. Narrow the dates to see them all.</p>
               )}
             </div>
           )}

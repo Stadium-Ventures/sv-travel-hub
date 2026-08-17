@@ -66,10 +66,8 @@ export default function MapView() {
     }
     return m
   }, [heartbeatPlayers])
-  const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey)
-
-  // Best window recommender (uses filtered markers — Kent's filters should
-  // drive the recommendations too)
+  // Best window recommender inputs (declared before the marker filter pass
+  // because the "Double ups only" toggle needs the double-up list)
   const homeBase = useTripStore((s) => s.homeBase)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
@@ -88,6 +86,14 @@ export default function MapView() {
     // what counts as a double/triple up (Tom 2026-08-12)
     return findDoubleUps(all, players, filterStart, filterEnd, undefined, undefined, maxDriveMinutes)
   }, [proGames, ncaaGames, hsGames, summerGames, players, filterStart, filterEnd, maxDriveMinutes])
+
+  // Venues participating in any double up in the window — powers the
+  // "Double ups only" map filter (Tom 2026-08-17, Mike D debrief).
+  const doubleUpCoords = useMemo(
+    () => doubleUps.flatMap((du) => du.games.map((g) => g.venue.coords)),
+    [doubleUps],
+  )
+  const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey, doubleUpCoords)
 
   // Filtering to specific players re-scopes the question: "when/where can I
   // see THEM", not "what's near my star". The drive radius is skipped so a

@@ -1,10 +1,13 @@
 import type { TierMarker } from './hooks/useTierMarkers'
 import { TIER_COLORS } from './hooks/useTierMarkers'
+import { formatGameTimeDisplay, type TimeDisplayMode } from '../../lib/formatters'
 
 /** Heartbeat days-since-visit + planned-visit info, keyed by normalized player name. */
 export interface PopupEnrichment {
   daysByPlayer: Map<string, number | null>
   plannedByPlayer: Map<string, { date: string; agent: string | null }>
+  /** ET/Local toggle from timeStore — the popup is raw HTML, so pass it in. */
+  timeMode?: TimeDisplayMode
 }
 
 function heartbeatBadgeColor(days: number | null): string {
@@ -79,8 +82,31 @@ export function buildVenuePopupHtml(marker: TierMarker, enrich?: PopupEnrichment
   html += `</button>`
   html += `</div>`
 
-  // Full game-date list — expandable
-  if (marker.gameDates.length > 0) {
+  // Per-game drill-in list — the Maptive "click the count, see the games"
+  // view Mike D's whole workflow runs on (2026-08-17): each game in the
+  // window with date, real time, and opponent. Falls back to the old
+  // date-only list for venues whose games carry no detail.
+  const markerNames = new Set(marker.players.map((p) => p.name))
+  if (marker.games.length > 0) {
+    const uid = `sv-games-${marker.key.replace(/[^a-z0-9]/gi, '-')}`
+    html += `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,0.15)">`
+    html += `<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b;margin-bottom:3px">Games in your dates</div>`
+    html += `<div id="${uid}" style="max-height:150px;overflow-y:auto">`
+    for (const g of marker.games) {
+      const t = formatGameTimeDisplay(g.time, enrich?.timeMode ?? 'et', { coords: marker.coords, tz: g.tz })
+      const who = g.players.filter((n) => markerNames.has(n))
+      html += `<div style="display:flex;gap:6px;align-items:baseline;font-size:11px;color:#cbd5e1;margin-bottom:2px">`
+      html += `<span style="width:46px;flex-shrink:0;font-weight:600;color:#94a3b8">${formatDate(g.date)}</span>`
+      html += `<span style="width:56px;flex-shrink:0;color:#64748b">${t || ''}</span>`
+      html += `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.opponent ?? ''}${who.length > 0 && marker.players.length > 1 ? ` &middot; ${who.join(', ')}` : ''}</span>`
+      html += `</div>`
+    }
+    html += `</div>`
+    if (marker.games.length > 6) {
+      html += `<div style="font-size:9px;color:#64748b;margin-top:2px">${marker.games.length} games &middot; scroll for more</div>`
+    }
+    html += `</div>`
+  } else if (marker.gameDates.length > 0) {
     const visibleCount = 5
     const visible = marker.gameDates.slice(0, visibleCount).map(formatDate)
     const hidden = marker.gameDates.slice(visibleCount).map(formatDate)

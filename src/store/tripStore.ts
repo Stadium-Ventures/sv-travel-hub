@@ -155,7 +155,15 @@ export const useTripStore = create<TripState>()(
   pinnedGame: null,
   plannedSwing: null,
 
-  setDateRange: (startDate, endDate) => set({ startDate, endDate }),
+  setDateRange: (startDate, endDate) => {
+    // Old games never render (Mike D 2026-08-17: past games still showing
+    // was a top Maptive complaint). Clamp at the store chokepoint so every
+    // date input — Map bar, planner, presets — inherits the guard.
+    const today = new Date().toISOString().split('T')[0]!
+    const s = startDate < today ? today : startDate
+    const e = endDate < today ? today : endDate
+    set({ startDate: s, endDate: e })
+  },
   setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes }),
   setMaxFlightHours: (maxFlightHours) => set({ maxFlightHours }),
   setUseHeartbeatBoost: (useHeartbeatBoost: boolean) => set({ useHeartbeatBoost }),

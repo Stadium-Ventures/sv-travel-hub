@@ -246,7 +246,7 @@ export function SwingOptions({ swing, pickedIdx, onPick }: {
   const letters = ['A', 'B', 'C', 'D', 'E']
   return (
     <div className="mt-2 space-y-1">
-      <p className="text-[10px] uppercase tracking-wide text-text-dim/60">Ways to run it — pick one to see it above</p>
+      <p className="text-[10px] uppercase tracking-wide text-text-dim/60">Ways to run it: pick one to see it above</p>
       {combos.map((w, i) => {
         const picked = pickedIdx === i
         return (

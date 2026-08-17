@@ -30,6 +30,11 @@ export interface MapFilterState {
   /** When true, only show venues with at least one overdue (>90d) or
    *  never-visited player. Kent interview ask: "guys we need to see." */
   overdueOnly: boolean
+  /** When true, only show venues that are part of a double up (2+ clients
+   *  seeable in one outing) inside the selected dates. Tom 2026-08-17,
+   *  from the Mike D Maptive debrief: "our filters should also include
+   *  player and double ups." */
+  doubleUpsOnly: boolean
 }
 
 export const DEFAULT_MAP_FILTERS: MapFilterState = {
@@ -39,6 +44,7 @@ export const DEFAULT_MAP_FILTERS: MapFilterState = {
   selectedPlayers: [],
   colorBy: 'tier',
   overdueOnly: false,
+  doubleUpsOnly: false,
 }
 
 /** Heartbeat color thresholds (days since in-person visit).
@@ -81,6 +87,7 @@ export function countActiveFilters(s: MapFilterState): number {
   if (s.tiers.size < 4) n++
   if (s.levels.size < 3) n++
   if (s.overdueOnly) n++
+  if (s.doubleUpsOnly) n++
   if (s.search.trim() !== '') n++
   if (s.selectedPlayers.length > 0) n++
   return n
@@ -215,6 +222,15 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
               title="Show only venues with at least one player overdue (>90d) or never visited"
             >
               Overdue only
+            </button>
+            <button
+              onClick={() => setState({ ...state, doubleUpsOnly: !state.doubleUpsOnly })}
+              className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                state.doubleUpsOnly ? 'bg-accent-green/15 text-accent-green' : 'text-text-dim/60 hover:text-text hover:bg-gray-800/50'
+              }`}
+              title="Show only venues that are part of a double up: 2+ clients seeable in one outing within your dates"
+            >
+              Double ups only
             </button>
           </div>
 
@@ -355,13 +371,27 @@ export function applyMapFilters(
   markers: TierMarker[],
   state: MapFilterState,
   daysByPlayerKey?: Map<string, number | null>,
+  /** Venue coordinates that participate in a double up within the current
+   *  dates — required for the "Double ups only" toggle to keep anything. */
+  doubleUpCoords?: Array<{ lat: number; lng: number }>,
 ): TierMarker[] {
   const search = state.search.trim().toLowerCase()
   const selectedPlayers = new Set(state.selectedPlayers.map((n) => n.trim().toLowerCase()))
+  const isDoubleUpVenue = (m: TierMarker): boolean => {
+    if (!doubleUpCoords || doubleUpCoords.length === 0) return false
+    // Same proximity tolerance the marker builder uses to match games to venues
+    return doubleUpCoords.some((c) => {
+      const dLat = c.lat - m.coords.lat
+      const dLng = c.lng - m.coords.lng
+      return dLat * dLat + dLng * dLng < 0.00002
+    })
+  }
   return markers
     .map((m) => {
       // Venue-name search: when set, only keep markers whose venue matches.
       if (search !== '' && !m.venueName.toLowerCase().includes(search)) return null
+      // Double-ups toggle: only venues that are part of a 2+ client outing.
+      if (state.doubleUpsOnly && !isDoubleUpVenue(m)) return null
       const survivors = m.players.filter((p) => {
         if (!state.tiers.has(p.tier)) return false
         if (!state.levels.has(p.level as MapLevelFilter)) return false

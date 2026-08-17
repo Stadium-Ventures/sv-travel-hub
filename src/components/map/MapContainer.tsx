@@ -10,6 +10,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { useTripStore } from '../../store/tripStore'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
+import { useTimeStore } from '../../store/timeStore'
 import { dispatchMapEvent, addMapEventListener } from '../../lib/mapEvents'
 import { injectMapStyles } from './mapStyles'
 import { buildVenuePopupHtml } from './VenuePopup'
@@ -126,6 +127,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   // days-since-visit values. Subscribing to .players ensures the map repaints
   // when heartbeat data refreshes.
   const heartbeatPlayers = useHeartbeatStore((s) => s.players)
+  const timeMode = useTimeStore((s) => s.mode)
   const dragOriginRef = useRef(false) // suppress map re-center after drag
 
   // Initialize Leaflet. The cleanup function tears down any map instance so
@@ -444,7 +446,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       // best tier they contain (read in iconCreateFunction above).
       ;(marker as unknown as { svTier?: number }).svTier = tm.bestTier
 
-      marker.bindPopup(buildVenuePopupHtml(tm, { daysByPlayer, plannedByPlayer }), {
+      marker.bindPopup(buildVenuePopupHtml(tm, { daysByPlayer, plannedByPlayer, timeMode }), {
         maxWidth: 320,
         className: 'sv-dark-popup',
       })
@@ -454,7 +456,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
 
     map.addLayer(layerGroup)
     clusterGroupRef.current = layerGroup as any
-  }, [loaded, tierMarkers, colorBy, heartbeatPlayers])
+  }, [loaded, tierMarkers, colorBy, heartbeatPlayers, timeMode])
 
   // Render non-game event pins — distinct amber 📌 markers, separate from the
   // round player-venue dots, so "who's where" reads at a glance.
