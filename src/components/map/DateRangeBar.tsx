@@ -1,13 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTripStore } from '../../store/tripStore'
-import { fetchWithTimeout } from '../../lib/fetchWithTimeout'
-
-interface CitySuggestion {
-  lat: number
-  lng: number
-  label: string  // friendly "City, State"
-  display: string // full display_name from Nominatim
-}
+import CityPicker from '../ui/CityPicker'
 
 function todayISO(): string {
   return new Date().toISOString().split('T')[0]!
@@ -54,140 +47,10 @@ export default function DateRangeBar({
 }: DateRangeBarProps) {
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const setHomeBase = useTripStore((s) => s.setHomeBase)
-  const isPresetCity = STARTING_LOCATIONS.some((l) => l.name === homeBaseName)
 
   // In-progress typing for the date inputs — see the comment at the inputs.
   const [draftStart, setDraftStart] = useState<string | null>(null)
   const [draftEnd, setDraftEnd] = useState<string | null>(null)
-
-  const [customCity, setCustomCity] = useState('')
-  const [cityLoading, setCityLoading] = useState(false)
-  const [cityError, setCityError] = useState<string | null>(null)
-  const [suggestions, setSuggestions] = useState<CitySuggestion[]>([])
-  const [suggestOpen, setSuggestOpen] = useState(false)
-  const searchAbortRef = useRef<AbortController | null>(null)
-  const suggestContainerRef = useRef<HTMLDivElement>(null)
-
-  // Close suggestions when clicking outside
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (suggestContainerRef.current && !suggestContainerRef.current.contains(e.target as Node)) {
-        setSuggestOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
-  }, [])
-
-  function selectSuggestion(s: CitySuggestion) {
-    setHomeBase({ lat: s.lat, lng: s.lng }, s.label)
-    setCustomCity('')
-    setSuggestOpen(false)
-    setSuggestions([])
-  }
-
-  // Debounced Nominatim autocomplete — Kent's 2026-06-08 ask:
-  // "I don't know how to spell albuquerque reliably and was hoping for help."
-  // Fires after 250ms of no typing, when query is >= 2 chars.
-  useEffect(() => {
-    const q = customCity.trim()
-    if (q.length < 2) { setSuggestions([]); return }
-    const handle = setTimeout(async () => {
-      searchAbortRef.current?.abort()
-      const ac = new AbortController()
-      searchAbortRef.current = ac
-      try {
-        // NOTE: do NOT pass featuretype=city. Nominatim's featuretype filter
-        // excludes large cities that OSM tags as administrative boundaries
-        // (e.g. Albuquerque), so partial queries returned zero matches.
-        // Instead we keep the query open and filter to populated places
-        // client-side via address class/type.
-        const params = new URLSearchParams({
-          q, format: 'json', limit: '10', countrycodes: 'us,ca',
-          addressdetails: '1', dedupe: '1',
-        })
-        const res = await fetchWithTimeout(
-          `https://nominatim.openstreetmap.org/search?${params}`,
-          { timeoutMs: 6000, headers: { 'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures)' }, signal: ac.signal },
-        )
-        if (!res.ok) return
-        type NomResult = {
-          lat: string; lon: string; display_name: string
-          class?: string; type?: string
-          address?: { city?: string; town?: string; village?: string; hamlet?: string; municipality?: string; county?: string; state?: string; country_code?: string }
-        }
-        const results = await res.json() as NomResult[]
-        const mapped: CitySuggestion[] = results
-          // Keep only populated places — drop streets, POIs, buildings, etc.
-          // OSM class is usually 'place' for cities/towns; 'boundary' for
-          // admin polygons we also accept (catches Albuquerque).
-          .filter((r) => {
-            if (r.class === 'place') return true
-            if (r.class === 'boundary' && r.type === 'administrative') return true
-            // Fallback: if address resolved to a city/town/municipality it counts.
-            const a = r.address ?? {}
-            return Boolean(a.city || a.town || a.village || a.municipality)
-          })
-          .map((r) => {
-            const a = r.address ?? {}
-            const city = a.city ?? a.town ?? a.village ?? a.municipality ?? a.hamlet ?? r.display_name.split(',')[0]
-            const state = a.state ?? ''
-            const label = state ? `${city}, ${state}` : (city ?? '')
-            return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), label, display: r.display_name }
-          })
-          .filter((s) => s.label && isFinite(s.lat) && isFinite(s.lng))
-        // Dedupe by label
-        const seen = new Set<string>()
-        const unique = mapped.filter((s) => {
-          const k = s.label.toLowerCase()
-          if (seen.has(k)) return false
-          seen.add(k); return true
-        })
-        setSuggestions(unique)
-        setSuggestOpen(unique.length > 0)
-      } catch { /* aborted or network — fail silent */ }
-    }, 250)
-    return () => clearTimeout(handle)
-  }, [customCity])
-
-  // Submit (Go button or Enter) — picks the top suggestion, or runs a direct
-  // geocode if suggestions haven't loaded yet.
-  async function handleCustomCity(e: React.FormEvent) {
-    e.preventDefault()
-    if (suggestions.length > 0) {
-      selectSuggestion(suggestions[0]!)
-      return
-    }
-    const q = customCity.trim()
-    if (!q) return
-    setCityLoading(true); setCityError(null)
-    try {
-      const params = new URLSearchParams({
-        q, format: 'json', limit: '1', countrycodes: 'us,ca',
-      })
-      const res = await fetchWithTimeout(
-        `https://nominatim.openstreetmap.org/search?${params}`,
-        { timeoutMs: 8000, headers: { 'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures)' } },
-      )
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const results = await res.json() as Array<{ lat: string; lon: string; display_name: string }>
-      if (!results.length) {
-        setCityError('No match — try "City, State"')
-        return
-      }
-      const r = results[0]!
-      const lat = parseFloat(r.lat)
-      const lng = parseFloat(r.lon)
-      const parts = r.display_name.split(',').map((s) => s.trim())
-      const friendly = parts.length >= 3 ? `${parts[0]}, ${parts[parts.length - 3] ?? parts[1]}` : (parts[0] ?? q)
-      setHomeBase({ lat, lng }, friendly)
-      setCustomCity('')
-    } catch (err) {
-      setCityError(err instanceof Error ? err.message : 'Geocoding failed')
-    } finally {
-      setCityLoading(false)
-    }
-  }
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-surface border border-border/50 px-3 py-2">
@@ -247,124 +110,19 @@ export default function DateRangeBar({
 
       <span className="mx-1 text-text-dim/20">|</span>
 
-      {/* Starting from — single consolidated combobox. Shows current city as
-          a chip; click to open a dropdown with a search field + preset cities
-          and live Nominatim autocomplete. Replaces the prior "dropdown +
-          separate type-a-city input" pair. Kent's 2026-06-08 ask. */}
-      <div className="relative" ref={suggestContainerRef}>
-        <label className="flex items-center gap-1.5">
-          <span
-            className="text-[10px] uppercase tracking-wide text-text-dim/60 cursor-help"
-            title="The city your trips will start from. Drive radius is measured from here; flight times are estimated from here too. Dragging the star on the map updates this."
-          >
-            Trip origin
-          </span>
-          <button
-            type="button"
-            onClick={() => setSuggestOpen(!suggestOpen)}
-            className="flex items-center gap-1.5 rounded border border-border bg-gray-950/50 px-2 py-1 text-xs text-text hover:border-accent-blue/40 transition-colors min-w-[160px]"
-            title="Click to change starting city. Type any city or pick from common ones."
-          >
-            <span className="truncate flex-1 text-left">{homeBaseName}</span>
-            <span className={`text-text-dim/60 text-[10px] transition-transform ${suggestOpen ? 'rotate-180' : ''}`}>▼</span>
-          </button>
-        </label>
-
-        {suggestOpen && (
-          <div className="absolute left-0 top-full z-30 mt-1 w-[280px] overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
-            {/* Search input inside the dropdown */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (suggestions.length > 0) selectSuggestion(suggestions[0]!)
-                else if (customCity.trim()) handleCustomCity(e)
-              }}
-              className="border-b border-border/40 p-2"
-            >
-              <input
-                type="text"
-                value={customCity}
-                onChange={(e) => { setCustomCity(e.target.value); setCityError(null) }}
-                placeholder="Type any city..."
-                autoFocus
-                autoComplete="off"
-                className="w-full rounded border border-border/40 bg-gray-950/40 px-2 py-1 text-xs text-text placeholder:text-text-dim/40 focus:outline-none focus:border-accent-blue"
-              />
-              {cityError && <p className="mt-1 text-[10px] text-accent-red">{cityError}</p>}
-            </form>
-
-            <div className="max-h-[280px] overflow-y-auto">
-              {/* Live Nominatim suggestions — shown when query has matches */}
-              {suggestions.length > 0 && (
-                <div>
-                  <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-dim/50 bg-gray-950/40">
-                    Matches
-                  </div>
-                  {suggestions.map((s, i) => (
-                    <button
-                      key={`sug-${s.label}-${i}`}
-                      type="button"
-                      onClick={() => selectSuggestion(s)}
-                      className="block w-full px-3 py-1.5 text-left text-xs text-text hover:bg-accent-blue/10 transition-colors"
-                      title={s.display}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Preset cities — always shown. Filter to matches of query when typing. */}
-              <div>
-                <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-dim/50 bg-gray-950/40">
-                  Common cities
-                </div>
-                {STARTING_LOCATIONS
-                  .filter((loc) => !customCity.trim() || loc.name.toLowerCase().includes(customCity.trim().toLowerCase()))
-                  .map((loc) => {
-                    const isCurrent = loc.name === homeBaseName
-                    return (
-                      <button
-                        key={loc.name}
-                        type="button"
-                        onClick={() => {
-                          setHomeBase({ lat: loc.coords.lat, lng: loc.coords.lng }, loc.name)
-                          setSuggestOpen(false)
-                          setCustomCity('')
-                        }}
-                        className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-accent-blue/10 transition-colors ${
-                          isCurrent ? 'bg-accent-blue/10 text-accent-blue font-medium' : 'text-text'
-                        }`}
-                      >
-                        {loc.name}
-                        {isCurrent && <span className="ml-1.5 text-[10px] text-accent-blue/70">· current</span>}
-                      </button>
-                    )
-                  })}
-                {customCity.trim() && STARTING_LOCATIONS.filter((loc) => loc.name.toLowerCase().includes(customCity.trim().toLowerCase())).length === 0 && (
-                  <p className="px-3 py-1.5 text-[10px] text-text-dim/50 italic">No preset cities match — see live matches above or hit Enter.</p>
-                )}
-              </div>
-
-              {/* Show non-preset current city at top when custom */}
-              {!isPresetCity && !customCity.trim() && (
-                <div className="border-t border-border/40">
-                  <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-dim/50 bg-gray-950/40">
-                    Currently
-                  </div>
-                  <div className="px-3 py-1.5 text-xs text-accent-blue/80">
-                    {homeBaseName} <span className="text-[10px] text-text-dim/50">· custom</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {cityLoading && (
-              <div className="border-t border-border/40 px-3 py-1.5 text-[10px] text-text-dim">Searching…</div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Starting from — the SHARED CityPicker combobox (Photon-backed
+          autocomplete). This bar previously carried its own near-identical
+          fork still on Nominatim, so the "philad → nothing" prefix-search
+          fix never reached the Map toolbar (Tom 2026-08-17). One component,
+          one behavior, both surfaces. */}
+      <CityPicker
+        value={homeBaseName}
+        onChange={(coords, cityLabel) => setHomeBase(coords, cityLabel)}
+        presets={[...STARTING_LOCATIONS]}
+        label="Trip origin"
+        buttonClass="min-w-[160px]"
+        title="The city your trips will start from. Drive radius is measured from here. Dragging the star on the map updates this. Type any city or pick from common ones."
+      />
 
 
       {/* Right-aligned slot: Filters popover + help, injected by MapView so
