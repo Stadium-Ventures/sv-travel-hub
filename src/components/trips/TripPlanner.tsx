@@ -979,8 +979,13 @@ export default function TripPlanner() {
             const relevantToFilters = prioritySet.size > 0
               ? filtered.filter((g) => itemHasPriorityPlayer(g.primary, prioritySet))
               : filtered
+            // Road trips only: the header promises "in range", and the
+            // engine guarantees that for drive trips. Fly-in visits (e.g.
+            // Sterlin at Isotopes Park, 24h from an FNB Field anchor) are
+            // the opposite of in-range and read as a bug here (Tom
+            // 2026-08-17: "why is Sterlin Thompson (albuquerque) shown?").
             const otherClientGroups = prioritySet.size > 0
-              ? filtered.filter((g) => !itemHasPriorityPlayer(g.primary, prioritySet))
+              ? filtered.filter((g) => !itemHasPriorityPlayer(g.primary, prioritySet) && g.primary.type === 'road')
               : []
 
             // Cap displayed trips (default 5) with a Show all expander —

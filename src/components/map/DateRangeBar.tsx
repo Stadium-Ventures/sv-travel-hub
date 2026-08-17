@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import CityPicker from '../ui/CityPicker'
 import { STARTING_LOCATIONS } from '../../data/cityPresets'
+import { dispatchMapEvent } from '../../lib/mapEvents'
 
 function todayISO(): string {
   return new Date().toISOString().split('T')[0]!
@@ -102,7 +103,12 @@ export default function DateRangeBar({
           one behavior, both surfaces. */}
       <CityPicker
         value={homeBaseName}
-        onChange={(coords, cityLabel) => setHomeBase(coords, cityLabel)}
+        onChange={(coords, cityLabel) => {
+          setHomeBase(coords, cityLabel)
+          // Picking an origin takes you there — star moves with homeBase,
+          // viewport follows (Tom 2026-08-17).
+          dispatchMapEvent('map:fly-to', { lat: coords.lat, lng: coords.lng })
+        }}
         presets={[...STARTING_LOCATIONS]}
         label="Trip origin"
         buttonClass="min-w-[160px]"

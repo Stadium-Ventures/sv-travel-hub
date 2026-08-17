@@ -14,6 +14,12 @@ export type MapEventMap = {
   /** Fit the map viewport to a set of points (e.g. a destination pick's
    *  cluster venues after "Go here"). */
   'map:fit-points': { points: Array<{ lat: number; lng: number }> }
+  /** Fly to a point (e.g. a newly typed Trip Origin — "take me there and
+   *  move the star", Tom 2026-08-17). */
+  'map:fly-to': { lat: number; lng: number; zoom?: number }
+  /** Reset the viewport to the full continental-US extent in one click
+   *  instead of minus-minus-minus (Tom 2026-08-17). */
+  'map:reset-view': Record<string, never>
 }
 
 export function dispatchMapEvent<K extends keyof MapEventMap>(

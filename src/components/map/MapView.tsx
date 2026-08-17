@@ -87,11 +87,21 @@ export default function MapView() {
     return findDoubleUps(all, players, filterStart, filterEnd, undefined, undefined, maxDriveMinutes)
   }, [proGames, ncaaGames, hsGames, summerGames, players, filterStart, filterEnd, maxDriveMinutes])
 
+  // Filters scope the suggestions too (Tom 2026-08-17: "we start out with
+  // broad suggestions, we add filters, now the suggestions should change
+  // just for those filters"): with players picked, the Double Ups tab and
+  // its count only show combos involving at least one of them.
+  const scopedDoubleUps = useMemo(() => {
+    if (filterState.selectedPlayers.length === 0) return doubleUps
+    const picked = new Set(filterState.selectedPlayers.map((n) => n.trim().toLowerCase()))
+    return doubleUps.filter((du) => du.playerNames.some((n) => picked.has(n.trim().toLowerCase())))
+  }, [doubleUps, filterState.selectedPlayers])
+
   // Venues participating in any double up in the window — powers the
   // "Double ups only" map filter (Tom 2026-08-17, Mike D debrief).
   const doubleUpCoords = useMemo(
-    () => doubleUps.flatMap((du) => du.games.map((g) => g.venue.coords)),
-    [doubleUps],
+    () => scopedDoubleUps.flatMap((du) => du.games.map((g) => g.venue.coords)),
+    [scopedDoubleUps],
   )
   const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey, doubleUpCoords)
 
@@ -113,6 +123,10 @@ export default function MapView() {
   }, [players])
   const [suggestTab, setSuggestTab] = useState<SuggestTab>('when')
   const [selectedDoubleUp, setSelectedDoubleUp] = useState<number | null>(null)
+  // Player filter changes re-scope the Double Ups list, so a remembered
+  // index would highlight the wrong pair — clear it.
+  const selectedPlayersKey = filterState.selectedPlayers.join('|')
+  useEffect(() => { setSelectedDoubleUp(null) }, [selectedPlayersKey])
 
   function handlePlanDoubleUp(du: DoubleUp) {
     useTripStore.getState().setPriorityPlayers(du.playerNames.slice(0, 5))
@@ -411,7 +425,7 @@ export default function MapView() {
                 }, 100)
               }}
               picks={destinationPicks}
-              doubleUps={doubleUps}
+              doubleUps={scopedDoubleUps}
               playerMap={playerMap}
               scopedPlayers={filterState.selectedPlayers}
               originName={homeBaseName}
@@ -446,8 +460,8 @@ export default function MapView() {
               doubleUps={
                 // Only the SELECTED pair draws on the map — all 30 at once
                 // was a spaghetti of triangles (Tom 2026-07-22)
-                suggestTab === 'doubleups' && selectedDoubleUp != null && doubleUps[selectedDoubleUp]
-                  ? [doubleUps[selectedDoubleUp]!]
+                suggestTab === 'doubleups' && selectedDoubleUp != null && scopedDoubleUps[selectedDoubleUp]
+                  ? [scopedDoubleUps[selectedDoubleUp]!]
                   : []
               }
               selectedDoubleUp={selectedDoubleUp != null ? 0 : null}

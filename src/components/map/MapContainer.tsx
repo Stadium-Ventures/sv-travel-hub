@@ -18,6 +18,7 @@ import { TIER_COLORS } from './hooks/useTierMarkers'
 import type { TierMarker } from './hooks/useTierMarkers'
 import type { TripCandidate, DoubleUp } from '../../types/schedule'
 import { heartbeatColorFor, type MapColorMode } from './MapFilters'
+import { estimateDriveMinutes } from '../../lib/tripEngine'
 import type { EventMarker } from './hooks/useEventMarkers'
 
 
@@ -264,6 +265,31 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     })
   }, [loaded])
 
+  // Fly to a point — typing a Trip Origin should take you there (the star
+  // already moves with homeBase; the viewport now follows too).
+  useEffect(() => {
+    if (!loaded) return
+    return addMapEventListener('map:fly-to', ({ lat, lng, zoom }) => {
+      const L = leafletRef.current
+      const map = mapInstance.current
+      if (!L || !map) return
+      dragOriginRef.current = true // suppress the homeBase-change recenter
+      map.setView(L.latLng(lat, lng), zoom ?? 7, { animate: true })
+    })
+  }, [loaded])
+
+  // One-click zoom back out to the whole US (Tom 2026-08-17: "instead of
+  // having to minus minus minus minus and move things around").
+  useEffect(() => {
+    if (!loaded) return
+    return addMapEventListener('map:reset-view', () => {
+      const L = leafletRef.current
+      const map = mapInstance.current
+      if (!L || !map) return
+      map.fitBounds(L.latLngBounds(L.latLng(24.5, -125), L.latLng(49.5, -66.5)), { animate: true })
+    })
+  }, [loaded])
+
   // Update home base marker + drive radius circle when homeBase changes
   useEffect(() => {
     if (!loaded || !mapInstance.current || !leafletRef.current) return
@@ -446,7 +472,12 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       // best tier they contain (read in iconCreateFunction above).
       ;(marker as unknown as { svTier?: number }).svTier = tm.bestTier
 
-      marker.bindPopup(buildVenuePopupHtml(tm, { daysByPlayer, plannedByPlayer, timeMode }), {
+      marker.bindPopup(buildVenuePopupHtml(tm, {
+        daysByPlayer,
+        plannedByPlayer,
+        timeMode,
+        origin: { name: homeBaseName, driveMinutes: estimateDriveMinutes(homeBase, tm.coords) },
+      }), {
         maxWidth: 320,
         className: 'sv-dark-popup',
       })
@@ -456,7 +487,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
 
     map.addLayer(layerGroup)
     clusterGroupRef.current = layerGroup as any
-  }, [loaded, tierMarkers, colorBy, heartbeatPlayers, timeMode])
+  }, [loaded, tierMarkers, colorBy, heartbeatPlayers, timeMode, homeBase, homeBaseName])
 
   // Render non-game event pins — distinct amber 📌 markers, separate from the
   // round player-venue dots, so "who's where" reads at a glance.
@@ -725,7 +756,14 @@ function DriveRadiusChip() {
   const display = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
 
   return (
-    <div ref={wrapRef} className="absolute right-3 top-3 z-[400]">
+    <div ref={wrapRef} className="absolute right-3 top-3 z-[400] flex items-start gap-1.5">
+      <button
+        onClick={() => dispatchMapEvent('map:reset-view', {})}
+        className="rounded-md border border-border/80 bg-surface/95 backdrop-blur px-2.5 py-1.5 text-[11px] font-medium text-text shadow-md hover:border-accent-blue/50 transition-colors"
+        title="Zoom back out to the full US map"
+      >
+        US view
+      </button>
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 rounded-md border border-border/80 bg-surface/95 backdrop-blur px-2.5 py-1.5 text-[11px] font-medium text-text shadow-md hover:border-accent-blue/50 transition-colors"

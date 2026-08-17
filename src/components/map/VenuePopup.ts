@@ -1,6 +1,6 @@
 import type { TierMarker } from './hooks/useTierMarkers'
 import { TIER_COLORS } from './hooks/useTierMarkers'
-import { formatGameTimeDisplay, type TimeDisplayMode } from '../../lib/formatters'
+import { formatDriveTime, formatGameTimeDisplay, type TimeDisplayMode } from '../../lib/formatters'
 
 /** Heartbeat days-since-visit + planned-visit info, keyed by normalized player name. */
 export interface PopupEnrichment {
@@ -8,6 +8,9 @@ export interface PopupEnrichment {
   plannedByPlayer: Map<string, { date: string; agent: string | null }>
   /** ET/Local toggle from timeStore — the popup is raw HTML, so pass it in. */
   timeMode?: TimeDisplayMode
+  /** Drive from the star/Trip Origin to this venue (Tom 2026-08-17: "can
+   *  we get distance from star location if we tap on a dot?"). */
+  origin?: { name: string; driveMinutes: number }
 }
 
 function heartbeatBadgeColor(days: number | null): string {
@@ -34,6 +37,14 @@ export function buildVenuePopupHtml(marker: TierMarker, enrich?: PopupEnrichment
 
   // Venue name
   html += `<div style="font-weight:700;font-size:13px;color:#f1f5f9">${marker.venueName}</div>`
+
+  // Drive from the star — always name the origin, never a bare number
+  // (Kent's from-where ambiguity rule, 2026-08-17)
+  if (enrich?.origin) {
+    const mins = enrich.origin.driveMinutes
+    const driveLabel = mins < 10 ? 'at' : `${formatDriveTime(mins)} from`
+    html += `<div style="font-size:11px;color:#60a5fa;margin-top:1px">${driveLabel} ${enrich.origin.name} <span style="color:#64748b">(est. drive)</span></div>`
+  }
 
   // WHEN, right under the name — the question a scout asks first
   // (Tom 2026-07-22: dates were buried at the bottom)
