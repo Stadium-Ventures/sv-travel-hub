@@ -16,6 +16,9 @@ import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 import { groupAndNumberTrips, itemHasPriorityPlayer, itemPlayerNames, type UnifiedTripItem } from './groupAndNumberTrips'
 import { estimateDriveMinutes } from '../../lib/tripEngine'
+import CityPicker from '../ui/CityPicker'
+import NearbyGamesFacts from './NearbyGamesFacts'
+import { STARTING_LOCATIONS } from '../../data/cityPresets'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
@@ -267,6 +270,7 @@ export default function TripPlanner() {
   const setDateRange = useTripStore((s) => s.setDateRange)
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
+  const setHomeBase = useTripStore((s) => s.setHomeBase)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const clearTrips = useTripStore((s) => s.clearTrips)
   const proGames = useScheduleStore((s) => s.proGames)
@@ -657,6 +661,21 @@ export default function TripPlanner() {
           {startDate > endDate && (
             <p className="self-center text-xs text-accent-red">End date is before start date</p>
           )}
+          {/* Trip origin lives HERE too (Kent 2026-08-17: "where am I +
+              what dates am I there" is the whole input). Same shared store
+              value as the Map's Trip Origin — change either, both update. */}
+          <div>
+            <label className="mb-1 block text-xs text-text-dim">Trip origin</label>
+            <div className="py-0.5">
+              <CityPicker
+                value={homeBaseName}
+                onChange={(coords, cityLabel) => setHomeBase(coords, cityLabel)}
+                presets={STARTING_LOCATIONS}
+                buttonClass="min-w-[170px] py-1.5"
+                title="Where you'll be. The games list below shows drive times from here. Shared with the Map's Trip Origin."
+              />
+            </div>
+          </div>
           <button
             onClick={generateTrips}
             disabled={!canGenerate || startDate > endDate}
@@ -821,6 +840,19 @@ export default function TripPlanner() {
           </div>
         )}
       </div>
+
+      {/* FACTS FIRST (Kent 2026-08-17): before any recommendation, show the
+          raw opportunities around the chosen base for the chosen dates —
+          games, times, venues, players, and drive times from the base. Trip
+          generation stays the explicit second step (Generate Trips above /
+          "+ Priority" on a row feeds it). */}
+      {players.length > 0 && (
+        <NearbyGamesFacts
+          playerMap={playerMap}
+          onPlayerClick={(name) => setSelectedPlayer(name)}
+          onAddPriority={addPriorityPlayer}
+        />
+      )}
 
       {/* Convergence — with 3+ priority players, lead with the all-N answer:
           the tightest window where every one of them has a game (or the

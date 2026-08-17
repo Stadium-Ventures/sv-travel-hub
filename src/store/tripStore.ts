@@ -208,9 +208,14 @@ export const useTripStore = create<TripState>()(
           .filter((g) => g.date >= startDate && g.date <= endDate && g.playerNames.includes(priorityPlayers[0]!))
           .sort((a, b) => a.date.localeCompare(b.date))[0]
       if (anchorGame) {
+        // Local re-anchor ONLY — the engine builds around the games, but the
+        // user's typed base must survive the run. Persisting the venue name
+        // here silently flipped "Trip origin: Philadelphia" to e.g. "FNB
+        // Field" after Generate, which is exactly the from-where ambiguity
+        // Kent flagged (2026-08-17: distances read from the base he set,
+        // never from an inferred anchor).
         homeBase = anchorGame.venue.coords
         homeBaseName = anchorGame.venue.name
-        set({ homeBase, homeBaseName })
       }
     }
     const players = useRosterStore.getState().players

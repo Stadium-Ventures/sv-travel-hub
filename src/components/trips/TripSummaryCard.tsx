@@ -245,9 +245,11 @@ export default function TripSummaryCard({
               {driveMin >= 10 && (
                 <span
                   className={`font-medium ${driveTierClass(driveMin)}`}
-                  title={`${driveTierTitle(driveMin)} — estimated drive from ${prev!.venue}`}
+                  title={`${driveTierTitle(driveMin)} — estimated drive from ${prev!.venue} (straight-line based; real traffic can add time)`}
                 >
-                  {' '}· {formatDriveTime(driveMin)} drive
+                  {/* Name the leg's origin inline — a bare "1h 6m drive" read
+                      as from-the-trip-origin and confused Kent (2026-08-17) */}
+                  {' '}· {formatDriveTime(driveMin)} from {prev!.venue}
                 </span>
               )}
             </p>
