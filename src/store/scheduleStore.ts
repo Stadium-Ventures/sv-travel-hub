@@ -29,7 +29,7 @@ export interface PlayerTeamAssignment {
 // Activity log entry — tracks visible changes for transparency
 export interface AssignmentChange {
   playerName: string
-  action: 'assigned' | 'reassigned' | 'not-found' | 'name-matched' | 'fallback'
+  action: 'assigned' | 'reassigned' | 'not-found' | 'name-matched' | 'fallback' | 'removed'
   from?: string // previous team name
   to?: string   // new team name
   timestamp: number
@@ -104,6 +104,7 @@ interface ScheduleState {
   autoAssignPlayers: () => Promise<void>
   fetchProSchedules: (startDate: string, endDate: string) => Promise<void>
   regenerateProGames: () => void
+  pruneRemovedPlayers: () => void
   checkRosterMoves: () => Promise<void>
   fetchNcaaSchedules: (playerOrgs: Array<{ playerName: string; org: string }>, opts?: { merge?: boolean; forceRefresh?: boolean }) => Promise<void>
   fetchHsSchedules: (playerOrgs: Array<{ playerName: string; org: string; state: string }>, opts?: { merge?: boolean; forceRefresh?: boolean }) => Promise<void>
@@ -628,6 +629,11 @@ export const useScheduleStore = create<ScheduleState>()(
             assignmentLog: [...(get().assignmentLog ?? []), ...changeLog],
           })
 
+          // Drop assignments for names no longer on the roster BEFORE
+          // regenerating — newAssignments spreads the old map, so removed
+          // players ride along forever otherwise.
+          get().pruneRemovedPlayers()
+
           // Re-process cached schedule data with new assignments
           // so players appear on their correct team's games
           const cachedSchedules = get().proSchedules
@@ -653,6 +659,33 @@ export const useScheduleStore = create<ScheduleState>()(
           })
           console.error('Auto-assign failed:', e)
         }
+      },
+
+      pruneRemovedPlayers: () => {
+        // The roster master sheet is the source of truth (Tom 2026-08-17:
+        // removed from the sheet = removed from the app). Assignments are
+        // persisted and keyed by name, and auto-assign only ever UPDATES
+        // names still on the roster — spreading the old map kept removed
+        // players (Davis Sharpe) alive forever, and regenerateProGames kept
+        // stamping them onto games, where they surfaced as tier-4 ghosts.
+        const rosterPlayers = useRosterStore.getState().players
+        if (rosterPlayers.length === 0) return // roster not loaded — never wipe on an empty read
+        const rosterNames = new Set(rosterPlayers.map((p) => p.playerName))
+        const assignments = get().playerTeamAssignments
+        const removed = Object.keys(assignments).filter((n) => !rosterNames.has(n))
+        if (removed.length === 0) return
+        const pruned = { ...assignments }
+        for (const n of removed) delete pruned[n]
+        const logTimestamp = Date.now()
+        set({
+          playerTeamAssignments: pruned,
+          assignmentLog: [
+            ...(get().assignmentLog ?? []),
+            ...removed.map((playerName) => ({ playerName, action: 'removed' as const, timestamp: logTimestamp })),
+          ],
+        })
+        debugLog(`[roster-prune] dropped ${removed.length} ex-roster assignment(s): ${removed.join(', ')}`)
+        get().regenerateProGames()
       },
 
       regenerateProGames: () => {
