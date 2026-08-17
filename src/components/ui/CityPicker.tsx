@@ -63,7 +63,12 @@ export default function CityPicker({
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
 
-  // Debounced Nominatim autocomplete (US + Canada)
+  // Debounced live autocomplete via Photon (komoot's OSM geocoder).
+  // Nominatim /search is a full-name geocoder with NO prefix matching —
+  // "philad" returned nothing and "phila" buried Philadelphia under
+  // township alt-name matches (Kent + Tom, 2026-08-17). Photon is built
+  // for search-as-you-type: prefix matching + importance ranking, so the
+  // big city comes first. Enter-submit still geocodes via Nominatim below.
   useEffect(() => {
     const q = query.trim()
     if (q.length < 2) { setSuggestions([]); return }
@@ -72,36 +77,33 @@ export default function CityPicker({
       const ac = new AbortController()
       abortRef.current = ac
       try {
-        // featuretype=city excludes large admin-boundary cities like
-        // Albuquerque — drop it and filter populated places client-side.
-        const params = new URLSearchParams({
-          q, format: 'json', limit: '10', countrycodes: 'us,ca',
-          addressdetails: '1', dedupe: '1',
-        })
+        const params = new URLSearchParams({ q, limit: '12', lang: 'en' })
         const res = await fetchWithTimeout(
-          `https://nominatim.openstreetmap.org/search?${params}`,
-          { timeoutMs: 6000, headers: { 'User-Agent': 'SVTravelHub/1.0 (Stadium Ventures)' }, signal: ac.signal },
+          `https://photon.komoot.io/api/?${params}`,
+          { timeoutMs: 6000, signal: ac.signal },
         )
         if (!res.ok) return
-        type NomResult = {
-          lat: string; lon: string; display_name: string
-          class?: string; type?: string
-          address?: { city?: string; town?: string; village?: string; hamlet?: string; municipality?: string; state?: string }
+        type PhotonFeature = {
+          geometry?: { coordinates?: [number, number] }
+          properties?: {
+            name?: string; state?: string; countrycode?: string
+            osm_key?: string; osm_value?: string
+          }
         }
-        const results = await res.json() as NomResult[]
-        const mapped: CitySuggestion[] = results
-          .filter((r) => {
-            if (r.class === 'place') return true
-            if (r.class === 'boundary' && r.type === 'administrative') return true
-            const a = r.address ?? {}
-            return Boolean(a.city || a.town || a.village || a.municipality)
+        const data = await res.json() as { features?: PhotonFeature[] }
+        const PLACE_VALUES = new Set(['city', 'town', 'village', 'borough', 'municipality', 'hamlet'])
+        const mapped: CitySuggestion[] = (data.features ?? [])
+          .filter((f) => {
+            const p = f.properties ?? {}
+            if (p.countrycode !== 'US' && p.countrycode !== 'CA') return false
+            return p.osm_key === 'place' && PLACE_VALUES.has(p.osm_value ?? '')
           })
-          .map((r) => {
-            const a = r.address ?? {}
-            const city = a.city ?? a.town ?? a.village ?? a.municipality ?? a.hamlet ?? r.display_name.split(',')[0]
-            const state = a.state ?? ''
-            const labelText = state ? `${city}, ${state}` : (city ?? '')
-            return { lat: parseFloat(r.lat), lng: parseFloat(r.lon), label: labelText, display: r.display_name }
+          .map((f) => {
+            const p = f.properties!
+            const [lng, lat] = f.geometry?.coordinates ?? [NaN, NaN]
+            const labelText = p.state ? `${p.name}, ${p.state}` : (p.name ?? '')
+            const country = p.countrycode === 'CA' ? 'Canada' : 'United States'
+            return { lat, lng, label: labelText, display: `${labelText}, ${country}` }
           })
           .filter((s) => s.label && isFinite(s.lat) && isFinite(s.lng))
         const seen = new Set<string>()
@@ -110,7 +112,7 @@ export default function CityPicker({
           if (seen.has(k)) return false
           seen.add(k); return true
         })
-        setSuggestions(unique)
+        setSuggestions(unique.slice(0, 8))
       } catch { /* aborted or network — silent */ }
     }, 250)
     return () => clearTimeout(handle)
