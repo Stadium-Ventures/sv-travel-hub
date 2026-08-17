@@ -25,7 +25,7 @@ const DEFAULT_HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orland
 const HOME_BASE = DEFAULT_HOME_BASE // Legacy alias — prefer passing homeBase explicitly
 const MAX_DRIVE_MINUTES = 240 // 4 hours one-way — a 4h drive beats a flight + hotel
 const MAX_INTER_VENUE_MINUTES = 120 // max detour between stops on multi-venue trip
-const MAX_TOTAL_DRIVE_MINUTES = 600 // 10h total round-trip driving cap for a 3-day trip
+const MAX_TOTAL_DRIVE_MINUTES = 600 // floor for the total-drive budget — the real cap scales with the Drive radius (see totalDriveCap in generateTrips)
 const MAX_ROAD_TRIPS = 8 // cap greedy selection — raised to surface more trip options
 const ANCHOR_DAY = 2 // Tuesday (0=Sun, 2=Tue)
 
@@ -732,6 +732,15 @@ export async function generateTrips(
   let candidateCount = 0
   const weekCandidateCounts = new Map<number, number>()
 
+  // Total-drive budget for one trip, derived from the Drive radius (~one
+  // radius-length drive per trip day) so widening the radius can only ADD
+  // trip options. The old fixed 600-min cap broke that: a wider radius pulled
+  // more stops into a candidate, its total drive grew past the fixed cap, and
+  // the whole trip — priority players included — vanished from results
+  // (Tom 2026-08-17: 8h radius returned strictly worse trips than 5h).
+  const totalDriveCap = Math.max(MAX_TOTAL_DRIVE_MINUTES, maxTripDays * maxDriveMinutes)
+  const priorityNameSet = new Set(priorityPlayers)
+
   for (const anchorDay of anchorDays) {
     if (candidateCount >= MAX_CANDIDATES) break
     const weekNum = getWeekNumber(anchorDay)
@@ -848,27 +857,63 @@ export async function generateTrips(
         })
 
       // Cap nearby games to prevent memory explosion in route optimization.
-      // Keep the closest venues — raised 6 → 12 (Tom 2026-08-12: with a
-      // wide radius, "every possible drive" matters more than trimming).
+      // Keep priority players' games first, then the closest venues — raised
+      // 6 → 12 (Tom 2026-08-12: with a wide radius, "every possible drive"
+      // matters more than trimming).
       if (nearbyGames.length > 12) {
-        nearbyGames.sort((a, b) => a.driveMinutes - b.driveMinutes)
+        nearbyGames.sort((a, b) => {
+          const aPriority = a.playerNames.some((n) => priorityNameSet.has(n))
+          const bPriority = b.playerNames.some((n) => priorityNameSet.has(n))
+          if (aPriority !== bPriority) return aPriority ? -1 : 1
+          return a.driveMinutes - b.driveMinutes
+        })
         nearbyGames.length = 12
       }
+
+      // Estimate the route with a nearest-neighbor heuristic (O(n²) instead
+      // of O(n!) permutations), absorbing stops only while total driving
+      // fits the trip's budget. A stop that would blow the budget is skipped
+      // individually — never the whole candidate — so the anchor trip and
+      // everything already absorbed survive at any radius.
+      let interVenueDrive = 0
+      let lastCoords = anchor.venue.coords
+      let returnHome = homeToAnchor
+      const routedIdx = new Set<number>()
+      const unrouted = new Set(nearbyGames.map((_, i) => i))
+      while (unrouted.size > 0) {
+        let bestIdx = -1
+        let bestDist = Infinity
+        for (const idx of unrouted) {
+          const d = lookupDriveMinutes(lastCoords, nearbyGames[idx]!.venue.coords)
+          if (d < bestDist) { bestDist = d; bestIdx = idx }
+        }
+        unrouted.delete(bestIdx)
+        const next = nearbyGames[bestIdx]!
+        const nextReturn = homeToVenue.get(coordKey(next.venue.coords)) ?? homeToAnchor
+        if (homeToAnchor + interVenueDrive + bestDist + nextReturn > totalDriveCap) continue
+        interVenueDrive += bestDist
+        lastCoords = next.venue.coords
+        returnHome = nextReturn
+        routedIdx.add(bestIdx)
+      }
+      // Preserve original (date) order for display — routedIdx only decides membership
+      const routedNearby = nearbyGames.filter((_, i) => routedIdx.has(i))
+      const totalDrive = homeToAnchor + interVenueDrive + returnHome
 
       // Collect all unique players visited
       const allPlayerNames = new Set<string>()
       for (const name of anchor.playerNames) {
         if (eligiblePlayers.has(name)) allPlayerNames.add(name)
       }
-      for (const g of nearbyGames) {
+      for (const g of routedNearby) {
         for (const name of g.playerNames) {
           if (eligiblePlayers.has(name)) allPlayerNames.add(name)
         }
       }
 
       // Build suggested days: only include days with actual games + 1 return travel day if multi-venue
-      const gameDays = [...new Set([anchor.date, ...nearbyGames.map((g) => g.date)])].sort()
-      const needsReturnDay = nearbyGames.length > 0 || homeToAnchor > 90 // >1.5h drive merits a return day
+      const gameDays = [...new Set([anchor.date, ...routedNearby.map((g) => g.date)])].sort()
+      const needsReturnDay = routedNearby.length > 0 || homeToAnchor > 90 // >1.5h drive merits a return day
       let suggestedDays = gameDays
       if (needsReturnDay && gameDays.length < maxTripDays) {
         const lastGameDay = new Date(gameDays[gameDays.length - 1]! + 'T12:00:00Z')
@@ -880,32 +925,10 @@ export async function generateTrips(
         }
       }
 
-      // Estimate total driving using nearest-neighbor route heuristic
-      // O(n²) instead of O(n!) permutations — scales to any number of stops
-      let interVenueDrive = 0
-      let lastCoords = anchor.venue.coords
-      const unvisited = new Set(nearbyGames.map((_, i) => i))
-      while (unvisited.size > 0) {
-        let bestIdx = -1
-        let bestDist = Infinity
-        for (const idx of unvisited) {
-          const d = lookupDriveMinutes(lastCoords, nearbyGames[idx]!.venue.coords)
-          if (d < bestDist) { bestDist = d; bestIdx = idx }
-        }
-        interVenueDrive += bestDist
-        lastCoords = nearbyGames[bestIdx]!.venue.coords
-        unvisited.delete(bestIdx)
-      }
-      const returnHome = homeToVenue.get(coordKey(lastCoords)) ?? homeToAnchor
-      const totalDrive = homeToAnchor + interVenueDrive + returnHome
-
-      // Skip trips that exceed total driving cap (too much time on the road for 3 days)
-      if (totalDrive > MAX_TOTAL_DRIVE_MINUTES) continue
-
       // Tuesday bonus: prefer Tuesday anchors with 20% value boost
       const dayOfWeek = new Date(anchorDay + 'T12:00:00Z').getUTCDay()
       const isTuesday = dayOfWeek === ANCHOR_DAY
-      const allTripGames = [anchor, ...nearbyGames]
+      const allTripGames = [anchor, ...routedNearby]
       const breakdown = computeScoreBreakdown([...allPlayerNames], playerMap, isTuesday, urgencyMap, allTripGames)
 
       // Drive efficiency penalty: prefer trips with less driving per point
@@ -916,13 +939,13 @@ export async function generateTrips(
 
       candidates.push({
         anchorGame: anchor,
-        nearbyGames,
+        nearbyGames: routedNearby,
         suggestedDays,
         totalPlayersVisited: allPlayerNames.size,
         visitValue: adjustedScore,
         driveFromHomeMinutes: homeToAnchor,
         totalDriveMinutes: totalDrive,
-        venueCount: 1 + new Set(nearbyGames.map((g) => coordKey(g.venue.coords))).size,
+        venueCount: 1 + new Set(routedNearby.map((g) => coordKey(g.venue.coords))).size,
         scoreBreakdown: breakdown,
       })
       candidateCount++

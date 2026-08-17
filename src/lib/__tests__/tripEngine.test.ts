@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { computeScoreBreakdown } from '../tripEngine'
+import { computeScoreBreakdown, generateTrips } from '../tripEngine'
 import type { RosterPlayer } from '../../types/roster'
+import type { GameEvent, TripPlan } from '../../types/schedule'
 
 function makePlayer(overrides: Partial<RosterPlayer> & { playerName: string }): RosterPlayer {
   return {
@@ -126,5 +127,66 @@ describe('computeScoreBreakdown — tier weighting', () => {
     expect(t1Score).toBe(25)
     expect(t3Score).toBe(5)
     expect(t1Score).toBeGreaterThan(t3Score)
+  })
+})
+
+describe('generateTrips — widening the drive radius never loses trips', () => {
+  // Regression for 2026-08-17: at a 5h radius the top trip covered 3 priority
+  // players; at 8h it vanished, leaving only 2-player trips. Cause: the wider
+  // radius let the candidate absorb far-away filler stops, pushing its total
+  // drive past a FIXED 600-min cap, which discarded the whole candidate. The
+  // total-drive budget now scales with the radius and over-budget stops are
+  // trimmed individually instead of killing the trip.
+  const HOME = { lat: 28.5383, lng: -81.3792 } // Orlando
+  const LNG = -81.3792
+  const venueAt = (lat: number, name: string) => ({ name, coords: { lat, lng: LNG } })
+
+  const game = (
+    id: string, date: string, dayOfWeek: number, lat: number, venueName: string, playerName: string,
+  ): GameEvent => ({
+    id, date, dayOfWeek, time: '', homeTeam: 'Home', awayTeam: 'Away', isHome: true,
+    venue: venueAt(lat, venueName), source: 'mlb-api', playerNames: [playerName],
+  })
+
+  // Anchor ~3h north of home (Mon), two priority teammates ±0.5° (Tue),
+  // and filler games 5-6.5h from home — only reachable at the 8h radius.
+  const games: GameEvent[] = [
+    game('a', '2026-08-24', 1, 30.5, 'Anchor Park', 'Anchor Ace'),
+    game('b', '2026-08-25', 2, 31.0, 'North Field', 'Nearby Beta'),
+    game('c', '2026-08-25', 2, 30.0, 'South Field', 'Nearby Carl'),
+    game('f1', '2026-08-25', 2, 33.5, 'Filler Park 1', 'Filler One'),
+    game('f2', '2026-08-25', 2, 34.0, 'Filler Park 2', 'Filler Two'),
+    game('f3', '2026-08-25', 2, 34.5, 'Filler Park 3', 'Filler Three'),
+    game('f4', '2026-08-25', 2, 35.0, 'Filler Park 4', 'Filler Four'),
+  ]
+  const players = [
+    'Anchor Ace', 'Nearby Beta', 'Nearby Carl',
+    'Filler One', 'Filler Two', 'Filler Three', 'Filler Four',
+  ].map((playerName) => makePlayer({ playerName }))
+  const priority = ['Anchor Ace', 'Nearby Beta', 'Nearby Carl']
+
+  const priorityCoverage = (plan: TripPlan): number => {
+    let best = 0
+    for (const trip of plan.trips) {
+      const names = new Set([
+        ...trip.anchorGame.playerNames,
+        ...trip.nearbyGames.flatMap((g) => g.playerNames),
+      ])
+      best = Math.max(best, priority.filter((p) => names.has(p)).length)
+    }
+    return best
+  }
+
+  it('a trip covering all 3 priority players survives the radius expanding 5h → 8h', async () => {
+    const run = (maxDriveMinutes: number) =>
+      generateTrips(games, players, '2026-08-24', '2026-08-25', undefined,
+        maxDriveMinutes, priority, undefined, 4, undefined, HOME)
+
+    const at5h = await run(300)
+    const at8h = await run(480)
+
+    expect(priorityCoverage(at5h)).toBe(3)
+    // The wider radius must not lose that coverage (this is the regression)
+    expect(priorityCoverage(at8h)).toBe(3)
   })
 })
