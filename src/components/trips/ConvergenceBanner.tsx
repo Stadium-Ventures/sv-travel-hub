@@ -228,21 +228,45 @@ function AlternateRow({ w, detail, note, playerMap, maxHopMinutes, onPlayerClick
 /** All the ways to run a swing — Kent's "Option A / Option B" choices
  *  (2026-07-24), including the primary combo as Option A. Rendered inside
  *  the covering trip card, so choices live WITH the trip rather than in a
- *  separate summary up top (Tom 2026-07-24). */
-export function SwingOptions({ swing }: { swing: ConvergenceWindow }) {
+ *  separate summary up top (Tom 2026-07-24).
+ *
+ *  "Pick one" means picking DOES something (Tom 2026-08-17): clicking an
+ *  option swaps the card's detail view — venues, times, drives — to that
+ *  option's itinerary. Clicking the picked option again restores the
+ *  card's suggested route. */
+export function SwingOptions({ swing, pickedIdx, onPick }: {
+  swing: ConvergenceWindow
+  /** Index of the combo currently shown as the card's detail view;
+   *  null = the card's own suggested route. */
+  pickedIdx: number | null
+  onPick: (idx: number | null) => void
+}) {
   const combos = [swing, ...(swing.variants ?? [])]
   if (combos.length < 2) return null
   const letters = ['A', 'B', 'C', 'D', 'E']
   return (
     <div className="mt-2 space-y-1">
-      <p className="text-[10px] uppercase tracking-wide text-text-dim/60">Ways to run it — pick one</p>
-      {combos.map((w, i) => (
-        <p key={w.stops.map((s) => s.gameId).join('|')} className="rounded-lg bg-gray-950/50 px-3 py-1.5 text-[11px] text-text-dim">
-          <span className="font-medium text-text">Option {letters[i] ?? String.fromCharCode(65 + i)}</span>
-          {' · '}{w.stops.map((s) => `${s.playerNames.join(' & ')} ${formatDate(s.date)}`).join(' → ')}
-          <span className="text-text-dim/60"> · longest drive {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}</span>
-        </p>
-      ))}
+      <p className="text-[10px] uppercase tracking-wide text-text-dim/60">Ways to run it — pick one to see it above</p>
+      {combos.map((w, i) => {
+        const picked = pickedIdx === i
+        return (
+          <button
+            key={w.stops.map((s) => s.gameId).join('|')}
+            onClick={() => onPick(picked ? null : i)}
+            title={picked ? 'Click to go back to the suggested route' : 'Show this option as the trip above'}
+            className={`block w-full rounded-lg px-3 py-1.5 text-left text-[11px] transition-colors ${
+              picked
+                ? 'bg-accent-blue/10 text-text-dim ring-1 ring-accent-blue/60'
+                : 'bg-gray-950/50 text-text-dim hover:bg-gray-900/70'
+            }`}
+          >
+            <span className="font-medium text-text">Option {letters[i] ?? String.fromCharCode(65 + i)}</span>
+            {' · '}{w.stops.map((s) => `${s.playerNames.join(' & ')} ${formatDate(s.date)}`).join(' → ')}
+            <span className="text-text-dim/60"> · longest drive {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}</span>
+            {picked && <span className="ml-2 font-medium text-accent-blue">Shown above</span>}
+          </button>
+        )
+      })}
     </div>
   )
 }

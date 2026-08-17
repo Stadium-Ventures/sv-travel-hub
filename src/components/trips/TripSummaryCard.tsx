@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { TripCandidate, FlyInVisit, GameEvent } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
@@ -88,10 +88,30 @@ export default function TripSummaryCard({
   const toggleTripStar = useTripStore((s) => s.toggleTripStar)
   const timeMode = useTimeStore((s) => s.mode)
 
-  const lines = useMemo(
-    () => (item.type === 'road' ? linesForRoadTrip(item.trip) : linesForFlyIn(item.visit)),
-    [item],
+  // "Pick one" picks (Tom 2026-08-17): choosing a Ways-to-run-it option
+  // replaces the card's detail view with THAT itinerary — same lines, same
+  // venues/times/drives treatment, and Show on map follows it too. null =
+  // the card's own suggested route.
+  const [pickedOption, setPickedOption] = useState<number | null>(null)
+  const swingCombos = useMemo(
+    () => (swing ? [swing, ...(swing.variants ?? [])] : []),
+    [swing],
   )
+  const lines = useMemo(() => {
+    const picked = pickedOption != null ? swingCombos[pickedOption] : undefined
+    if (picked) {
+      return picked.stops.map((s): GameLine => ({
+        date: s.date,
+        time: s.source === 'mlb-api' ? s.time : undefined,
+        venue: s.venueName,
+        coords: s.coords,
+        tz: s.venueTz,
+        players: s.playerNames,
+        source: s.source,
+      }))
+    }
+    return item.type === 'road' ? linesForRoadTrip(item.trip) : linesForFlyIn(item.visit)
+  }, [item, pickedOption, swingCombos])
   const playerNames = useMemo(() => {
     const names: string[] = []
     for (const l of lines) for (const n of l.players) if (!names.includes(n)) names.push(n)
@@ -182,6 +202,14 @@ export default function TripSummaryCard({
         <span className="font-medium">{dateLabel}</span>
         <span>· {lines.length} game{lines.length !== 1 ? 's' : ''}</span>
         <span>· {venueCount} venue{venueCount !== 1 ? 's' : ''}</span>
+        {pickedOption != null && (
+          <span
+            className="rounded bg-accent-blue/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue"
+            title="These lines show the option you picked below — click it again to go back to the suggested route"
+          >
+            Showing Option {['A', 'B', 'C', 'D', 'E'][pickedOption] ?? String.fromCharCode(65 + pickedOption)}
+          </span>
+        )}
         {item.type === 'road' && item.trip.plannedFromSwing && (
           <span
             className="rounded bg-accent-blue/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue"
@@ -237,7 +265,7 @@ export default function TripSummaryCard({
         </p>
       )}
 
-      {swing && <SwingOptions swing={swing} />}
+      {swing && <SwingOptions swing={swing} pickedIdx={pickedOption} onPick={setPickedOption} />}
     </div>
   )
 }
