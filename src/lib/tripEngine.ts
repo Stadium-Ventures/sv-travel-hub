@@ -842,17 +842,12 @@ export async function generateTrips(
           const nearbyHomeKey = coordKey(g.venue.coords)
           const homeToNearby = homeToVenue.get(nearbyHomeKey) ?? Infinity
           if (homeToNearby > maxDriveMinutes * 1.5) return false
-          // Time conflict check: if both games are on the same day and have known times,
-          // ensure there's enough gap to attend both (game ~2.5h + drive between venues)
-          if (g.date === anchor.date && g.time && anchor.time) {
-            const anchorTime = new Date(anchor.time).getTime()
-            const nearbyTime = new Date(g.time).getTime()
-            if (!isNaN(anchorTime) && !isNaN(nearbyTime)) {
-              const gapMinutes = Math.abs(nearbyTime - anchorTime) / 60000
-              const minGap = 150 + Math.max(g.driveMinutes, 15) // ~2.5h for a game + travel
-              if (gapMinutes < minGap) return false // Can't physically attend both
-            }
-          }
+          // NO start-time rejection here. Tom's standing rule (2026-07-23):
+          // times never disqualify — an overlapping same-day pair is "split
+          // innings or game + meal", the exact thing the double-up engine
+          // counts. A gap check here silently dropped the partner game, so
+          // the planner built solo trips for a date the Map advertised as
+          // "1 double up" (Tiroly 9:05 + Lindsey 9:35, 37min apart, 2026-08-17).
           return true
         })
 
