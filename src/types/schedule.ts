@@ -61,6 +61,11 @@ export interface TripCandidate {
    *  where several dates work equally well (e.g. a week-long head-to-head).
    *  Display-only; computed after trip selection. */
   altDates?: string[]
+  /** Built from the exact convergence route the user clicked "Plan" on.
+   *  Banner routes may have legs over the Drive cap (flagged, not dropped),
+   *  so the engine can't be trusted to rediscover the clicked itinerary —
+   *  this card IS that itinerary, and it pins to the top of the results. */
+  plannedFromSwing?: boolean
 }
 
 export interface PriorityResult {

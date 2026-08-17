@@ -7,10 +7,17 @@ import { useTimeStore } from '../../store/timeStore'
 /**
  * The all-N answer to "can I see Tanner, Garrett AND Kellon in one swing?"
  * (Kent's west-coast-swing text, 2026-07-24). Display rules (Tom's review,
- * same day):
- * - All windows visible as rows — no expander. The best one carries the stop
- *   list; the rest are one-liners. They are NOT equal options (1h55m vs
- *   9h48m drives), so weight stays with the best.
+ * same day; revised 2026-08-17):
+ * - The best window carries the stop list. Everything else — night variants
+ *   AND alternate windows — collapses behind ONE "other ways to run it"
+ *   disclosure (Tom 2026-08-17: all-rows-visible made the page busy and
+ *   confusing; they are NOT equal options, so weight stays with the best).
+ * - Collapsed rows expand IN PLACE to their full itinerary — seeing an
+ *   alternate's details must not wipe results or swap dates (Tom 2026-08-17).
+ * - The actions that DO change dates (headline button, widen pointer) carry
+ *   the exact route via plannedSwing, so the regenerated results are
+ *   guaranteed to contain the itinerary that was promised — never just
+ *   dates + a re-roll of the engine.
  * - Once a generated trip below covers every priority player, the parent
  *   renders NO banner at all — the covering trip card carries the swing and
  *   its Option rows (a headline summarizing the card beneath it was noise).
@@ -44,6 +51,7 @@ export default function ConvergenceBanner({
   onPlayerClick?: (name: string) => void
 }) {
   const [showMissDetails, setShowMissDetails] = useState(false)
+  const [showAlternates, setShowAlternates] = useState(false)
   const n = playerNames.length
 
   if (missingPlayers.length > 0) {
@@ -111,8 +119,11 @@ export default function ConvergenceBanner({
     </>
   )
 
-  // ── Full banner: best window with stops, other windows as visible rows ──
+  // ── Full banner: best window with stops; every other option (night
+  //    variants + alternate windows) behind ONE collapsed disclosure ──
+  const variants = best.variants ?? []
   const alternates = windows.slice(1)
+  const otherCount = variants.length + alternates.length
   return (
     <div className="rounded-xl border border-accent-green/30 bg-accent-green/5 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -120,7 +131,7 @@ export default function ConvergenceBanner({
         <button
           onClick={() => onUseDates(best)}
           className="shrink-0 rounded-lg bg-accent-blue/15 px-2.5 py-1 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
-          title="Set the planner to these dates and regenerate trips"
+          title="Set the planner to these dates — this exact itinerary will lead the results"
         >
           Plan around these dates →
         </button>
@@ -135,27 +146,79 @@ export default function ConvergenceBanner({
         <StopLines w={best} playerMap={playerMap} maxHopMinutes={maxHopMinutes} onPlayerClick={onPlayerClick} />
       </div>
 
-      <VariantRows primary={best} />
-
-      {alternates.length > 0 && (
-        <div className="mt-2 space-y-1">
-          {alternates.map((w) => (
-            <div key={`${w.startDate}-${w.stops.map((s) => s.gameId).join('|')}`} className="flex flex-wrap items-center gap-x-2 rounded-lg bg-gray-950/50 px-3 py-1.5 text-[11px] text-text-dim">
-              <span className="font-medium text-text">
-                {formatDate(w.startDate)}{w.endDate !== w.startDate ? ` – ${formatDate(w.endDate)}` : ''}
-              </span>
-              <span>{w.stops.map((s) => s.venueName).join(' → ')}</span>
-              <span className={w.feasible ? 'text-text-dim/60' : 'text-accent-orange'}>
-                · longest drive {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}
-              </span>
-              <button
-                onClick={() => onUseDates(w)}
-                className="ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/10 transition-colors"
-              >
-                Plan →
-              </button>
+      {otherCount > 0 && (
+        <>
+          <button
+            onClick={() => setShowAlternates((s) => !s)}
+            className="mt-2 text-[11px] font-medium text-accent-blue/80 hover:text-accent-blue"
+          >
+            {showAlternates ? '▾' : '▸'} {otherCount} other way{otherCount !== 1 ? 's' : ''} to run it
+          </button>
+          {showAlternates && (
+            <div className="mt-1 space-y-1">
+              {variants.map((w) => (
+                <AlternateRow
+                  key={w.stops.map((s) => s.gameId).join('|')}
+                  w={w}
+                  detail={w.stops.map((s) => `${s.playerNames.join(' & ')} ${formatDate(s.date)}`).join(' → ')}
+                  note="same stops, different nights"
+                  playerMap={playerMap}
+                  maxHopMinutes={maxHopMinutes}
+                  onPlayerClick={onPlayerClick}
+                />
+              ))}
+              {alternates.map((w) => (
+                <AlternateRow
+                  key={`${w.startDate}-${w.stops.map((s) => s.gameId).join('|')}`}
+                  w={w}
+                  detail={w.stops.map((s) => s.venueName).join(' → ')}
+                  playerMap={playerMap}
+                  maxHopMinutes={maxHopMinutes}
+                  onPlayerClick={onPlayerClick}
+                />
+              ))}
             </div>
-          ))}
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** One collapsed-section row: an alternate way to run the swing. Expands
+ *  in place to the full stop-by-stop itinerary — "planning" an alternate
+ *  just means seeing its details, so it must not wipe the generated results
+ *  or swap the dates (Tom 2026-08-17). */
+function AlternateRow({ w, detail, note, playerMap, maxHopMinutes, onPlayerClick }: {
+  w: ConvergenceWindow
+  detail: string
+  note?: string
+  playerMap: Map<string, RosterPlayer>
+  maxHopMinutes: number
+  onPlayerClick?: (name: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="rounded-lg bg-gray-950/50 px-3 py-1.5 text-[11px] text-text-dim">
+      <div className="flex flex-wrap items-center gap-x-2">
+        <span className="font-medium text-text">
+          {formatDate(w.startDate)}{w.endDate !== w.startDate ? ` – ${formatDate(w.endDate)}` : ''}
+        </span>
+        <span>{detail}</span>
+        {note && <span className="text-text-dim/60">· {note}</span>}
+        <span className={w.feasible ? 'text-text-dim/60' : 'text-accent-orange'}>
+          · longest drive {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}
+        </span>
+        <button
+          onClick={() => setExpanded((s) => !s)}
+          className="ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/10 transition-colors"
+        >
+          {expanded ? '▾ hide' : '▸ details'}
+        </button>
+      </div>
+      {expanded && (
+        <div className="mt-1.5 space-y-0.5 border-t border-gray-800/60 pt-1.5">
+          <StopLines w={w} playerMap={playerMap} maxHopMinutes={maxHopMinutes} onPlayerClick={onPlayerClick} />
         </div>
       )}
     </div>
@@ -177,30 +240,6 @@ export function SwingOptions({ swing }: { swing: ConvergenceWindow }) {
         <p key={w.stops.map((s) => s.gameId).join('|')} className="rounded-lg bg-gray-950/50 px-3 py-1.5 text-[11px] text-text-dim">
           <span className="font-medium text-text">Option {letters[i] ?? String.fromCharCode(65 + i)}</span>
           {' · '}{w.stops.map((s) => `${s.playerNames.join(' & ')} ${formatDate(s.date)}`).join(' → ')}
-          <span className="text-text-dim/60"> · longest drive {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}</span>
-        </p>
-      ))}
-    </div>
-  )
-}
-
-/** Same venues, different nights — variant rows for the PRE-generation
- *  banner (the only place the full banner still renders). */
-function VariantRows({ primary }: { primary: ConvergenceWindow }) {
-  const variants = primary.variants ?? []
-  if (variants.length === 0) return null
-  const letters = ['B', 'C', 'D']
-  const describe = (w: ConvergenceWindow) =>
-    w.stops.map((s) => `${s.playerNames.join(' & ')} ${formatDate(s.date)}`).join(' → ')
-  return (
-    <div className="mt-2 space-y-1">
-      <p className="text-[10px] uppercase tracking-wide text-text-dim/60">
-        Other ways to run it (same stops, different nights) — above is Option A
-      </p>
-      {variants.map((w, i) => (
-        <p key={w.stops.map((s) => s.gameId).join('|')} className="rounded-lg bg-gray-950/50 px-3 py-1.5 text-[11px] text-text-dim">
-          <span className="font-medium text-text">Option {letters[i] ?? String.fromCharCode(66 + i)}</span>
-          {' · '}{describe(w)}
           <span className="text-text-dim/60"> · longest drive {w.maxHopMinutes === 0 ? 'none' : formatDriveTime(w.maxHopMinutes)}</span>
         </p>
       ))}

@@ -1,11 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Coordinates } from '../types/roster'
-import type { TripPlan } from '../types/schedule'
-import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, DEFAULT_HOME_BASE } from '../lib/tripEngine'
+import type { Coordinates, RosterPlayer } from '../types/roster'
+import type { GameEvent, TripCandidate, TripPlan } from '../types/schedule'
+import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, DEFAULT_HOME_BASE, computeScoreBreakdown } from '../lib/tripEngine'
 import { findDoubleUps } from '../lib/doubleUps'
 import { debugLog } from '../lib/debugLog'
 import type { UrgencyMap, PinnedGame } from '../lib/tripEngine'
+import type { ConvergenceWindow } from '../lib/convergence'
 import type { WorkerParams, WorkerMessage } from '../lib/tripEngine.worker'
 import { useRosterStore } from './rosterStore'
 import { useScheduleStore } from './scheduleStore'
@@ -35,6 +36,41 @@ export function getTripKey(trip: import('../types/schedule').TripCandidate): str
   const anchorDate = trip.anchorGame.date
   const venueKey = `${trip.anchorGame.venue.coords.lat.toFixed(4)},${trip.anchorGame.venue.coords.lng.toFixed(4)}`
   return `trip-${anchorDate}-${venueKey}`
+}
+
+/** Materialize a convergence route the user clicked "Plan" on as an exact
+ *  trip card. Banner routes may carry legs over the Drive cap (flagged, not
+ *  dropped), so the engine can't be trusted to rediscover the clicked
+ *  itinerary — build the card straight from the route's own stops.
+ *  Returns null if any stop's game is no longer in the loaded schedules. */
+function swingToTripCandidate(
+  swing: ConvergenceWindow,
+  allGames: GameEvent[],
+  players: RosterPlayer[],
+  urgencyMap: UrgencyMap | undefined,
+  homeBase: Coordinates,
+): TripCandidate | null {
+  const gameById = new Map(allGames.map((g) => [g.id, g]))
+  const stopGames = swing.stops.map((s) => gameById.get(s.gameId)).filter((g): g is GameEvent => !!g)
+  if (stopGames.length === 0 || stopGames.length !== swing.stops.length) return null
+  const anchor = stopGames[0]!
+  const nearbyGames = stopGames.slice(1).map((g, i) => ({ ...g, driveMinutes: swing.hopMinutes[i] ?? 0 }))
+  const visitedPlayers = [...new Set(swing.stops.flatMap((s) => s.playerNames))]
+  const playerMap = new Map(players.map((p) => [p.playerName, p]))
+  const isTuesday = new Date(anchor.date + 'T12:00:00Z').getUTCDay() === 2
+  const breakdown = computeScoreBreakdown(visitedPlayers, playerMap, isTuesday, urgencyMap, stopGames)
+  return {
+    anchorGame: anchor,
+    nearbyGames,
+    suggestedDays: [...new Set(stopGames.map((g) => g.date))].sort(),
+    totalPlayersVisited: visitedPlayers.length,
+    visitValue: breakdown.finalScore,
+    driveFromHomeMinutes: Math.round(estimateDriveMinutes(homeBase, anchor.venue.coords)),
+    totalDriveMinutes: swing.totalDriveMinutes,
+    venueCount: new Set(stopGames.map((g) => `${g.venue.coords.lat},${g.venue.coords.lng}`)).size,
+    scoreBreakdown: breakdown,
+    plannedFromSwing: true,
+  }
 }
 
 interface TripState {
@@ -70,6 +106,11 @@ interface TripState {
   /** One-shot: a specific game (Schedule tab "Plan trip") the next
    *  generation must build a trip around. Consumed by generateTrips. */
   pinnedGame: PinnedGame | null
+  /** One-shot: the exact convergence route the user clicked "Plan" on.
+   *  Materialized as a trip card after the next generation — the engine
+   *  can't be trusted to rediscover it (its legs may exceed the Drive cap,
+   *  which the banner flags but the engine enforces). Not persisted. */
+  plannedSwing: ConvergenceWindow | null
 
   setDateRange: (start: string, end: string) => void
   setMaxDriveMinutes: (minutes: number) => void
@@ -78,6 +119,7 @@ interface TripState {
   setHomeBase: (coords: Coordinates, name: string) => void
   setMaxNights: (n: number) => void
   setPinnedGame: (pin: PinnedGame | null) => void
+  setPlannedSwing: (swing: ConvergenceWindow | null) => void
   generateTrips: () => Promise<void>
   clearTrips: () => void
   setTripStatus: (tripKey: string, status: TripStatus | null) => void
@@ -111,6 +153,7 @@ export const useTripStore = create<TripState>()(
   selectedTripIndex: null,
   mapFocus: null,
   pinnedGame: null,
+  plannedSwing: null,
 
   setDateRange: (startDate, endDate) => set({ startDate, endDate }),
   setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes }),
@@ -120,6 +163,7 @@ export const useTripStore = create<TripState>()(
   setHomeBase: (homeBase, homeBaseName) => set({ homeBase, homeBaseName }),
   setMaxNights: (maxNights: number) => set({ maxNights }),
   setPinnedGame: (pinnedGame) => set({ pinnedGame }),
+  setPlannedSwing: (plannedSwing) => set({ plannedSwing }),
   clearTrips: () => set({ tripPlan: null, selectedTripIndex: null, mapFocus: null }),
   setSelectedTripIndex: (selectedTripIndex) => set({ selectedTripIndex }),
   setMapFocus: (mapFocus) => set({ mapFocus }),
@@ -413,6 +457,23 @@ export const useTripStore = create<TripState>()(
         // the Drive-radius setting, same as the Map tab
         plan.doubleUps = findDoubleUps(allGames, players, startDate, endDate, undefined, undefined, get().maxDriveMinutes)
 
+        // Exact-route injection: the user clicked "Plan" on a specific
+        // convergence route, so the results must contain THAT itinerary —
+        // not just the engine's take on the same dates, which enforces the
+        // Drive cap the banner deliberately shows routes beyond.
+        const plannedSwing = get().plannedSwing
+        if (plannedSwing) {
+          const planned = swingToTripCandidate(plannedSwing, allGames, players,
+            urgencyMap.size > 0 ? urgencyMap : undefined, homeBase)
+          if (planned) {
+            const routeIds = (t: TripCandidate) => [t.anchorGame.id, ...t.nearbyGames.map((g) => g.id)].sort().join('|')
+            const plannedIds = routeIds(planned)
+            const engineMatch = plan.trips.find((t) => routeIds(t) === plannedIds)
+            if (engineMatch) engineMatch.plannedFromSwing = true
+            else plan.trips.unshift(planned)
+          }
+        }
+
         // Prune stale tripStatuses — only keep keys that match current trips
         const currentKeys = new Set(plan.trips.map(getTripKey))
         const oldStatuses = get().tripStatuses
@@ -421,9 +482,9 @@ export const useTripStore = create<TripState>()(
           if (currentKeys.has(key)) prunedStatuses[key] = status
         }
 
-        // pinnedGame is one-shot: consumed by this run so later manual
-        // Generate presses aren't silently steered by a stale pin.
-        set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '', tripStatuses: prunedStatuses, pinnedGame: null })
+        // pinnedGame/plannedSwing are one-shot: consumed by this run so later
+        // manual Generate presses aren't silently steered by a stale pin.
+        set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '', tripStatuses: prunedStatuses, pinnedGame: null, plannedSwing: null })
         worker.terminate()
         activeWorker = null
       } else if (msg.type === 'error') {

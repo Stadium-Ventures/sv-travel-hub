@@ -103,6 +103,11 @@ export function groupAndNumberTrips({
   // each group's primary.
   const prioritySet = new Set(priorityPlayers)
   unified.sort((a, b) => {
+    // The exact route the user clicked "Plan" on always leads — they asked
+    // to see THIS trip, so it can't rank below engine-generated options.
+    const aPlanned = a.type === 'road' && a.trip.plannedFromSwing ? 1 : 0
+    const bPlanned = b.type === 'road' && b.trip.plannedFromSwing ? 1 : 0
+    if (aPlanned !== bPlanned) return bPlanned - aPlanned
     if (prioritySet.size > 0) {
       const diff = itemPriorityCount(b, prioritySet) - itemPriorityCount(a, prioritySet)
       if (diff !== 0) return diff

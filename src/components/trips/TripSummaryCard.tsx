@@ -182,6 +182,14 @@ export default function TripSummaryCard({
         <span className="font-medium">{dateLabel}</span>
         <span>· {lines.length} game{lines.length !== 1 ? 's' : ''}</span>
         <span>· {venueCount} venue{venueCount !== 1 ? 's' : ''}</span>
+        {item.type === 'road' && item.trip.plannedFromSwing && (
+          <span
+            className="rounded bg-accent-blue/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue"
+            title="Built from the exact route you clicked Plan on — some drives may be longer than your Drive setting"
+          >
+            The route you picked
+          </span>
+        )}
         {doubleUpDates.length > 0 && (
           <span
             className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-green"

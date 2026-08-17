@@ -838,6 +838,11 @@ export default function TripPlanner() {
           maxSpanDays={CONVERGENCE_SPAN_DAYS}
           outOfWindow={convergence.outOfWindow}
           onUseDates={(w) => {
+            // Carry the clicked route itself, not just its dates — the
+            // regeneration must show the EXACT itinerary the user picked
+            // (its legs may exceed the Drive cap, which the engine enforces
+            // but the banner deliberately shows past).
+            useTripStore.getState().setPlannedSwing(w)
             setDateRange(w.startDate, w.endDate)
             generateTrips()
           }}
