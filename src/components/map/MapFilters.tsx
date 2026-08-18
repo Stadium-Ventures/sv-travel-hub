@@ -525,8 +525,14 @@ export function applyMapFilters(
   state: MapFilterState,
   daysByPlayerKey?: Map<string, number | null>,
   /** Venue coordinates that participate in a double up within the current
-   *  dates — required for the "Double ups only" toggle to keep anything. */
+   *  dates — the coarse venue-level gate for "Double ups only". */
   doubleUpCoords?: Array<{ lat: number; lng: number }>,
+  /** Game ids that participate in a double up — with the toggle on, each
+   *  surviving venue's game list (and so its count badge, popup drill-in,
+   *  and date range) narrows to ONLY these. Without it, a venue that had
+   *  one double up kept all its solo games too (Tom 2026-08-18, Clover
+   *  Park showing 12 games with the toggle on). */
+  doubleUpGameIds?: Set<string>,
 ): TierMarker[] {
   const search = state.search.trim().toLowerCase()
   const selectedPlayers = new Set(state.selectedPlayers.map((n) => n.trim().toLowerCase()))
@@ -543,8 +549,29 @@ export function applyMapFilters(
     .map((m) => {
       // Venue-name search: when set, only keep markers whose venue matches.
       if (search !== '' && !m.venueName.toLowerCase().includes(search)) return null
-      // Double-ups toggle: only venues that are part of a 2+ client outing.
-      if (state.doubleUpsOnly && !isDoubleUpVenue(m)) return null
+      // Double-ups toggle: only venues that are part of a 2+ client outing,
+      // showing only their double-up games.
+      if (state.doubleUpsOnly) {
+        if (m.games.length > 0 && doubleUpGameIds) {
+          const duGames = m.games.filter((g) => doubleUpGameIds.has(g.id))
+          if (duGames.length === 0) return null
+          const duDates = [...new Set(duGames.map((g) => g.date))].sort()
+          const duNames = new Set(duGames.flatMap((g) => g.players))
+          m = {
+            ...m,
+            games: duGames,
+            gameDates: duDates,
+            // Keep only players who appear in a double-up game here, so the
+            // popup's player list matches its game list.
+            players: m.players.filter((p) => duNames.has(p.name)),
+          }
+          if (m.players.length === 0) return null
+        } else if (!isDoubleUpVenue(m)) {
+          // Venues without per-game data (e.g. spring training complexes)
+          // fall back to the coarse venue-coordinate check.
+          return null
+        }
+      }
       const survivors = m.players.filter((p) => {
         if (!state.tiers.has(p.tier)) return false
         if (!state.levels.has(p.level as MapLevelFilter)) return false

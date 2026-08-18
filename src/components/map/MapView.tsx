@@ -102,7 +102,13 @@ export default function MapView() {
     () => scopedDoubleUps.flatMap((du) => du.games.map((g) => g.venue.coords)),
     [scopedDoubleUps],
   )
-  const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey, doubleUpCoords)
+  // Game-level ids so "Double ups only" narrows each venue to JUST its
+  // double-up games — count badge, popup list, and date range follow.
+  const doubleUpGameIds = useMemo(
+    () => new Set(scopedDoubleUps.flatMap((du) => du.games.map((g) => g.id))),
+    [scopedDoubleUps],
+  )
+  const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey, doubleUpCoords, doubleUpGameIds)
 
   // Filtering to specific players re-scopes the question: "when/where can I
   // see THEM", not "what's near my star". The drive radius is skipped so a
