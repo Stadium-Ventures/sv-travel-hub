@@ -513,7 +513,7 @@ function MapHelp() {
             <li><strong className="text-text">Open Filters</strong>: dates, trip origin, players, tiers, and more all live there.</li>
             <li>Each dot = a venue with at least one of your players. Click for who, when, and recency. Zoom in to split the numbered clusters.</li>
             <li>Set a <strong className="text-text">Trip origin</strong> to get the star, drive radius, and distances. Drag the star to move it.</li>
-            <li><strong className="text-text">Click and hold a dot, then drag</strong> to another venue (or anywhere) to measure miles and est. drive.</li>
+            <li><strong className="text-text">Click and hold a dot, then drag</strong> to another venue (or anywhere) to measure miles and est. drive. With Airports on, dragging airport to airport shows est. flight time.</li>
             <li>Open <em>Suggestions</em> for when to go, where to go, and double ups.</li>
           </ol>
           <p className="mt-2 text-[11px] text-text-dim/60">

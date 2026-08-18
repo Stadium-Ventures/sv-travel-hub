@@ -40,6 +40,13 @@ function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: 
   return km * 0.621371
 }
 
+/** Gate-to-gate flight estimate: ~780 km/h cruise + 35 min taxi/climb/descent.
+ *  Airport-to-airport measure legs only — never used by the trip engine. */
+function estimateFlightMinutes(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const km = haversineMiles(a, b) / 0.621371
+  return Math.round(km / 13 + 35)
+}
+
 /** Compact pill for a route leg or connector — centered on its point. */
 function legLabelHtml(miles: number, driveMin: number, accent = '#fbbf24'): string {
   return `<div style="transform:translate(-50%,-130%);background:rgba(15,23,42,0.9);border:1px solid ${accent}80;border-radius:6px;padding:2px 7px;font-family:system-ui,sans-serif;font-size:10px;font-weight:700;color:${accent};white-space:nowrap;pointer-events:none">${Math.round(miles)} mi · ${formatDriveTime(driveMin)} est. drive</div>`
@@ -63,12 +70,13 @@ function placeOriginAt(lat: number, lng: number) {
   })
 }
 
-function measureLabelHtml(fromName: string, toName: string | null, miles: number, driveMin: number): string {
+function measureLabelHtml(fromName: string, toName: string | null, miles: number, minutes: number, mode: 'drive' | 'flight'): string {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const dest = toName ? esc(toName) : 'dropped point'
-  return `<div style="background:rgba(15,23,42,0.92);border:1px solid rgba(96,165,250,0.5);border-radius:6px;padding:4px 8px;font-family:system-ui,sans-serif;font-size:11px;color:#f1f5f9;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.5);transform:translate(14px,-50%);pointer-events:none">`
+  const accent = mode === 'flight' ? '#7dd3fc' : '#60a5fa'
+  return `<div style="background:rgba(15,23,42,0.92);border:1px solid ${accent}80;border-radius:6px;padding:4px 8px;font-family:system-ui,sans-serif;font-size:11px;color:#f1f5f9;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.5);transform:translate(14px,-50%);pointer-events:none">`
     + `<div style="color:#94a3b8">${esc(fromName)} to ${dest}</div>`
-    + `<div style="font-weight:700">${Math.round(miles)} mi <span style="color:#60a5fa">· ${formatDriveTime(driveMin)} est. drive</span></div>`
+    + `<div style="font-weight:700">${Math.round(miles)} mi <span style="color:${accent}">· ${formatDriveTime(minutes)} est. ${mode}</span></div>`
     + `</div>`
 }
 
@@ -439,6 +447,90 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     mapInstance.current.fitBounds(bounds, { padding: [60, 60], maxZoom: 7 })
   }, [loaded, tierMarkers])
 
+  // ── Click-and-hold measure (Tom 2026-08-18) ──
+  // Shared by venue dots AND airport badges: hold and drag from either, a
+  // dashed line + live readout follows the cursor, snapping to venues, the
+  // star, and airports. Airport-to-airport reads est. FLIGHT time; any leg
+  // touching a venue (or a dropped point) reads est. drive. Release keeps
+  // the measurement until the next map interaction; a plain click (under
+  // ~8px) opens the popup as usual. Kept in a ref so the marker effects
+  // always call the latest closure without re-rendering markers.
+  const beginMeasureRef = useRef<(start: { name: string; lat: number; lng: number; isAirport: boolean }, marker: import('leaflet').Marker | null) => void>(() => {})
+  beginMeasureRef.current = (start, marker) => {
+    const L = leafletRef.current
+    const map = mapInstance.current
+    if (!L || !map) return
+    if (measureLayerRef.current) { map.removeLayer(measureLayerRef.current); measureLayerRef.current = null }
+    measureActiveRef.current = true
+    map.dragging.disable()
+
+    const startLL = L.latLng(start.lat, start.lng)
+    // Snap candidates, pre-projected once — the map can't pan while
+    // measuring, so container points stay valid. Self excluded by coords.
+    const notSelf = (lat: number, lng: number) =>
+      Math.abs(lat - start.lat) > 1e-6 || Math.abs(lng - start.lng) > 1e-6
+    const candidates = [
+      ...tierMarkers
+        .filter((t) => notSelf(t.coords.lat, t.coords.lng))
+        .map((t) => ({ name: t.venueName, isAirport: false, ll: L.latLng(t.coords.lat, t.coords.lng) })),
+      ...(homeBase ? [{ name: homeBaseName || 'Trip origin', isAirport: false, ll: L.latLng(homeBase.lat, homeBase.lng) }] : []),
+      ...(showAirports
+        ? MAJOR_AIRPORTS.filter((a) => notSelf(a.lat, a.lng)).map((a) => ({ name: a.iata, isAirport: true, ll: L.latLng(a.lat, a.lng) }))
+        : []),
+    ].map((c) => ({ ...c, pt: map.latLngToContainerPoint(c.ll) }))
+    const startPt = map.latLngToContainerPoint(startLL)
+
+    let dragged = false
+    let group: import('leaflet').LayerGroup | null = null
+    let line: import('leaflet').Polyline | null = null
+    let label: import('leaflet').Marker | null = null
+    const popup = marker?.getPopup()
+
+    const onMove = (e: MouseEvent) => {
+      const pt = map.mouseEventToContainerPoint(e)
+      if (!dragged) {
+        if (pt.distanceTo(startPt) < 8) return
+        dragged = true
+        // A real drag began — suppress the popup the trailing click would
+        // open (rebound after the click settles, in onUp).
+        if (popup && marker) marker.unbindPopup()
+        group = L.layerGroup().addTo(map)
+        line = L.polyline([startLL, startLL], { color: '#60a5fa', weight: 2, dashArray: '6,6', interactive: false }).addTo(group)
+        label = L.marker(startLL, { icon: L.divIcon({ className: '', html: '' }), interactive: false, zIndexOffset: 1200 }).addTo(group)
+      }
+      // Snap to the nearest venue/star/airport within 26px of the cursor
+      let end: import('leaflet').LatLng = map.containerPointToLatLng(pt)
+      let endName: string | null = null
+      let endIsAirport = false
+      let best = 26
+      for (const c of candidates) {
+        const d = pt.distanceTo(c.pt)
+        if (d < best) { best = d; end = c.ll; endName = c.name; endIsAirport = c.isAirport }
+      }
+      const endCoords = { lat: end.lat, lng: end.lng }
+      const miles = haversineMiles(start, endCoords)
+      const isFlight = start.isAirport && endIsAirport
+      const minutes = isFlight
+        ? estimateFlightMinutes(start, endCoords)
+        : Math.round(estimateDriveMinutes(start, endCoords))
+      line!.setLatLngs([startLL, end])
+      line!.setStyle({ color: isFlight ? '#7dd3fc' : '#60a5fa' })
+      label!.setLatLng(end)
+      label!.setIcon(L.divIcon({ className: '', html: measureLabelHtml(start.name, endName, miles, minutes, isFlight ? 'flight' : 'drive'), iconSize: [0, 0] }))
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      map.dragging.enable()
+      measureActiveRef.current = false
+      if (!dragged) return // plain click — popup opens normally
+      setTimeout(() => { if (popup && marker) marker.bindPopup(popup) }, 80)
+      measureLayerRef.current = group // stays until the next map interaction
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
   // Render/update markers when tierMarkers change
   useEffect(() => {
     if (!loaded || !mapInstance.current || !leafletRef.current) return
@@ -511,74 +603,6 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       }
     }
 
-    // ── Click-and-hold measure (Tom 2026-08-18) ──
-    // Hold on a venue dot, drag: a dashed line + live readout of straight-
-    // line miles and the est. drive follows the cursor, snapping to other
-    // venues and the star. Release keeps the measurement on screen until
-    // the next map interaction. A plain click (under ~8px of movement)
-    // opens the popup exactly as before.
-    function beginMeasure(startTm: TierMarker, marker: import('leaflet').Marker) {
-      if (measureLayerRef.current) { map.removeLayer(measureLayerRef.current); measureLayerRef.current = null }
-      measureActiveRef.current = true
-      map.dragging.disable()
-
-      const start = L.latLng(startTm.coords.lat, startTm.coords.lng)
-      // Snap candidates (other venues + the star), pre-projected once —
-      // the map can't pan while measuring, so container points stay valid.
-      const candidates = [
-        ...tierMarkers
-          .filter((t) => t.key !== startTm.key)
-          .map((t) => ({ name: t.venueName, ll: L.latLng(t.coords.lat, t.coords.lng) })),
-        ...(homeBase ? [{ name: homeBaseName || 'Trip origin', ll: L.latLng(homeBase.lat, homeBase.lng) }] : []),
-        ...(showAirports ? MAJOR_AIRPORTS.map((a) => ({ name: `${a.iata} (${a.name})`, ll: L.latLng(a.lat, a.lng) })) : []),
-      ].map((c) => ({ ...c, pt: map.latLngToContainerPoint(c.ll) }))
-      const startPt = map.latLngToContainerPoint(start)
-
-      let dragged = false
-      let group: import('leaflet').LayerGroup | null = null
-      let line: import('leaflet').Polyline | null = null
-      let label: import('leaflet').Marker | null = null
-      const popup = marker.getPopup()
-
-      const onMove = (e: MouseEvent) => {
-        const pt = map.mouseEventToContainerPoint(e)
-        if (!dragged) {
-          if (pt.distanceTo(startPt) < 8) return
-          dragged = true
-          // A real drag began — suppress the popup the trailing click would
-          // open (rebound after the click settles, in onUp).
-          if (popup) marker.unbindPopup()
-          group = L.layerGroup().addTo(map)
-          line = L.polyline([start, start], { color: '#60a5fa', weight: 2, dashArray: '6,6', interactive: false }).addTo(group)
-          label = L.marker(start, { icon: L.divIcon({ className: '', html: '' }), interactive: false, zIndexOffset: 1200 }).addTo(group)
-        }
-        // Snap to the nearest venue/star within 26px of the cursor
-        let end: import('leaflet').LatLng = map.containerPointToLatLng(pt)
-        let endName: string | null = null
-        let best = 26
-        for (const c of candidates) {
-          const d = pt.distanceTo(c.pt)
-          if (d < best) { best = d; end = c.ll; endName = c.name }
-        }
-        line!.setLatLngs([start, end])
-        const miles = haversineMiles(startTm.coords, { lat: end.lat, lng: end.lng })
-        const driveMin = Math.round(estimateDriveMinutes(startTm.coords, { lat: end.lat, lng: end.lng }))
-        label!.setLatLng(end)
-        label!.setIcon(L.divIcon({ className: '', html: measureLabelHtml(startTm.venueName, endName, miles, driveMin), iconSize: [0, 0] }))
-      }
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        map.dragging.enable()
-        measureActiveRef.current = false
-        if (!dragged) return // plain click — popup opens normally
-        setTimeout(() => { if (popup) marker.bindPopup(popup) }, 80)
-        measureLayerRef.current = group // stays until the next map interaction
-      }
-      document.addEventListener('mousemove', onMove)
-      document.addEventListener('mouseup', onUp)
-    }
-
     // Add venue markers
     for (const tm of tierMarkers) {
       let color: string
@@ -628,7 +652,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       // panning is untouched because it only starts on a VENUE mousedown.
       marker.on('mousedown', (ev: import('leaflet').LeafletMouseEvent) => {
         L.DomEvent.preventDefault(ev.originalEvent)
-        beginMeasure(tm, marker)
+        beginMeasureRef.current({ name: tm.venueName, lat: tm.coords.lat, lng: tm.coords.lng, isAirport: false }, marker)
       })
 
       marker.bindPopup(buildVenuePopupHtml(tm, {
@@ -647,7 +671,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
 
     map.addLayer(layerGroup)
     clusterGroupRef.current = layerGroup as any
-  }, [loaded, tierMarkers, colorBy, heartbeatPlayers, timeMode, homeBase, homeBaseName, showAirports])
+  }, [loaded, tierMarkers, colorBy, heartbeatPlayers, timeMode, homeBase, homeBaseName])
 
   // Render non-game event pins — distinct amber 📌 markers, separate from the
   // round player-venue dots, so "who's where" reads at a glance.
@@ -723,9 +747,14 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         html += `<div style="margin-top:2px;font-size:11px;color:#94a3b8">${formatDriveTime(mins)} est. drive from ${homeBaseName || 'trip origin'}</div>`
       }
       html += `</div>`
-      L.marker([a.lat, a.lng], { icon, zIndexOffset: 300 })
+      const am = L.marker([a.lat, a.lng], { icon, zIndexOffset: 300 })
         .bindPopup(html, { className: 'sv-dark-popup' })
         .addTo(layer)
+      // Airport-to-airport drag = est. flight; airport-to-venue = est. drive
+      am.on('mousedown', (ev: import('leaflet').LeafletMouseEvent) => {
+        L.DomEvent.preventDefault(ev.originalEvent)
+        beginMeasureRef.current({ name: a.iata, lat: a.lat, lng: a.lng, isAirport: true }, am)
+      })
     }
     map.addLayer(layer)
     airportsLayerRef.current = layer

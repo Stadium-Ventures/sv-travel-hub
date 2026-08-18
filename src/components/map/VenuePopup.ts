@@ -97,19 +97,27 @@ export function buildVenuePopupHtml(marker: TierMarker, enrich?: PopupEnrichment
   // view Mike D's whole workflow runs on (2026-08-17): each game in the
   // window with date, real time, and opponent. Falls back to the old
   // date-only list for venues whose games carry no detail.
-  const markerNames = new Set(marker.players.map((p) => p.name))
   if (marker.games.length > 0) {
     const uid = `sv-games-${marker.key.replace(/[^a-z0-9]/gi, '-')}`
     html += `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,0.15)">`
     html += `<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:#64748b;margin-bottom:3px">Games in your dates</div>`
-    html += `<div id="${uid}" style="max-height:150px;overflow-y:auto">`
+    html += `<div id="${uid}" style="max-height:170px;overflow-y:auto">`
     for (const g of marker.games) {
       const t = formatGameTimeDisplay(g.time, enrich?.timeMode ?? 'et', { coords: marker.coords, tz: g.tz })
-      const who = g.players.filter((n) => markerNames.has(n))
-      html += `<div style="display:flex;gap:6px;align-items:baseline;font-size:11px;color:#cbd5e1;margin-bottom:2px">`
+      // WHOSE game — every row says it, on its own wrapping line, so
+      // shared-complex venues (Roger Dean hosts Jupiter AND Palm Beach)
+      // never leave "is this Dax's or Aaron's or both?" ambiguous, and
+      // long name lists wrap instead of truncating (Tom 2026-08-18).
+      const who = g.players.join(', ')
+      html += `<div style="display:flex;gap:6px;font-size:11px;color:#cbd5e1;margin-bottom:4px">`
       html += `<span style="width:46px;flex-shrink:0;font-weight:600;color:#94a3b8">${formatDate(g.date)}</span>`
       html += `<span style="width:56px;flex-shrink:0;color:#64748b">${t || ''}</span>`
-      html += `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.opponent ?? ''}${who.length > 0 && marker.players.length > 1 ? ` &middot; ${who.join(', ')}` : ''}</span>`
+      html += `<span style="flex:1;min-width:0">`
+      html += `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.opponent ?? ''}</div>`
+      html += who
+        ? `<div style="font-size:10px;color:#60a5fa;white-space:normal">${who}</div>`
+        : `<div style="font-size:10px;color:#64748b">no tracked player in this one</div>`
+      html += `</span>`
       html += `</div>`
     }
     html += `</div>`
