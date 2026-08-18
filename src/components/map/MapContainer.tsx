@@ -48,8 +48,9 @@ function estimateFlightMinutes(a: { lat: number; lng: number }, b: { lat: number
 }
 
 /** Compact pill for a route leg or connector — centered on its point. */
-function legLabelHtml(miles: number, driveMin: number, accent = '#fbbf24'): string {
-  return `<div style="transform:translate(-50%,-130%);background:rgba(15,23,42,0.9);border:1px solid ${accent}80;border-radius:6px;padding:2px 7px;font-family:system-ui,sans-serif;font-size:10px;font-weight:700;color:${accent};white-space:nowrap;pointer-events:none">${Math.round(miles)} mi · ${formatDriveTime(driveMin)} est. drive</div>`
+function legLabelHtml(miles: number, driveMin: number, accent = '#fbbf24', clearable = false): string {
+  const pointer = clearable ? 'pointer-events:auto;cursor:pointer' : 'pointer-events:none'
+  return `<div style="transform:translate(-50%,-130%);background:rgba(15,23,42,0.9);border:1px solid ${accent}80;border-radius:6px;padding:2px 7px;font-family:system-ui,sans-serif;font-size:10px;font-weight:700;color:${accent};white-space:nowrap;${pointer}">${Math.round(miles)} mi · ${formatDriveTime(driveMin)} est. drive${clearable ? `<span style="margin-left:6px;color:#94a3b8;font-weight:400">✕ clear</span>` : ''}</div>`
 }
 
 /** Set the trip origin at a point: optimistic preset-proximity label now,
@@ -168,13 +169,19 @@ interface MapContainerProps {
   /** Game id -> double-up kind line for popup rows ("Same-venue double up"
    *  vs "Drivable double up: pairs with X"), Tom 2026-08-18. */
   duLabelByGameId?: Map<string, string>
+  /** Selection key for the drawn double-up pair. fitBounds fires only when
+   *  THIS changes — not on list identity churn from pan/zoom re-scoping,
+   *  which used to snap the map back mid-drag (Tom 2026-08-18). */
+  doubleUpFocusKey?: string | null
+  /** Clears the drawn double-up pair (the connector's ✕ pill). */
+  onClearDoubleUp?: () => void
   /** Fires with the map bounds after every pan/zoom — the viewport itself
    *  scopes the left rail (in-view summary + suggestions), Tom 2026-08-18:
    *  "the map, not the origin or players, informs the suggestions". */
   onViewportChange?: (b: { south: number; west: number; north: number; east: number }) => void
 }
 
-export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey, doubleUps = [], selectedDoubleUp = null, showAirports = false, duLabelByGameId, onViewportChange }: MapContainerProps) {
+export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey, doubleUps = [], selectedDoubleUp = null, showAirports = false, duLabelByGameId, onViewportChange, doubleUpFocusKey = null, onClearDoubleUp }: MapContainerProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<import('leaflet').Map | null>(null)
   const leafletRef = useRef<typeof import('leaflet') | null>(null)
@@ -207,6 +214,9 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   const dragOriginRef = useRef(false) // suppress map re-center after drag
   const onViewportChangeRef = useRef(onViewportChange)
   onViewportChangeRef.current = onViewportChange
+  const onClearDoubleUpRef = useRef(onClearDoubleUp)
+  onClearDoubleUpRef.current = onClearDoubleUp
+  const lastDuFocusRef = useRef<string | null>(null)
 
   // Initialize Leaflet. The cleanup function tears down any map instance so
   // that React StrictMode's double-mount in dev doesn't leak a dead init.
@@ -386,6 +396,28 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       map.fitBounds(L.latLngBounds(L.latLng(24.5, -125), L.latLng(49.5, -66.5)), { animate: true })
     })
   }, [loaded])
+
+  // Pulse a player's visible venues (Tom 2026-08-18): halos flash on every
+  // marker containing them for ~1.5s before their schedule panel opens.
+  useEffect(() => {
+    if (!loaded) return
+    return addMapEventListener('map:pulse-player', ({ playerName }) => {
+      const L = leafletRef.current
+      const map = mapInstance.current
+      if (!L || !map) return
+      const targets = tierMarkers.filter((tm) => tm.players.some((p) => p.name === playerName))
+      if (targets.length === 0) return
+      const layer = L.layerGroup().addTo(map)
+      for (const tm of targets) {
+        L.marker([tm.coords.lat, tm.coords.lng], {
+          icon: L.divIcon({ className: '', html: `<div class="sv-pulse-halo"></div>`, iconSize: [56, 56], iconAnchor: [28, 28] }),
+          interactive: false,
+          zIndexOffset: 1100,
+        }).addTo(layer)
+      }
+      setTimeout(() => { map.removeLayer(layer) }, 1500)
+    })
+  }, [loaded, tierMarkers])
 
   // Update home base marker + drive radius circle when homeBase changes
   useEffect(() => {
@@ -860,14 +892,15 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         // the pair's venues explains itself (Tom 2026-08-18 asked if this
         // line came from an airport; it is venue-to-venue).
         const duMiles = haversineMiles(g1.venue.coords, g2.venue.coords)
-        L.marker([
+        const duPill = L.marker([
           (g1.venue.coords.lat + g2.venue.coords.lat) / 2,
           (g1.venue.coords.lng + g2.venue.coords.lng) / 2,
         ], {
-          icon: L.divIcon({ className: '', html: legLabelHtml(duMiles, Math.round(du.driveMinutesBetween), tierColor), iconSize: [0, 0] }),
-          interactive: false,
+          icon: L.divIcon({ className: '', html: legLabelHtml(duMiles, Math.round(du.driveMinutesBetween), tierColor, true), iconSize: [0, 0] }),
+          interactive: true,
           zIndexOffset: 950,
         }).addTo(layer)
+        duPill.on('click', () => onClearDoubleUpRef.current?.())
       } else {
         // Shared venue (head-to-head / tournament) — ×2 badge
         const v = du.games[0]!.venue
@@ -887,8 +920,15 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     doubleUpLayerRef.current = layer
 
     // Zoom to the selected pair — framed WITH the drive-radius circle so
-    // the dashed circle is actually visible (Tom 2026-07-22)
-    if (selectedDoubleUp != null && doubleUps[selectedDoubleUp]) {
+    // the dashed circle is actually visible (Tom 2026-07-22). Fires ONLY
+    // when the selection itself changes: the doubleUps array gets a new
+    // identity on every pan (viewport re-scope), and refitting on that
+    // yanked the map back whenever the user dragged away (Tom 2026-08-18:
+    // "show on map locks it until you click again" — the LINE stays, the
+    // viewport is yours).
+    const focusChanged = doubleUpFocusKey !== lastDuFocusRef.current
+    lastDuFocusRef.current = doubleUpFocusKey
+    if (focusChanged && doubleUpFocusKey && selectedDoubleUp != null && doubleUps[selectedDoubleUp]) {
       const du = doubleUps[selectedDoubleUp]!
       const pts = du.games.map((g) => L.latLng(g.venue.coords.lat, g.venue.coords.lng))
       const b = L.latLngBounds(pts)
@@ -900,7 +940,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       b.extend([c.lat - dLat, c.lng - dLng])
       map.fitBounds(b, { padding: [40, 40], animate: true })
     }
-  }, [loaded, doubleUps, selectedDoubleUp])
+  }, [loaded, doubleUps, selectedDoubleUp, doubleUpFocusKey])
 
   // "Show on map" focus — fit the viewport to the trip's own venues. Store-
   // driven (not a map event) because this component mounts AFTER the click

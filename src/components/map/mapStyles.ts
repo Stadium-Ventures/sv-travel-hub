@@ -11,6 +11,21 @@ export function injectMapStyles() {
   const style = document.createElement('style')
   style.id = STYLE_ID
   style.textContent = `
+    /* Player-locate pulse (Tom 2026-08-18): halos flash on a player's
+       visible venues before their schedule panel opens */
+    @keyframes svPulse {
+      0%   { transform: scale(0.35); opacity: 1; }
+      100% { transform: scale(1.35); opacity: 0.1; }
+    }
+    .sv-pulse-halo {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: 3px solid #60a5fa;
+      box-shadow: 0 0 20px rgba(96,165,250,0.9), inset 0 0 12px rgba(96,165,250,0.5);
+      animation: svPulse 0.72s ease-out 2;
+    }
+
     /* Venue dot markers */
     .sv-venue-dot {
       border-radius: 50%;

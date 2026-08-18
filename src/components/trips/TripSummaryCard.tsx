@@ -125,15 +125,27 @@ export default function TripSummaryCard({
   const venueCount = new Set(lines.map((l) => l.venue)).size
 
   // Double ups aren't a separate list anymore — they're a property of the
-  // trip (Tom 2026-07-22). A date counts when you'd see 2+ clients that day.
-  const doubleUpDates = useMemo(() => {
-    const byDate = new Map<string, Set<string>>()
+  // trip (Tom 2026-07-22). A date counts when you'd see 2+ clients that
+  // day, split by family (Tom 2026-08-18): same-venue = one park covers
+  // them; drivable = a drive between parks that day.
+  const duDates = useMemo(() => {
+    const byDate = new Map<string, Map<string, Set<string>>>()
     for (const l of lines) {
-      const set = byDate.get(l.date) ?? new Set<string>()
+      const venues = byDate.get(l.date) ?? new Map<string, Set<string>>()
+      const set = venues.get(l.venue) ?? new Set<string>()
       for (const n of l.players) set.add(n)
-      byDate.set(l.date, set)
+      venues.set(l.venue, set)
+      byDate.set(l.date, venues)
     }
-    return [...byDate.entries()].filter(([, names]) => names.size >= 2).map(([d]) => d)
+    const sameVenue: string[] = []
+    const drivable: string[] = []
+    for (const [d, venues] of byDate) {
+      const total = new Set([...venues.values()].flatMap((v) => [...v]))
+      if (total.size < 2) continue
+      if ([...venues.values()].some((v) => v.size >= 2)) sameVenue.push(d)
+      else drivable.push(d)
+    }
+    return { sameVenue, drivable }
   }, [lines])
   const tripKey = item.type === 'road' ? getTripKey(item.trip) : null
   const starred = tripKey ? !!starredTrips[tripKey] : false
@@ -218,12 +230,20 @@ export default function TripSummaryCard({
             The route you picked
           </span>
         )}
-        {doubleUpDates.length > 0 && (
+        {duDates.sameVenue.length > 0 && (
           <span
             className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-green"
-            title={`See 2+ clients in one outing on: ${doubleUpDates.map((d) => formatDate(d)).join(', ')}`}
+            title={`One park, one seat, 2+ clients on: ${duDates.sameVenue.map((d) => formatDate(d)).join(', ')}`}
           >
-            Double up{doubleUpDates.length > 1 ? ` ×${doubleUpDates.length}` : ` · ${formatDate(doubleUpDates[0]!)}`}
+            Same-venue double up{duDates.sameVenue.length > 1 ? ` ×${duDates.sameVenue.length}` : ` · ${formatDate(duDates.sameVenue[0]!)}`}
+          </span>
+        )}
+        {duDates.drivable.length > 0 && (
+          <span
+            className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-green"
+            title={`2+ clients that day with a drive between parks: ${duDates.drivable.map((d) => formatDate(d)).join(', ')}`}
+          >
+            Drivable double up{duDates.drivable.length > 1 ? ` ×${duDates.drivable.length}` : ` · ${formatDate(duDates.drivable[0]!)}`}
           </span>
         )}
       </p>
@@ -238,7 +258,7 @@ export default function TripSummaryCard({
           const driveMin = prev ? Math.round((haversineKm(prev.coords, l.coords) * 1.2 / 95) * 60) : 0
           return (
             <p key={`${l.date}-${l.venue}-${i}`} className="truncate text-[11px] text-text-dim/70">
-              <span className={`inline-block w-24 font-medium ${doubleUpDates.includes(l.date) ? 'text-accent-green' : 'text-text-dim'}`}>{formatDate(l.date)}</span>
+              <span className={`inline-block w-24 font-medium ${(duDates.sameVenue.includes(l.date) || duDates.drivable.includes(l.date)) ? 'text-accent-green' : 'text-text-dim'}`}>{formatDate(l.date)}</span>
               <span className="text-text-dim">{l.venue}</span>
               {l.time && <span className="text-text-dim/60"> {formatGameTimeDisplay(l.time, timeMode, { coords: l.coords, tz: l.tz })}</span>}
               {l.players.length > 0 && <span> · {l.players.join(', ')}</span>}

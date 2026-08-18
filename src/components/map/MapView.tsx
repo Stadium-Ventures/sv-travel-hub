@@ -98,17 +98,23 @@ export default function MapView() {
     return doubleUps.filter((du) => du.playerNames.some((n) => picked.has(n.trim().toLowerCase())))
   }, [doubleUps, filterState.selectedPlayers])
 
-  // Venues participating in any double up in the window — powers the
-  // "Double ups only" map filter (Tom 2026-08-17, Mike D debrief).
+  // Two double-up families (Tom 2026-08-18): "double up" plain = SAME
+  // VENUE, same game (head-to-head, tournament); "drivable" = a drive
+  // between venues within the Drive-radius parameter, origin not needed.
+  // The map toggles filter by family; only games in the ACTIVE families
+  // survive (count badges, popups, and date ranges follow).
+  const activeFamilyDus = useMemo(() => {
+    const sameVenueType = (t: string) => t === 'same-venue-matchup' || t === 'tournament-cluster'
+    return scopedDoubleUps.filter((du) =>
+      sameVenueType(du.type) ? filterState.doubleUpsOnly : filterState.drivableDoubleUpsOnly)
+  }, [scopedDoubleUps, filterState.doubleUpsOnly, filterState.drivableDoubleUpsOnly])
   const doubleUpCoords = useMemo(
-    () => scopedDoubleUps.flatMap((du) => du.games.map((g) => g.venue.coords)),
-    [scopedDoubleUps],
+    () => activeFamilyDus.flatMap((du) => du.games.map((g) => g.venue.coords)),
+    [activeFamilyDus],
   )
-  // Game-level ids so "Double ups only" narrows each venue to JUST its
-  // double-up games — count badge, popup list, and date range follow.
   const doubleUpGameIds = useMemo(
-    () => new Set(scopedDoubleUps.flatMap((du) => du.games.map((g) => g.id))),
-    [scopedDoubleUps],
+    () => new Set(activeFamilyDus.flatMap((du) => du.games.map((g) => g.id))),
+    [activeFamilyDus],
   )
   // Per-game double-up kind for popup rows (Tom 2026-08-18: "drivable"
   // could be misread as same-venue — name which one it is on every game).
@@ -184,6 +190,14 @@ export default function MapView() {
   }, [suggestionDoubleUps, selectedDuKey])
   const setSelectedDoubleUp = (i: number | null) =>
     setSelectedDuKey(i == null ? null : duKey(suggestionDoubleUps[i]!))
+  // The DRAWN pair is locked to the selection key, independent of the
+  // viewport-scoped list — panning away must never drop or re-zoom it
+  // (Tom 2026-08-18). Cleared by the card toggle or the connector's ✕.
+  const drawnDoubleUp = useMemo(
+    () => (selectedDuKey ? scopedDoubleUps.find((du) => duKey(du) === selectedDuKey) ?? null : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopedDoubleUps, selectedDuKey],
+  )
   // Player filter changes re-scope the Double Ups list — clear selection.
   const selectedPlayersKey = filterState.selectedPlayers.join('|')
   useEffect(() => { setSelectedDuKey(null) }, [selectedPlayersKey])
@@ -461,7 +475,17 @@ export default function MapView() {
               markers={visibleMarkers}
               filterStart={filterStart}
               filterEnd={filterEnd}
-              onPlayerClick={(n) => setSchedulePanelPlayer(n)}
+              onPlayerClick={(n) => {
+                // Locate before detail (Tom 2026-08-18): pulse the player's
+                // visible venues for ~1.5s, THEN open their schedule.
+                const visible = visibleMarkers.some((m) => m.players.some((p) => p.name === n))
+                if (visible) {
+                  dispatchMapEvent('map:pulse-player', { playerName: n })
+                  setTimeout(() => setSchedulePanelPlayer(n), 1500)
+                } else {
+                  setSchedulePanelPlayer(n)
+                }
+              }}
               zoomedWide={zoomedWide}
             />
           )}
@@ -537,11 +561,11 @@ export default function MapView() {
               doubleUps={
                 // Only the SELECTED pair draws on the map — all 30 at once
                 // was a spaghetti of triangles (Tom 2026-07-22)
-                suggestTab === 'doubleups' && selectedDoubleUp != null && suggestionDoubleUps[selectedDoubleUp]
-                  ? [suggestionDoubleUps[selectedDoubleUp]!]
-                  : []
+                suggestTab === 'doubleups' && drawnDoubleUp ? [drawnDoubleUp] : []
               }
-              selectedDoubleUp={selectedDoubleUp != null ? 0 : null}
+              selectedDoubleUp={drawnDoubleUp ? 0 : null}
+              doubleUpFocusKey={suggestTab === 'doubleups' ? selectedDuKey : null}
+              onClearDoubleUp={() => setSelectedDuKey(null)}
             />
           </div>
         </div>

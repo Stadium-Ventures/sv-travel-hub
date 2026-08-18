@@ -36,11 +36,14 @@ export interface MapFilterState {
   /** When true, only show venues with at least one overdue (>90d) or
    *  never-visited player. Kent interview ask: "guys we need to see." */
   overdueOnly: boolean
-  /** When true, only show venues that are part of a double up (2+ clients
-   *  seeable in one outing) inside the selected dates. Tom 2026-08-17,
-   *  from the Mike D Maptive debrief: "our filters should also include
-   *  player and double ups." */
+  /** When true, only show venues with a SAME-VENUE double up in the dates:
+   *  one park, one seat, 2+ clients (head-to-heads + tournaments). Plain
+   *  "double up" means exactly this everywhere in the app (Tom 2026-08-18). */
   doubleUpsOnly: boolean
+  /** When true, only show venues in a DRIVABLE double up: 2+ clients
+   *  seeable in one outing by driving between venues, paired by the Drive
+   *  radius parameter — no trip origin needed (Tom 2026-08-18). */
+  drivableDoubleUpsOnly: boolean
   /** Overlay of major-airport badges on the map (Tom 2026-08-18: toggleable
    *  airport markers, like the US view button). Overlay, not a filter — it
    *  never hides venues and doesn't count toward the Filters badge. */
@@ -55,6 +58,7 @@ export const DEFAULT_MAP_FILTERS: MapFilterState = {
   colorBy: 'tier',
   overdueOnly: false,
   doubleUpsOnly: false,
+  drivableDoubleUpsOnly: false,
   showAirports: false,
 }
 
@@ -113,6 +117,7 @@ export function countActiveFilters(s: MapFilterState): number {
   if (s.levels.size < 3) n++
   if (s.overdueOnly) n++
   if (s.doubleUpsOnly) n++
+  if (s.drivableDoubleUpsOnly) n++
   if (s.search.trim() !== '') n++
   if (s.selectedPlayers.length > 0) n++
   return n
@@ -162,7 +167,6 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
   // Trip origin + drive radius — shared store, so the Trip Planner stays in
   // sync. The radius control only exists once an origin is set (the radius
   // is measured FROM the origin — without one it has no meaning).
-  const homeBase = useTripStore((s) => s.homeBase)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const setHomeBase = useTripStore((s) => s.setHomeBase)
   const clearHomeBase = useTripStore((s) => s.clearHomeBase)
@@ -269,24 +273,25 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
               title="Where you'll be. Sets the star + drive radius, and every distance reads from here. Drag the star on the map to move it."
             />
           </div>
-          {homeBase && (
-            <div className="flex items-center gap-2">
-              <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Radius</span>
-              <input
-                type="range"
-                min={120}
-                max={480}
-                step={30}
-                value={maxDriveMinutes}
-                onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
-                className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
-                title="Drive radius from your origin (the dashed circle on the map)"
-              />
-              <span className="w-12 shrink-0 text-right text-[11px] text-text">
-                {maxDriveMinutes % 60 > 0 ? `${Math.floor(maxDriveMinutes / 60)}h ${maxDriveMinutes % 60}m` : `${Math.floor(maxDriveMinutes / 60)}h`}
-              </span>
-            </div>
-          )}
+          {/* Always visible: the radius is BOTH the circle around the
+              origin (when set) AND the pairing distance for drivable
+              double ups, which need no origin (Tom 2026-08-18). */}
+          <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Radius</span>
+            <input
+              type="range"
+              min={120}
+              max={480}
+              step={30}
+              value={maxDriveMinutes}
+              onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
+              className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
+              title="Max drive: pairs drivable double ups anywhere on the map, and draws the dashed circle around your origin when one is set"
+            />
+            <span className="w-12 shrink-0 text-right text-[11px] text-text">
+              {maxDriveMinutes % 60 > 0 ? `${Math.floor(maxDriveMinutes / 60)}h ${maxDriveMinutes % 60}m` : `${Math.floor(maxDriveMinutes / 60)}h`}
+            </span>
+          </div>
 
           {/* Player picker (affirmative selection — Kent's 2026-06-08 ask).
               Selected players stack as removable chips; the picker stays
@@ -338,9 +343,18 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
               className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
                 state.doubleUpsOnly ? 'bg-accent-green/15 text-accent-green' : 'text-text-dim/60 hover:text-text hover:bg-gray-800/50'
               }`}
-              title="Show only venues that are part of a double up: 2+ clients seeable in one outing within your dates"
+              title="Same-venue double ups: one park, one seat, 2+ clients (head-to-heads and tournaments) within your dates"
             >
-              Double ups only
+              Double ups (same venue)
+            </button>
+            <button
+              onClick={() => setState({ ...state, drivableDoubleUpsOnly: !state.drivableDoubleUpsOnly })}
+              className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                state.drivableDoubleUpsOnly ? 'bg-accent-green/15 text-accent-green' : 'text-text-dim/60 hover:text-text hover:bg-gray-800/50'
+              }`}
+              title="Drivable double ups: 2+ clients seeable in one outing by driving between venues. Pairing distance = the Drive radius below; works anywhere on the map, no trip origin needed"
+            >
+              Drivable double ups
             </button>
             <button
               onClick={() => setState({ ...state, showAirports: !state.showAirports })}
@@ -512,9 +526,10 @@ export function applyMapFilters(
     .map((m) => {
       // Venue-name search: when set, only keep markers whose venue matches.
       if (search !== '' && !m.venueName.toLowerCase().includes(search)) return null
-      // Double-ups toggle: only venues that are part of a 2+ client outing,
-      // showing only their double-up games.
-      if (state.doubleUpsOnly) {
+      // Double-up family toggles: only venues in an ACTIVE family (the
+      // caller pre-unions ids/coords per the toggles), showing only those
+      // games.
+      if (state.doubleUpsOnly || state.drivableDoubleUpsOnly) {
         if (m.games.length > 0 && doubleUpGameIds) {
           const duGames = m.games.filter((g) => doubleUpGameIds.has(g.id))
           if (duGames.length === 0) return null

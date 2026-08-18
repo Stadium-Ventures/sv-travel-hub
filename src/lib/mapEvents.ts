@@ -20,6 +20,7 @@ export type MapEventMap = {
   /** Reset the viewport to the full continental-US extent in one click
    *  instead of minus-minus-minus (Tom 2026-08-17). */
   'map:reset-view': Record<string, never>
+  'map:pulse-player': { playerName: string }
 }
 
 export function dispatchMapEvent<K extends keyof MapEventMap>(
