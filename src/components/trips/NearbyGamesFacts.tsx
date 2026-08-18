@@ -54,9 +54,10 @@ export default function NearbyGamesFacts({
   const [showBeyond, setShowBeyond] = useState(false)
 
   const { inRange, beyond } = useMemo(() => {
-    const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
     const inRangeRows: FactRow[] = []
     const beyondRows: FactRow[] = []
+    if (!homeBase) return { inRange: inRangeRows, beyond: beyondRows }
+    const all = [...proGames, ...ncaaGames, ...hsGames, ...summerGames]
     const seen = new Set<string>()
     for (const g of all) {
       if (g.date < startDate || g.date > endDate) continue
@@ -83,6 +84,20 @@ export default function NearbyGamesFacts({
     beyondRows.sort(cmp)
     return { inRange: inRangeRows, beyond: beyondRows }
   }, [proGames, ncaaGames, hsGames, summerGames, startDate, endDate, homeBase, maxDriveMinutes, playerMap, sortKey])
+
+  // Facts need a "from where" — until an origin is set there is nothing
+  // honest to compute, so ask for the one missing input instead of
+  // defaulting to a city the user never picked.
+  if (!homeBase) {
+    return (
+      <div className="rounded-xl border border-border bg-surface px-4 py-3">
+        <h3 className="text-sm font-semibold text-text">What&rsquo;s around your trip origin</h3>
+        <p className="mt-1 text-xs text-text-dim">
+          Pick a Trip origin above to see every client game within reach on these dates, with estimated drive times from it.
+        </p>
+      </div>
+    )
+  }
 
   const visible = showAll ? inRange : inRange.slice(0, INITIAL_ROWS)
   const driveHoursLabel = maxDriveMinutes % 60 > 0

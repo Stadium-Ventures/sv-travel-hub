@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Coordinates, RosterPlayer } from '../types/roster'
 import type { GameEvent, TripCandidate, TripPlan } from '../types/schedule'
-import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, DEFAULT_HOME_BASE, computeScoreBreakdown } from '../lib/tripEngine'
+import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, computeScoreBreakdown } from '../lib/tripEngine'
 import { findDoubleUps } from '../lib/doubleUps'
 import { debugLog } from '../lib/debugLog'
 import type { UrgencyMap, PinnedGame } from '../lib/tripEngine'
@@ -81,7 +81,11 @@ interface TripState {
   useHeartbeatBoost: boolean
   priorityPlayers: string[]
   maxNights: number
-  homeBase: Coordinates
+  /** Trip origin. NULL until the user picks one — there is no pre-set
+   *  starting destination (Tom 2026-08-18, Mike D flow: the map starts as
+   *  the whole US; star + drive radius appear only after the origin filter
+   *  is enabled). Only the origin picker and star-drag ever set this. */
+  homeBase: Coordinates | null
   homeBaseName: string
   tripPlan: TripPlan | null
   computing: boolean
@@ -117,6 +121,7 @@ interface TripState {
   setMaxFlightHours: (hours: number) => void
   setPriorityPlayers: (players: string[]) => void
   setHomeBase: (coords: Coordinates, name: string) => void
+  clearHomeBase: () => void
   setMaxNights: (n: number) => void
   setPinnedGame: (pin: PinnedGame | null) => void
   setPlannedSwing: (swing: ConvergenceWindow | null) => void
@@ -142,8 +147,8 @@ export const useTripStore = create<TripState>()(
   useHeartbeatBoost: false, // default OFF — Heartbeat data is a snapshot of now, not the future
   priorityPlayers: [],
   maxNights: 2,
-  homeBase: DEFAULT_HOME_BASE,
-  homeBaseName: 'Orlando, FL',
+  homeBase: null,
+  homeBaseName: '',
   tripPlan: null,
   computing: false,
   progressStep: '',
@@ -169,6 +174,7 @@ export const useTripStore = create<TripState>()(
   setUseHeartbeatBoost: (useHeartbeatBoost: boolean) => set({ useHeartbeatBoost }),
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
   setHomeBase: (homeBase, homeBaseName) => set({ homeBase, homeBaseName }),
+  clearHomeBase: () => set({ homeBase: null, homeBaseName: '' }),
   setMaxNights: (maxNights: number) => set({ maxNights }),
   setPinnedGame: (pinnedGame) => set({ pinnedGame }),
   setPlannedSwing: (plannedSwing) => set({ plannedSwing }),
@@ -226,6 +232,20 @@ export const useTripStore = create<TripState>()(
         homeBaseName = anchorGame.venue.name
       }
     }
+    // No origin at all — the origin starts unset (no pre-set default), and
+    // without either a base or a priority-player anchor the engine has no
+    // "from where". Block with the fix instead of guessing a city.
+    if (!homeBase) {
+      set({
+        computing: false,
+        tripPlan: null,
+        progressStep: 'Blocked',
+        progressDetail: 'Pick a Trip origin (or add a priority player to anchor around) before generating trips.',
+      })
+      return
+    }
+    const base: Coordinates = homeBase
+    const baseName = homeBaseName || 'trip start'
     const players = useRosterStore.getState().players
     let scheduleState = useScheduleStore.getState()
 
@@ -263,11 +283,11 @@ export const useTripStore = create<TripState>()(
         if (playerGames.length === 0) continue // missing schedule already handled above
         const hasDrivable = playerGames.some((g) => {
           if (g.venue.coords.lat === 0 && g.venue.coords.lng === 0) return false
-          return estimateDriveMinutes(homeBase, g.venue.coords) <= maxDriveMinutes
+          return estimateDriveMinutes(base, g.venue.coords) <= maxDriveMinutes
         })
         if (!hasDrivable) {
           const driveHours = Math.round(maxDriveMinutes / 60)
-          set({ progressDetail: `Heads up: ${pName} has no games within ${driveHours}h drive of ${homeBaseName} — will check fly-in options...` })
+          set({ progressDetail: `Heads up: ${pName} has no games within ${driveHours}h drive of ${baseName} — will check fly-in options...` })
           // Brief pause so user sees the warning before heavy computation
           await new Promise((r) => setTimeout(r, 1200))
         }
@@ -447,7 +467,7 @@ export const useTripStore = create<TripState>()(
       urgencyRecord: Object.keys(urgencyRecord).length > 0 ? urgencyRecord : undefined,
       maxFlightHours,
       playerTeamAssignments: scheduleState.playerTeamAssignments,
-      homeBase,
+      homeBase: base,
       maxTripDays: maxNights + 1,
       pinnedGame: pinnedGame ?? undefined,
     }
@@ -466,6 +486,10 @@ export const useTripStore = create<TripState>()(
         set({ progressStep: msg.step, progressDetail: msg.detail ?? '' })
       } else if (msg.type === 'result') {
         const plan = msg.plan
+        // Label driveFromHomeMinutes with the base the ENGINE actually used
+        // (anchor venue when priority players re-anchored) — every distance
+        // names its origin (Kent 2026-08-17).
+        plan.baseName = baseName
         // Detect double-up opportunities across all games — pair cap follows
         // the Drive-radius setting, same as the Map tab
         plan.doubleUps = findDoubleUps(allGames, players, startDate, endDate, undefined, undefined, get().maxDriveMinutes)
@@ -477,7 +501,7 @@ export const useTripStore = create<TripState>()(
         const plannedSwing = get().plannedSwing
         if (plannedSwing) {
           const planned = swingToTripCandidate(plannedSwing, allGames, players,
-            urgencyMap.size > 0 ? urgencyMap : undefined, homeBase)
+            urgencyMap.size > 0 ? urgencyMap : undefined, base)
           if (planned) {
             const routeIds = (t: TripCandidate) => [t.anchorGame.id, ...t.nearbyGames.map((g) => g.id)].sort().join('|')
             const plannedIds = routeIds(planned)
@@ -531,7 +555,11 @@ export const useTripStore = create<TripState>()(
       // v8: reset dates to the fresh default (today → +14d) — persisted
       // ranges went stale (start dates in the past) and Orlando default
       // re-asserted (Tom 2026-07-22).
-      version: 8,
+      // v9: origin starts UNSET (Tom 2026-08-18) — no pre-set starting
+      // destination; the star/radius exist only after the user picks one.
+      // One-time wipe of the old Orlando default; origins picked after v9
+      // persist normally.
+      version: 9,
       migrate: (persisted: any) => ({
         startDate: defaultStart(),
         endDate: defaultEnd(),
@@ -542,11 +570,9 @@ export const useTripStore = create<TripState>()(
         tripStatuses: persisted?.tripStatuses ?? {},
         starredTrips: persisted?.starredTrips ?? {},
         maxNights: persisted?.maxNights ?? 2,
-        // v7 reset: force-overwrite home base to the Orlando default. Keeps
-        // the user free to pick a different city per session, but stops the
-        // old stuck value from re-loading on every visit.
-        homeBase: DEFAULT_HOME_BASE,
-        homeBaseName: 'Orlando, FL',
+        // v9 reset: origin unset — no default city.
+        homeBase: null as Coordinates | null,
+        homeBaseName: '',
       }),
       partialize: (state) => ({
         // tripPlan is NOT persisted — it's computed data that should be
@@ -585,8 +611,8 @@ export const useTripStore = create<TripState>()(
           tripStatuses: p?.tripStatuses ?? {},
           starredTrips: p?.starredTrips ?? {},
           maxNights: p?.maxNights ?? 2,
-          homeBase: p?.homeBase ?? DEFAULT_HOME_BASE,
-          homeBaseName: p?.homeBaseName ?? 'Orlando, FL',
+          homeBase: p?.homeBase ?? null,
+          homeBaseName: p?.homeBaseName ?? '',
           tripPlan: null, // Always start fresh
         }
       },

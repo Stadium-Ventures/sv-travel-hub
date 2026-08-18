@@ -47,7 +47,6 @@ export default function MapView() {
     setFilterEnd,
     setNext7Days,
     setNext30Days,
-    syncFromTrip,
   } = useMapDateRange()
 
   // Data hooks
@@ -110,7 +109,9 @@ export default function MapView() {
   // stale origin can't blank the answer (Tom 2026-08-12: two FL players
   // filtered, star still in NC, panel claimed "no games in this range").
   const playerScoped = filterState.selectedPlayers.length > 0
-  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, doubleUps, playerScoped)
+  // No origin set = no radius to scope by — suggestions stay broad
+  // (roster-wide) until the user enables the origin filter (Tom 2026-08-18).
+  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, doubleUps, playerScoped || homeBase == null)
 
   // Destination picks — scans ALL tier markers (not drive-filtered) because
   // the whole point of "Where to go?" is to look beyond the current radius.
@@ -135,9 +136,9 @@ export default function MapView() {
     const last = du.dates[du.dates.length - 1] ?? du.date
     const start = first > today ? first : today
     useTripStore.getState().setDateRange(start, last >= start ? last : start)
-    // Anchor the engine at the opportunity's area (origin scrapped 2026-07-22)
-    const anchor = du.games[0]!
-    useTripStore.getState().setHomeBase(anchor.venue.coords, anchor.venue.name)
+    // No setHomeBase here — the origin is user-owned (Tom 2026-08-18: only
+    // the origin picker and star-drag move it). The engine anchors itself
+    // at the first priority player's earliest game.
     dispatchMapEvent('app:switch-tab', { tab: 'trips' })
     window.scrollTo({ top: 0 })
     setTimeout(() => {
@@ -294,28 +295,27 @@ export default function MapView() {
         </div>
       )}
 
-      {/* THE toolbar — dates + origin + radius, with Filters and help
-          tucked into popovers on the right (2026-07-21 apple-fy pass:
-          replaces the old help bar + date bar + full-width filter strip). */}
-      <DateRangeBar
-        filterStart={filterStart}
-        filterEnd={filterEnd}
-        setFilterStart={setFilterStart}
-        setFilterEnd={setFilterEnd}
-        onNext7Days={setNext7Days}
-        onNext30Days={setNext30Days}
-        onUseTripDates={syncFromTrip}
-      >
-        {hasSchedules && (
-          <MapFilters
-            state={filterState}
-            setState={setFilterState}
-            markerCount={tierMarkers.length}
-            totalCount={allTierMarkers.length}
-            daysByPlayerKey={daysByPlayerKey}
-            venueNames={[...new Set(allTierMarkers.map((m) => m.venueName))].sort()}
-          />
-        )}
+      {/* THE toolbar — one Filters popover holding EVERY control (dates,
+          origin, radius, players, tiers...) plus a passive readout of what's
+          applied (Tom 2026-08-18: nest every filter under Filters; the first
+          move is the filters, Maptive-style). */}
+      <DateRangeBar filterStart={filterStart} filterEnd={filterEnd}>
+        <MapFilters
+          state={filterState}
+          setState={setFilterState}
+          markerCount={tierMarkers.length}
+          totalCount={allTierMarkers.length}
+          daysByPlayerKey={daysByPlayerKey}
+          venueNames={[...new Set(allTierMarkers.map((m) => m.venueName))].sort()}
+          dateProps={{
+            filterStart,
+            filterEnd,
+            setFilterStart,
+            setFilterEnd,
+            onNext7Days: setNext7Days,
+            onNext30Days: setNext30Days,
+          }}
+        />
         <MapHelp />
       </DateRangeBar>
 
@@ -430,12 +430,13 @@ export default function MapView() {
               scopedPlayers={filterState.selectedPlayers}
               originName={homeBaseName}
               driveHours={Math.round(maxDriveMinutes / 60)}
-              gamesBeyondRadius={!playerScoped && bestWindows.length === 0 && tierMarkers.length > 0}
+              gamesBeyondRadius={homeBase != null && !playerScoped && bestWindows.length === 0 && tierMarkers.length > 0}
               activeTab={suggestTab}
               setActiveTab={(t) => {
                 setSuggestTab(t)
                 // Returning to "When to go" = back to the starred area
-                if (t === 'when') dispatchMapEvent('map:fit-points', { points: [homeBase] })
+                // (only meaningful once an origin/star exists)
+                if (t === 'when' && homeBase) dispatchMapEvent('map:fit-points', { points: [homeBase] })
               }}
               selectedDoubleUp={selectedDoubleUp}
               setSelectedDoubleUp={setSelectedDoubleUp}
@@ -505,12 +506,13 @@ function MapHelp() {
         ?
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-[320px] rounded-xl border border-border bg-surface px-4 py-3 text-xs text-text-dim leading-relaxed shadow-xl">
+        <div className="absolute left-0 top-full z-40 mt-1 w-[320px] rounded-xl border border-border bg-surface px-4 py-3 text-xs text-text-dim leading-relaxed shadow-xl">
           <p className="mb-1.5 font-semibold text-text">How to use this map</p>
           <ol className="space-y-1 list-decimal list-inside">
-            <li><strong className="text-text">Pick a date range</strong> (or click <em>Next 7 days</em>).</li>
-            <li><strong className="text-text">Pick where you'll be</strong> via the <em>Trip origin</em> dropdown, or drag the star.</li>
-            <li>Each dot = a venue with at least one of your players. Click for who, when, and recency.</li>
+            <li><strong className="text-text">Open Filters</strong>: dates, trip origin, players, tiers, and more all live there.</li>
+            <li>Each dot = a venue with at least one of your players. Click for who, when, and recency. Zoom in to split the numbered clusters.</li>
+            <li>Set a <strong className="text-text">Trip origin</strong> to get the star, drive radius, and distances. Drag the star to move it.</li>
+            <li><strong className="text-text">Click and hold a dot, then drag</strong> to another venue (or anywhere) to measure miles and est. drive.</li>
             <li>Open <em>Suggestions</em> for when to go, where to go, and double ups.</li>
           </ol>
           <p className="mt-2 text-[11px] text-text-dim/60">

@@ -143,13 +143,17 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
   // Compute drive minutes from home base for each game (for full schedule view)
   const gamesWithDrive = useMemo(() => {
     return allGames.map((g) => {
-      const driveMin = estimateDriveMinutes(homeBase, g.venue.coords)
+      // No origin set — no "from where" for a drive estimate (Tom 2026-08-18)
+      const driveMin = homeBase ? estimateDriveMinutes(homeBase, g.venue.coords) : null
       return { game: g, driveMin }
     })
   }, [allGames, homeBase])
 
   // Determine range color for a drive time
-  function getRangeInfo(driveMin: number): { label: string; color: string; borderColor: string; bgColor: string } {
+  function getRangeInfo(driveMin: number | null): { label: string; color: string; borderColor: string; bgColor: string } {
+    if (driveMin == null) {
+      return { label: 'No trip origin set', color: 'text-text-dim', borderColor: 'border-border/30', bgColor: '' }
+    }
     if (driveMin <= maxDriveMinutes) {
       return { label: 'Drive', color: 'text-accent-green', borderColor: 'border-accent-green/30', bgColor: 'bg-accent-green/5' }
     }
@@ -428,7 +432,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                   </span>
                 </h3>
                 <p className="mt-0.5 text-[11px] text-text-dim">
-                  {formatDate(startDate)} — {formatDate(endDate)} | Drive times from {homeBaseName}
+                  {formatDate(startDate)} — {formatDate(endDate)}{homeBase ? ` | Drive times from ${homeBaseName}` : ' | Set a Trip origin for drive times'}
                 </p>
               </div>
             </div>
@@ -519,8 +523,8 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                       </span>
 
                       {/* Drive time + range badge */}
-                      <span className={`text-right font-medium ${range.color} whitespace-nowrap`} title={`${range.label} — ${formatDriveTime(driveMin)} from ${homeBaseName}`}>
-                        {formatDriveTime(driveMin)}
+                      <span className={`text-right font-medium ${range.color} whitespace-nowrap`} title={driveMin == null ? 'Set a Trip origin to see drive times' : `${range.label} — ${formatDriveTime(driveMin)} from ${homeBaseName}`}>
+                        {driveMin == null ? '—' : formatDriveTime(driveMin)}
                       </span>
                     </div>
                   )
@@ -530,13 +534,13 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
 
             {/* Summary stats */}
             {allGames.length > 0 && (() => {
-              const driveCount = gamesWithDrive.filter(({ driveMin }) => driveMin <= maxDriveMinutes).length
+              const driveCount = gamesWithDrive.filter(({ driveMin }) => driveMin != null && driveMin <= maxDriveMinutes).length
               const flyInCount = gamesWithDrive.filter(({ driveMin }) => {
-                if (driveMin <= maxDriveMinutes) return false
+                if (driveMin == null || driveMin <= maxDriveMinutes) return false
                 const approxKm = (driveMin / 60) * 95 / 1.2
                 return (approxKm / 800 + 3) <= maxFlightHours
               }).length
-              const remoteCount = allGames.length - driveCount - flyInCount
+              const remoteCount = homeBase ? allGames.length - driveCount - flyInCount : 0
               const homeCount = allGames.filter((g) => g.isHome).length
               return (
                 <div className="mt-3 rounded-lg bg-gray-950/50 px-3 py-2 text-xs">
@@ -544,14 +548,18 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                     <span className="text-text-dim">Home / Away</span>
                     <span className="text-text">{homeCount}H / {allGames.length - homeCount}A</span>
                   </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-accent-green">Drivable</span>
-                    <span className="text-text">{driveCount} game{driveCount !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-accent-orange">Fly-in</span>
-                    <span className="text-text">{flyInCount} game{flyInCount !== 1 ? 's' : ''}</span>
-                  </div>
+                  {homeBase && (
+                    <>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-accent-green">Drivable</span>
+                        <span className="text-text">{driveCount} game{driveCount !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-accent-orange">Fly-in</span>
+                        <span className="text-text">{flyInCount} game{flyInCount !== 1 ? 's' : ''}</span>
+                      </div>
+                    </>
+                  )}
                   {remoteCount > 0 && (
                     <div className="flex justify-between mt-1">
                       <span className="text-accent-red">Remote</span>

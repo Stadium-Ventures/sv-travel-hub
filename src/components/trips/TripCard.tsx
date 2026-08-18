@@ -369,7 +369,7 @@ function assignStopsToDays(stops: VenueStop[], suggestedDays: string[]): Map<str
   return dayMap
 }
 
-export function generateItineraryText(trip: TripCandidate, index: number, stops: VenueStop[], playerMap: Map<string, RosterPlayer>, homeBase = 'Orlando, FL'): string {
+export function generateItineraryText(trip: TripCandidate, index: number, stops: VenueStop[], playerMap: Map<string, RosterPlayer>, homeBase = 'trip start'): string {
   const startDate = formatDate(trip.suggestedDays[0]!)
   const endDate = formatDate(trip.suggestedDays[trip.suggestedDays.length - 1]!)
   const dayCount = trip.suggestedDays.length
@@ -408,6 +408,12 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
 
 function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerClick, overlappingTrips: _overlappingTrips, alternativeTrips }: Props) {
   const homeBaseName = useTripStore((s) => s.homeBaseName)
+  // driveFromHomeMinutes was measured from the base the ENGINE used (the
+  // anchor venue when priority players re-anchored the run) — label with
+  // THAT, never the live origin (Kent 2026-08-17: distances name their
+  // origin; the two can differ).
+  const planBaseName = useTripStore((s) => s.tripPlan?.baseName)
+  const originLabel = planBaseName || homeBaseName || 'trip start'
   const [selectedAltIndex, setSelectedAltIndex] = useState(-1) // -1 = primary trip
   const allVariants = useMemo(() => [trip, ...(alternativeTrips ?? [])], [trip, alternativeTrips])
   const activeTrip = selectedAltIndex === -1 ? trip : (allVariants[selectedAltIndex + 1] ?? trip)
@@ -492,7 +498,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             {dateLabel} · {[...allPlayers].map(n => {
               const p = playerMap.get(n)
               return p ? n : n
-            }).join(', ')} · ~{formatDriveTime(activeTrip.driveFromHomeMinutes)} from {homeBaseName}
+            }).join(', ')} · ~{formatDriveTime(activeTrip.driveFromHomeMinutes)} from {originLabel}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2 text-[11px] text-text-dim/60">
@@ -691,7 +697,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                   )}
                   {dayIdx === 0 && activeTrip.driveFromHomeMinutes > 0 && (
                     <span className="text-[11px] text-text-dim/60 ml-auto">
-                      Drive from {homeBaseName}: ~{formatDriveTime(activeTrip.driveFromHomeMinutes)}
+                      Drive from {originLabel}: ~{formatDriveTime(activeTrip.driveFromHomeMinutes)}
                     </span>
                   )}
                   {dayIdx === displayDays.length - 1 && lastStop && (

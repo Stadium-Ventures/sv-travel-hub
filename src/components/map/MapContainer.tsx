@@ -19,7 +19,27 @@ import type { TierMarker } from './hooks/useTierMarkers'
 import type { TripCandidate, DoubleUp } from '../../types/schedule'
 import { heartbeatColorFor, type MapColorMode } from './MapFilters'
 import { estimateDriveMinutes } from '../../lib/tripEngine'
+import { formatDriveTime } from '../../lib/formatters'
 import type { EventMarker } from './hooks/useEventMarkers'
+
+/** Straight-line miles — for the click-and-drag measure readout. */
+function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const km = 6371 * 2 * Math.asin(Math.sqrt(
+    Math.sin(toRad(b.lat - a.lat) / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(toRad(b.lng - a.lng) / 2) ** 2,
+  ))
+  return km * 0.621371
+}
+
+function measureLabelHtml(fromName: string, toName: string | null, miles: number, driveMin: number): string {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const dest = toName ? esc(toName) : 'dropped point'
+  return `<div style="background:rgba(15,23,42,0.92);border:1px solid rgba(96,165,250,0.5);border-radius:6px;padding:4px 8px;font-family:system-ui,sans-serif;font-size:11px;color:#f1f5f9;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.5);transform:translate(14px,-50%);pointer-events:none">`
+    + `<div style="color:#94a3b8">${esc(fromName)} to ${dest}</div>`
+    + `<div style="font-weight:700">${Math.round(miles)} mi <span style="color:#60a5fa">· ${formatDriveTime(driveMin)} est. drive</span></div>`
+    + `</div>`
+}
 
 
 // Nearest preset city name for a dragged custom location
@@ -114,6 +134,11 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   const radiusCircleRef = useRef<import('leaflet').Circle | null>(null)
   const tripHighlightRef = useRef<import('leaflet').LayerGroup | null>(null)
   const doubleUpLayerRef = useRef<import('leaflet').LayerGroup | null>(null)
+  // Click-and-hold measure tool (Tom 2026-08-18: drag from a venue to
+  // another venue/point → miles + est. drive). The finished measurement
+  // stays on the map until the next map interaction or a new measure.
+  const measureLayerRef = useRef<import('leaflet').LayerGroup | null>(null)
+  const measureActiveRef = useRef(false)
   const [loaded, setLoaded] = useState(false)
   const [initError, setInitError] = useState<string | null>(null)
   const [initStatus, setInitStatus] = useState('Initializing map...')
@@ -196,21 +221,27 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
             if (players.length > 0) {
               // Seed Priority Players on the trip store. Matches TripPlanner's
               // 5-slot UI (Kent interview 2026-06-08: "if I select five players...").
+              // No setHomeBase — the origin is user-owned (Tom 2026-08-18:
+              // only the picker and star-drag move it); the trip engine
+              // anchors itself at the first priority player's earliest game.
               useTripStore.getState().setPriorityPlayers(players.slice(0, 5))
-              // "Assume the user is in the area" (Tom 2026-07-22): anchor the
-              // trip engine at this venue so the itinerary is built around
-              // the destination, not a home city.
-              const lat = parseFloat(planEl.dataset.lat ?? '')
-              const lng = parseFloat(planEl.dataset.lng ?? '')
-              if (isFinite(lat) && isFinite(lng)) {
-                useTripStore.getState().setHomeBase({ lat, lng }, planEl.dataset.venue || 'Trip area')
-              }
               dispatchMapEvent('app:switch-tab', { tab: 'trips' })
               window.scrollTo({ top: 0 })
               map.closePopup()
             }
           }
         })
+      })
+
+      // A finished measurement clears on the next map interaction (pan or
+      // click) — marker mousedowns don't reach here, so starting a NEW
+      // measure from a dot won't wipe itself.
+      map.on('mousedown', () => {
+        if (measureActiveRef.current) return
+        if (measureLayerRef.current) {
+          map.removeLayer(measureLayerRef.current)
+          measureLayerRef.current = null
+        }
       })
 
       mapInstance.current = map
@@ -240,6 +271,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       if (radiusCircleRef.current) radiusCircleRef.current = null
       if (tripHighlightRef.current) tripHighlightRef.current = null
       if (doubleUpLayerRef.current) doubleUpLayerRef.current = null
+      if (measureLayerRef.current) measureLayerRef.current = null
       setLoaded(false)
     }
   }, [])
@@ -300,6 +332,10 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     if (homeMarkerRef.current) { map.removeLayer(homeMarkerRef.current); homeMarkerRef.current = null }
     if (radiusCircleRef.current) { map.removeLayer(radiusCircleRef.current); radiusCircleRef.current = null }
 
+    // No origin set — no star, no radius circle (Tom 2026-08-18: neither
+    // exists until the user enables the origin filter).
+    if (!homeBase) return
+
     // Home base star marker — draggable. Anchored at its BOTTOM TIP so the
     // star floats just above the location: when the star sits ON a venue
     // (every "Show on map"/plan action moves it onto the anchor venue), the
@@ -332,7 +368,8 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       void reverseGeocodeLabel(pos.lat, pos.lng).then((label) => {
         if (!label) return
         const cur = useTripStore.getState()
-        // Only upgrade if user hasn't moved again or set a preset since.
+        // Only upgrade if user hasn't moved again, cleared, or set a preset since.
+        if (!cur.homeBase) return
         const dlat = Math.abs(cur.homeBase.lat - pos.lat)
         const dlng = Math.abs(cur.homeBase.lng - pos.lng)
         if (dlat < 0.001 && dlng < 0.001) {
@@ -440,6 +477,73 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       }
     }
 
+    // ── Click-and-hold measure (Tom 2026-08-18) ──
+    // Hold on a venue dot, drag: a dashed line + live readout of straight-
+    // line miles and the est. drive follows the cursor, snapping to other
+    // venues and the star. Release keeps the measurement on screen until
+    // the next map interaction. A plain click (under ~8px of movement)
+    // opens the popup exactly as before.
+    function beginMeasure(startTm: TierMarker, marker: import('leaflet').Marker) {
+      if (measureLayerRef.current) { map.removeLayer(measureLayerRef.current); measureLayerRef.current = null }
+      measureActiveRef.current = true
+      map.dragging.disable()
+
+      const start = L.latLng(startTm.coords.lat, startTm.coords.lng)
+      // Snap candidates (other venues + the star), pre-projected once —
+      // the map can't pan while measuring, so container points stay valid.
+      const candidates = [
+        ...tierMarkers
+          .filter((t) => t.key !== startTm.key)
+          .map((t) => ({ name: t.venueName, ll: L.latLng(t.coords.lat, t.coords.lng) })),
+        ...(homeBase ? [{ name: homeBaseName || 'Trip origin', ll: L.latLng(homeBase.lat, homeBase.lng) }] : []),
+      ].map((c) => ({ ...c, pt: map.latLngToContainerPoint(c.ll) }))
+      const startPt = map.latLngToContainerPoint(start)
+
+      let dragged = false
+      let group: import('leaflet').LayerGroup | null = null
+      let line: import('leaflet').Polyline | null = null
+      let label: import('leaflet').Marker | null = null
+      const popup = marker.getPopup()
+
+      const onMove = (e: MouseEvent) => {
+        const pt = map.mouseEventToContainerPoint(e)
+        if (!dragged) {
+          if (pt.distanceTo(startPt) < 8) return
+          dragged = true
+          // A real drag began — suppress the popup the trailing click would
+          // open (rebound after the click settles, in onUp).
+          if (popup) marker.unbindPopup()
+          group = L.layerGroup().addTo(map)
+          line = L.polyline([start, start], { color: '#60a5fa', weight: 2, dashArray: '6,6', interactive: false }).addTo(group)
+          label = L.marker(start, { icon: L.divIcon({ className: '', html: '' }), interactive: false, zIndexOffset: 1200 }).addTo(group)
+        }
+        // Snap to the nearest venue/star within 26px of the cursor
+        let end: import('leaflet').LatLng = map.containerPointToLatLng(pt)
+        let endName: string | null = null
+        let best = 26
+        for (const c of candidates) {
+          const d = pt.distanceTo(c.pt)
+          if (d < best) { best = d; end = c.ll; endName = c.name }
+        }
+        line!.setLatLngs([start, end])
+        const miles = haversineMiles(startTm.coords, { lat: end.lat, lng: end.lng })
+        const driveMin = Math.round(estimateDriveMinutes(startTm.coords, { lat: end.lat, lng: end.lng }))
+        label!.setLatLng(end)
+        label!.setIcon(L.divIcon({ className: '', html: measureLabelHtml(startTm.venueName, endName, miles, driveMin), iconSize: [0, 0] }))
+      }
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+        map.dragging.enable()
+        measureActiveRef.current = false
+        if (!dragged) return // plain click — popup opens normally
+        setTimeout(() => { if (popup) marker.bindPopup(popup) }, 80)
+        measureLayerRef.current = group // stays until the next map interaction
+      }
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+    }
+
     // Add venue markers
     for (const tm of tierMarkers) {
       let color: string
@@ -462,7 +566,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       }
       const icon = L.divIcon({
         className: '',
-        html: `<div class="sv-venue-dot" style="width:10px;height:10px;background:${color}"></div>`,
+        html: `<div class="sv-venue-dot" style="width:10px;height:10px;background:${color}" title="Click for details. Hold and drag to measure distance"></div>`,
         iconSize: [14, 14],
         iconAnchor: [7, 7],
       })
@@ -472,11 +576,21 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       // best tier they contain (read in iconCreateFunction above).
       ;(marker as unknown as { svTier?: number }).svTier = tm.bestTier
 
+      // Click-and-hold measure (Tom 2026-08-18): hold on a dot and drag to
+      // another venue, the star, or any point → live miles + est. drive.
+      // A plain click (no drag) still opens the popup as before; map
+      // panning is untouched because it only starts on a VENUE mousedown.
+      marker.on('mousedown', (ev: import('leaflet').LeafletMouseEvent) => {
+        L.DomEvent.preventDefault(ev.originalEvent)
+        beginMeasure(tm, marker)
+      })
+
       marker.bindPopup(buildVenuePopupHtml(tm, {
         daysByPlayer,
         plannedByPlayer,
         timeMode,
-        origin: { name: homeBaseName, driveMinutes: estimateDriveMinutes(homeBase, tm.coords) },
+        // Drive-from-origin line only exists once an origin does
+        origin: homeBase ? { name: homeBaseName || 'trip origin', driveMinutes: estimateDriveMinutes(homeBase, tm.coords) } : undefined,
       }), {
         maxWidth: 320,
         className: 'sv-dark-popup',
@@ -739,6 +853,9 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
 function DriveRadiusChip() {
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
+  // The radius is measured FROM the origin — no origin, no Drive chip
+  // (Tom 2026-08-18). The US-view button stays regardless.
+  const homeBase = useTripStore((s) => s.homeBase)
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
 
@@ -764,16 +881,18 @@ function DriveRadiusChip() {
       >
         US view
       </button>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 rounded-md border border-border/80 bg-surface/95 backdrop-blur px-2.5 py-1.5 text-[11px] font-medium text-text shadow-md hover:border-accent-blue/50 transition-colors"
-        title="Adjust the dashed drive-radius circle around your starting city"
-      >
-        <span className="inline-block h-1.5 w-3 rounded-full border border-dashed border-accent-blue" />
-        Drive: {display}
-        <span className={`text-text-dim/60 text-[9px] transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
-      </button>
-      {open && (
+      {homeBase && (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1.5 rounded-md border border-border/80 bg-surface/95 backdrop-blur px-2.5 py-1.5 text-[11px] font-medium text-text shadow-md hover:border-accent-blue/50 transition-colors"
+          title="Adjust the dashed drive-radius circle around your starting city"
+        >
+          <span className="inline-block h-1.5 w-3 rounded-full border border-dashed border-accent-blue" />
+          Drive: {display}
+          <span className={`text-text-dim/60 text-[9px] transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+        </button>
+      )}
+      {homeBase && open && (
         <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border border-border bg-surface p-3 shadow-xl">
           <label className="block text-[10px] uppercase tracking-wide text-text-dim/60 mb-1.5">
             Drive radius — {display}

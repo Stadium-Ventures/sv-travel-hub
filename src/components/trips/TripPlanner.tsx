@@ -271,6 +271,7 @@ export default function TripPlanner() {
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const setHomeBase = useTripStore((s) => s.setHomeBase)
+  const clearHomeBase = useTripStore((s) => s.clearHomeBase)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const clearTrips = useTripStore((s) => s.clearTrips)
   const proGames = useScheduleStore((s) => s.proGames)
@@ -670,7 +671,9 @@ export default function TripPlanner() {
               <CityPicker
                 value={homeBaseName}
                 onChange={(coords, cityLabel) => setHomeBase(coords, cityLabel)}
+                onClear={clearHomeBase}
                 presets={STARTING_LOCATIONS}
+                placeholder="No origin set"
                 buttonClass="min-w-[170px] py-1.5"
                 title="Where you'll be. The games list below shows drive times from here. Shared with the Map's Trip Origin."
               />
@@ -747,7 +750,7 @@ export default function TripPlanner() {
           <span>
             {priorityPlayers.length > 0
               ? <>· trips stay within this drive of {priorityPlayers[0]}&rsquo;s games · 3 days max</>
-              : <>· trips stay within this drive of {homeBaseName} (Trip Origin on the Map) · 3 days max</>}
+              : <>· trips stay within this drive of {homeBaseName || 'your trip origin'} (Trip Origin above) · 3 days max</>}
           </span>
         </div>
 
@@ -912,7 +915,7 @@ export default function TripPlanner() {
           {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length > 0 && (
             <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-4 py-3">
               <p className="text-sm text-accent-orange">
-                No road trips possible — all players with games are beyond the {Math.floor(maxDriveMinutes / 60)}h drive radius from {homeBaseName}.
+                No road trips possible — all players with games are beyond the {Math.floor(maxDriveMinutes / 60)}h drive radius from {tripPlan?.baseName || homeBaseName || 'your trip origin'}.
                 See fly-in options below, or increase the max drive time.
               </p>
             </div>
@@ -1032,7 +1035,7 @@ export default function TripPlanner() {
                         </>
                       ) : (
                         <li>
-                          Trips stay within a {Math.floor(maxDriveMinutes / 60)}h drive of {homeBaseName} (Trip Origin + Drive chip on the Map).
+                          Trips stay within a {Math.floor(maxDriveMinutes / 60)}h drive of {tripPlan?.baseName || homeBaseName || 'your trip origin'} (Trip Origin above).
                         </li>
                       )}
                       <li>

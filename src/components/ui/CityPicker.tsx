@@ -35,6 +35,10 @@ interface CityPickerProps {
   buttonClass?: string
   /** Title/tooltip text on the button */
   title?: string
+  /** Shown on the button while no city is set (value === ''). */
+  placeholder?: string
+  /** When provided AND a city is set, renders a small ✕ that unsets it. */
+  onClear?: () => void
 }
 
 export default function CityPicker({
@@ -44,6 +48,8 @@ export default function CityPicker({
   label,
   buttonClass = 'min-w-[180px]',
   title = 'Click to change starting city. Type any city or pick from common ones.',
+  placeholder = 'Pick a city...',
+  onClear,
 }: CityPickerProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -170,9 +176,19 @@ export default function CityPicker({
           className={`flex items-center gap-1.5 rounded border border-border bg-gray-950/50 px-2 py-1 text-xs text-text hover:border-accent-blue/40 transition-colors ${buttonClass}`}
           title={title}
         >
-          <span className="truncate flex-1 text-left">{value}</span>
+          <span className={`truncate flex-1 text-left ${value ? '' : 'text-text-dim/50'}`}>{value || placeholder}</span>
           <span className={`text-text-dim/60 text-[10px] transition-transform ${open ? 'rotate-180' : ''}`}>▼</span>
         </button>
+        {onClear && value && (
+          <button
+            type="button"
+            onClick={() => { onClear(); setOpen(false); setQuery('') }}
+            className="text-text-dim/50 hover:text-text text-xs px-0.5"
+            title="Clear the trip origin (removes the star and drive radius)"
+          >
+            ✕
+          </button>
+        )}
       </label>
 
       {open && (
@@ -235,7 +251,7 @@ export default function CityPicker({
               })}
             </div>
 
-            {!isPreset && !query.trim() && (
+            {value !== '' && !isPreset && !query.trim() && (
               <div className="border-t border-border/40">
                 <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-dim/50 bg-gray-950/40">
                   Currently

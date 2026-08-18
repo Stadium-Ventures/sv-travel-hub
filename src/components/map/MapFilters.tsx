@@ -6,9 +6,17 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRosterStore } from '../../store/rosterStore'
+import { useTripStore } from '../../store/tripStore'
 import type { TierMarker } from './hooks/useTierMarkers'
 import { TIER_COLORS } from './hooks/useTierMarkers'
 import PlayerSearchPicker from '../ui/PlayerSearchPicker'
+import CityPicker from '../ui/CityPicker'
+import { STARTING_LOCATIONS } from '../../data/cityPresets'
+import { dispatchMapEvent } from '../../lib/mapEvents'
+
+function todayISO(): string {
+  return new Date().toISOString().split('T')[0]!
+}
 
 export type MapLevelFilter = 'Pro' | 'NCAA' | 'HS'
 /** How to color venue dots — by player tier (default), or by Heartbeat
@@ -76,6 +84,18 @@ interface MapFiltersProps {
   daysByPlayerKey?: Map<string, number | null>
   /** All loaded venue names — powers the venue search typeahead. */
   venueNames?: string[]
+  /** Date-range state, owned by MapView. Every filter — dates, origin,
+   *  players, tiers — lives under this ONE popover (Tom 2026-08-18, from
+   *  the Maptive flow: "the first move for the user is to go to the
+   *  filters"). */
+  dateProps: {
+    filterStart: string
+    filterEnd: string
+    setFilterStart: (v: string) => void
+    setFilterEnd: (v: string) => void
+    onNext7Days: () => void
+    onNext30Days: () => void
+  }
 }
 
 const TIER_LABEL: Record<number, string> = { 1: 'Must-see (T1)', 2: 'High (T2)', 3: 'Standard (T3)', 4: 'Dev (T4)' }
@@ -125,7 +145,7 @@ export function HeartbeatLegend() {
  * of chrome). The badge shows how many filter categories are active so a
  * narrowed map is never a mystery.
  */
-export default function MapFilters({ state, setState, markerCount, totalCount, daysByPlayerKey, venueNames = [] }: MapFiltersProps) {
+export default function MapFilters({ state, setState, markerCount, totalCount, daysByPlayerKey, venueNames = [], dateProps }: MapFiltersProps) {
   void daysByPlayerKey // accepted so caller can pass; consumed by applyMapFilters below
   const players = useRosterStore((s) => s.players)
   const filtered = markerCount < totalCount
@@ -133,6 +153,23 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
   const [venueFocus, setVenueFocus] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
   const activeCount = countActiveFilters(state)
+
+  // Trip origin + drive radius — shared store, so the Trip Planner stays in
+  // sync. The radius control only exists once an origin is set (the radius
+  // is measured FROM the origin — without one it has no meaning).
+  const homeBase = useTripStore((s) => s.homeBase)
+  const homeBaseName = useTripStore((s) => s.homeBaseName)
+  const setHomeBase = useTripStore((s) => s.setHomeBase)
+  const clearHomeBase = useTripStore((s) => s.clearHomeBase)
+  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
+  const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
+
+  // Draft-buffered date inputs — same guard as the old toolbar inputs:
+  // the store clamps past dates on EVERY change, but typing "10"-"12" in
+  // the month segment passes through a past month on the first keystroke,
+  // and the clamp wiped the second digit (Tom 2026-08-11).
+  const [draftStart, setDraftStart] = useState<string | null>(null)
+  const [draftEnd, setDraftEnd] = useState<string | null>(null)
 
   // Venue typeahead — Kent types "Dayt" hoping for Daytona; the venue is
   // named "Jackie Robinson Ballpark", so raw substring match found nothing.
@@ -191,24 +228,122 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-[360px] space-y-3 rounded-xl border border-border bg-surface p-3.5 shadow-xl">
-          {/* Color-by mode (Kent's "color overdue guys" ask) */}
+        <div className="absolute left-0 top-full z-40 mt-1 w-[400px] max-w-[calc(100vw-2rem)] space-y-3 rounded-xl border border-border bg-surface p-3.5 shadow-xl">
+          {/* The big three first — dates, origin, player (Tom 2026-08-18) */}
+
+          {/* Date range */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Dates</span>
+            <input
+              type="date"
+              value={draftStart ?? dateProps.filterStart}
+              onChange={(e) => {
+                const v = e.target.value
+                setDraftStart(v || null)
+                if (v && v >= todayISO()) dateProps.setFilterStart(v)
+              }}
+              onBlur={() => {
+                if (draftStart) dateProps.setFilterStart(draftStart)
+                setDraftStart(null)
+              }}
+              className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
+            />
+            <span className="text-text-dim text-xs">to</span>
+            <input
+              type="date"
+              value={draftEnd ?? dateProps.filterEnd}
+              onChange={(e) => {
+                const v = e.target.value
+                setDraftEnd(v || null)
+                if (v && v >= todayISO()) dateProps.setFilterEnd(v)
+              }}
+              onBlur={() => {
+                if (draftEnd) dateProps.setFilterEnd(draftEnd)
+                setDraftEnd(null)
+              }}
+              className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
+            />
+            <button
+              onClick={dateProps.onNext7Days}
+              className="rounded bg-gray-950/50 border border-border px-2 py-1 text-[11px] text-text-dim hover:text-text transition-colors"
+            >
+              Next 7 days
+            </button>
+            <button
+              onClick={dateProps.onNext30Days}
+              className="rounded bg-gray-950/50 border border-border px-2 py-1 text-[11px] text-text-dim hover:text-text transition-colors"
+            >
+              Next 30 days
+            </button>
+          </div>
+
+          {/* Trip origin — unset by default; picking one drops the star,
+              flies the map there, and enables the drive radius. */}
           <div className="flex items-center gap-1.5">
-            <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Color by</span>
-            {(['tier', 'heartbeat'] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setState({ ...state, colorBy: mode })}
-                className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                  state.colorBy === mode
-                    ? 'bg-accent-blue/15 text-accent-blue'
-                    : 'text-text-dim/60 hover:text-text hover:bg-gray-800/50'
-                }`}
-                title={mode === 'tier' ? 'Color by player tier (T1 red, T2 orange, T3 gray)' : 'Color by Heartbeat overdue-ness'}
-              >
-                {mode === 'tier' ? 'Tier' : 'Heartbeat'}
-              </button>
-            ))}
+            <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Origin</span>
+            <CityPicker
+              value={homeBaseName}
+              onChange={(coords, cityLabel) => {
+                setHomeBase(coords, cityLabel)
+                dispatchMapEvent('map:fly-to', { lat: coords.lat, lng: coords.lng })
+              }}
+              onClear={clearHomeBase}
+              presets={[...STARTING_LOCATIONS]}
+              placeholder="No origin set"
+              buttonClass="min-w-[160px]"
+              title="Where you'll be. Sets the star + drive radius, and every distance reads from here. Drag the star on the map to move it."
+            />
+          </div>
+          {homeBase && (
+            <div className="flex items-center gap-2">
+              <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Radius</span>
+              <input
+                type="range"
+                min={120}
+                max={480}
+                step={30}
+                value={maxDriveMinutes}
+                onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
+                className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
+                title="Drive radius from your origin (the dashed circle on the map)"
+              />
+              <span className="w-12 shrink-0 text-right text-[11px] text-text">
+                {maxDriveMinutes % 60 > 0 ? `${Math.floor(maxDriveMinutes / 60)}h ${maxDriveMinutes % 60}m` : `${Math.floor(maxDriveMinutes / 60)}h`}
+              </span>
+            </div>
+          )}
+
+          {/* Player picker (affirmative selection — Kent's 2026-06-08 ask).
+              Selected players stack as removable chips; the picker stays
+              open for adding more (Tom 2026-08-11). */}
+          <div className="flex items-start gap-1.5">
+            <span className="w-16 shrink-0 pt-1 text-[10px] uppercase tracking-wide text-text-dim/60">Player</span>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+              {state.selectedPlayers.map((name) => (
+                <span key={name} className="flex items-center gap-1 rounded-lg bg-accent-blue/15 px-2 py-0.5 text-[11px] font-medium text-accent-blue">
+                  {name}
+                  <button
+                    onClick={() => setState({ ...state, selectedPlayers: state.selectedPlayers.filter((n) => n !== name) })}
+                    className="text-accent-blue/60 hover:text-accent-blue"
+                    title={`Remove ${name} from the map filter`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              <PlayerSearchPicker
+                value=""
+                players={players}
+                excludeNames={state.selectedPlayers}
+                placeholder={state.selectedPlayers.length === 0 ? 'Find player...' : '+ Add another...'}
+                onChange={(name) => {
+                  if (name && !state.selectedPlayers.includes(name)) {
+                    setState({ ...state, selectedPlayers: [...state.selectedPlayers, name] })
+                  }
+                }}
+                compact
+              />
+            </div>
           </div>
 
           {/* Quick toggles */}
@@ -277,39 +412,6 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
             })}
           </div>
 
-          {/* Player picker (affirmative selection — Kent's 2026-06-08 ask).
-              Selected players stack as removable chips; the picker stays
-              open for adding more (Tom 2026-08-11). */}
-          <div className="flex items-start gap-1.5">
-            <span className="w-16 shrink-0 pt-1 text-[10px] uppercase tracking-wide text-text-dim/60">Player</span>
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-              {state.selectedPlayers.map((name) => (
-                <span key={name} className="flex items-center gap-1 rounded-lg bg-accent-blue/15 px-2 py-0.5 text-[11px] font-medium text-accent-blue">
-                  {name}
-                  <button
-                    onClick={() => setState({ ...state, selectedPlayers: state.selectedPlayers.filter((n) => n !== name) })}
-                    className="text-accent-blue/60 hover:text-accent-blue"
-                    title={`Remove ${name} from the map filter`}
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
-              <PlayerSearchPicker
-                value=""
-                players={players}
-                excludeNames={state.selectedPlayers}
-                placeholder={state.selectedPlayers.length === 0 ? 'Find player...' : '+ Add another...'}
-                onChange={(name) => {
-                  if (name && !state.selectedPlayers.includes(name)) {
-                    setState({ ...state, selectedPlayers: [...state.selectedPlayers, name] })
-                  }
-                }}
-                compact
-              />
-            </div>
-          </div>
-
           {/* Venue text search with typeahead over loaded venue names */}
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Venue</span>
@@ -338,6 +440,25 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Color-by mode (Kent's "color overdue guys" ask) */}
+          <div className="flex items-center gap-1.5">
+            <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Color by</span>
+            {(['tier', 'heartbeat'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setState({ ...state, colorBy: mode })}
+                className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  state.colorBy === mode
+                    ? 'bg-accent-blue/15 text-accent-blue'
+                    : 'text-text-dim/60 hover:text-text hover:bg-gray-800/50'
+                }`}
+                title={mode === 'tier' ? 'Color by player tier (T1 red, T2 orange, T3 gray)' : 'Color by Heartbeat overdue-ness'}
+              >
+                {mode === 'tier' ? 'Tier' : 'Heartbeat'}
+              </button>
+            ))}
           </div>
 
           {/* Footer: count + clear */}

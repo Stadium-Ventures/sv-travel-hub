@@ -1,128 +1,50 @@
-import { useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { useTripStore } from '../../store/tripStore'
-import CityPicker from '../ui/CityPicker'
-import { STARTING_LOCATIONS } from '../../data/cityPresets'
-import { dispatchMapEvent } from '../../lib/mapEvents'
+import { formatDate } from '../../lib/formatters'
 
-function todayISO(): string {
-  return new Date().toISOString().split('T')[0]!
-}
-
+// The map toolbar is now a Filters button + a passive readout (Tom
+// 2026-08-18, from the Maptive flow: "the first move for the user is to go
+// to the filters" — every control, dates and origin included, lives inside
+// the Filters popover). This bar just says what's currently applied so a
+// narrowed map is never a mystery with the popover closed.
 interface DateRangeBarProps {
   filterStart: string
   filterEnd: string
-  setFilterStart: (v: string) => void
-  setFilterEnd: (v: string) => void
-  onNext7Days: () => void
-  onNext30Days: () => void
-  /** @deprecated date range is unified with Trip Planner now; retained for API compat */
-  onUseTripDates?: () => void
-  /** Right-aligned toolbar slot — MapView injects the Filters popover and
-   *  help button here so the map has ONE toolbar (2026-07-21 apple-fy). */
+  /** Leading slot — MapView injects the Filters popover and help button. */
   children?: ReactNode
 }
 
-export default function DateRangeBar({
-  filterStart,
-  filterEnd,
-  setFilterStart,
-  setFilterEnd,
-  onNext7Days,
-  onNext30Days,
-  children,
-}: DateRangeBarProps) {
+export default function DateRangeBar({ filterStart, filterEnd, children }: DateRangeBarProps) {
+  const homeBase = useTripStore((s) => s.homeBase)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
-  const setHomeBase = useTripStore((s) => s.setHomeBase)
+  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
 
-  // In-progress typing for the date inputs — see the comment at the inputs.
-  const [draftStart, setDraftStart] = useState<string | null>(null)
-  const [draftEnd, setDraftEnd] = useState<string | null>(null)
+  const hours = Math.floor(maxDriveMinutes / 60)
+  const mins = maxDriveMinutes % 60
+  const radiusLabel = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-surface border border-border/50 px-3 py-2">
-      {/* Date range.
-          Draft-buffered: the store setters clamp past dates to today on
-          EVERY change, but typing "10"/"11"/"12" in the month segment
-          passes through a past month on the first keystroke ("1" = Jan),
-          and the clamp re-rendered the input back to today, wiping the
-          second digit (couldn't reach Oct–Dec, Tom 2026-08-11 — same
-          family as the 2026-07-22 `min`-clamp wipe). So while typing, the
-          input shows the raw draft; the store only receives valid non-past
-          dates live, and blur commits (and clamps) whatever is left. */}
-      <input
-        type="date"
-        value={draftStart ?? filterStart}
-        onChange={(e) => {
-          const v = e.target.value
-          setDraftStart(v || null)
-          if (v && v >= todayISO()) setFilterStart(v)
-        }}
-        onBlur={() => {
-          if (draftStart) setFilterStart(draftStart)
-          setDraftStart(null)
-        }}
-        className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
-      />
-      <span className="text-text-dim text-xs">to</span>
-      <input
-        type="date"
-        value={draftEnd ?? filterEnd}
-        onChange={(e) => {
-          const v = e.target.value
-          setDraftEnd(v || null)
-          if (v && v >= todayISO()) setFilterEnd(v)
-        }}
-        onBlur={() => {
-          if (draftEnd) setFilterEnd(draftEnd)
-          setDraftEnd(null)
-        }}
-        className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
-      />
+      {children}
 
-      <div className="flex gap-1">
-        <button
-          onClick={onNext7Days}
-          className="rounded bg-gray-950/50 border border-border px-2 py-1 text-[11px] text-text-dim hover:text-text transition-colors"
-        >
-          Next 7 days
-        </button>
-        <button
-          onClick={onNext30Days}
-          className="rounded bg-gray-950/50 border border-border px-2 py-1 text-[11px] text-text-dim hover:text-text transition-colors"
-        >
-          Next 30 days
-        </button>
-      </div>
-
-      <span className="mx-1 text-text-dim/20">|</span>
-
-      {/* Starting from — the SHARED CityPicker combobox (Photon-backed
-          autocomplete). This bar previously carried its own near-identical
-          fork still on Nominatim, so the "philad → nothing" prefix-search
-          fix never reached the Map toolbar (Tom 2026-08-17). One component,
-          one behavior, both surfaces. */}
-      <CityPicker
-        value={homeBaseName}
-        onChange={(coords, cityLabel) => {
-          setHomeBase(coords, cityLabel)
-          // Picking an origin takes you there — star moves with homeBase,
-          // viewport follows (Tom 2026-08-17).
-          dispatchMapEvent('map:fly-to', { lat: coords.lat, lng: coords.lng })
-        }}
-        presets={[...STARTING_LOCATIONS]}
-        label="Trip origin"
-        buttonClass="min-w-[160px]"
-        title="The city your trips will start from. Drive radius is measured from here. Dragging the star on the map updates this. Type any city or pick from common ones."
-      />
-
-
-      {/* Right-aligned slot: Filters popover + help, injected by MapView so
-          the map has a single toolbar. */}
-      <span className="ml-auto flex items-center gap-2 text-[11px] text-text-dim whitespace-nowrap">
-        {children}
-        <span className="text-text-dim/50" title="Date range, drive radius, and starting city are shared between Map and Trip Planner. Change in either, both update.">
-          synced w/ Trip Planner
+      {/* Current-state readout — filters are the source, this just reports */}
+      <span className="text-xs text-text">
+        {formatDate(filterStart)} to {formatDate(filterEnd)}
+      </span>
+      <span className="text-text-dim/20">|</span>
+      {homeBase ? (
+        <span className="text-xs text-text" title="Trip origin — the star on the map. Distances and the drive radius read from here.">
+          from <span className="font-medium">{homeBaseName}</span>
+          <span className="text-text-dim"> · {radiusLabel} radius</span>
         </span>
+      ) : (
+        <span className="text-xs text-text-dim/60" title="No trip origin yet, so the map shows every game. Pick an origin in Filters to get the star, drive radius, and distances.">
+          no trip origin yet: set one in Filters for distances
+        </span>
+      )}
+
+      <span className="ml-auto text-[11px] text-text-dim/50 whitespace-nowrap" title="Date range, drive radius, and trip origin are shared between Map and Trip Planner. Change in either, both update.">
+        synced w/ Trip Planner
       </span>
     </div>
   )

@@ -153,4 +153,9 @@ export interface TripPlan {
   nearMisses?: NearMiss[]
   doubleUps?: DoubleUp[]
   flyInDiagnostic?: Record<string, string> // priority player name → diagnostic trace
+  /** The base the engine measured driveFromHomeMinutes from (the user's
+   *  origin, or the anchor venue when priority players re-anchored the run).
+   *  Trip cards label distances with THIS, never the live origin — the two
+   *  can differ (Kent 2026-08-17: every distance names its origin). */
+  baseName?: string
 }

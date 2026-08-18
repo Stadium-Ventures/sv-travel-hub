@@ -58,7 +58,9 @@ export type BestWindowStrategy = 'impact' | 't1-count' | 'overdue-priority' | 'p
 
 export function useBestWindows(
   tierMarkers: TierMarker[],
-  homeBase: { lat: number; lng: number },
+  /** NULL while no trip origin is set — callers must pass ignoreRadius=true
+   *  then (no star means no radius to scope by; suggestions stay broad). */
+  homeBase: { lat: number; lng: number } | null,
   maxDriveMinutes: number,
   filterStart: string,
   filterEnd: string,
@@ -88,6 +90,7 @@ export function useBestWindows(
     // Star-scoped (Tom 2026-07-22 course-correct): "when should I travel to
     // the starred spot" — only venues within the drive radius count.
     function driveMinutesFromHome(coords: { lat: number; lng: number }): number {
+      if (!homeBase) return 0 // unreachable in practice: ignoreRadius is true whenever origin is unset
       const km = 6371 * 2 * Math.asin(Math.sqrt(
         Math.sin(((coords.lat - homeBase.lat) * Math.PI / 180) / 2) ** 2 +
         Math.cos(homeBase.lat * Math.PI / 180) * Math.cos(coords.lat * Math.PI / 180) *

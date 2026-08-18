@@ -118,19 +118,22 @@ interface Props {
 export default function SuggestionsPanel(props: Props) {
   const { activeTab, setActiveTab, doubleUps } = props
   const scoped = (props.scopedPlayers?.length ?? 0) > 0
-  // Player-scoped subtitles — the star/radius no longer bounds the answer
+  const hasOrigin = !!props.originName
+  // Player-scoped subtitles — the star/radius no longer bounds the answer.
+  // No origin set = no star to talk about; suggestions are roster-wide.
   const subtitle = scoped
     ? {
         when: `The best dates to see ${props.scopedPlayers!.join(' + ')} — wherever they play.`,
         where: `The best areas to see ${props.scopedPlayers!.join(' + ')} in this date range.`,
         doubleups: TAB_SUBTITLES.doubleups,
       }[activeTab]
-    : TAB_SUBTITLES[activeTab]
-  // Open by default on desktop; collapsed on small screens so the map
-  // (rendered first there) stays the star of the tab.
-  const [open, setOpen] = useState(() => {
-    try { return window.matchMedia('(min-width: 1024px)').matches } catch { return true }
-  })
+    : !hasOrigin && activeTab === 'when'
+      ? 'The best dates across all client games in this range. Set a Trip origin in Filters to scope this to your area.'
+      : TAB_SUBTITLES[activeTab]
+  // Collated until asked for (Tom 2026-08-18): the panel starts as one
+  // compact row and unfurls only when Suggestions or one of its tabs is
+  // clicked — the map is the first read of the page.
+  const [open, setOpen] = useState(false)
 
   const TABS: { key: SuggestTab; label: string }[] = [
     { key: 'when', label: 'When to go' },
@@ -165,7 +168,7 @@ export default function SuggestionsPanel(props: Props) {
         </div>
       </div>
 
-      <p className="mt-1.5 text-[10px] text-text-dim/60">{subtitle}</p>
+      {open && <p className="mt-1.5 text-[10px] text-text-dim/60">{subtitle}</p>}
 
       {open && (
         <div className="mt-3">
@@ -379,14 +382,13 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
 function WhereTab({ picks, stillLoading }: { picks: DestinationPick[]; stillLoading?: boolean }) {
   // Lit-up selection so it's clear which area the map is showing
   const [selectedPick, setSelectedPick] = useState<number | null>(null)
-  // Origin scrapped (Tom 2026-07-22) — picks are just the best AREAS.
-  // "Show on map" fits the viewport to the cluster; "Plan trips" anchors
-  // the engine at the area (assume-the-user-is-there) and generates.
-  // Engaging an area MOVES THE STAR there (Tom 2026-07-22): the radius
-  // circle follows, and "When to go" now answers dates for THIS area.
+  // Picks are just the best AREAS. "Show on map" fits the viewport to the
+  // cluster; "Plan trips" seeds the area's players and generates (the
+  // engine anchors at the first one's earliest game). Neither touches the
+  // star — the origin is user-owned, moved only by the origin picker and
+  // star-drag (Tom 2026-08-18).
   function showArea(p: DestinationPick, i: number) {
     setSelectedPick(i)
-    useTripStore.getState().setHomeBase(p.centroid, p.label)
     if (p.venues.length > 0) {
       dispatchMapEvent('map:fit-points', { points: p.venues.map((v) => v.coords) })
     }
@@ -396,7 +398,6 @@ function WhereTab({ picks, stillLoading }: { picks: DestinationPick[]; stillLoad
     // priority players from a previous plan hijack the results and the
     // area's own trips get hidden (Tom 2026-07-22, the Chicago click).
     useTripStore.getState().setPriorityPlayers(p.players.slice(0, 5).map((pl) => pl.name))
-    useTripStore.getState().setHomeBase(p.centroid, p.label)
     dispatchMapEvent('app:switch-tab', { tab: 'trips' })
     window.scrollTo({ top: 0 })
     setTimeout(() => {
@@ -423,7 +424,7 @@ function WhereTab({ picks, stillLoading }: { picks: DestinationPick[]; stillLoad
                   ? 'bg-accent-blue/15 ring-1 ring-accent-blue/50'
                   : i === 0 ? 'bg-accent-blue/10 hover:bg-accent-blue/15' : 'bg-gray-900/40 hover:bg-gray-900/60'
               }`}
-              title="Move the star here and show the area on the map"
+              title="Zoom the map to this area's venues"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -518,10 +519,9 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
         const travel = airportLabelFor(du)
         const selected = selectedDoubleUp === i
         const focusOnMap = () => {
+          // Selection zooms the map to the pair (MapContainer effect); the
+          // star stays put — origin is user-owned (Tom 2026-08-18).
           setSelectedDoubleUp(i)
-          // Star (and radius circle) follow the pair — same as Where to go
-          const anchor = du.games[0]!
-          useTripStore.getState().setHomeBase(anchor.venue.coords, anchor.venue.name)
         }
         return (
           <div
