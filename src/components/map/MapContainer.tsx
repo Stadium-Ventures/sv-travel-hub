@@ -168,9 +168,13 @@ interface MapContainerProps {
   /** Game id -> double-up kind line for popup rows ("Same-venue double up"
    *  vs "Drivable double up: pairs with X"), Tom 2026-08-18. */
   duLabelByGameId?: Map<string, string>
+  /** Fires with the map bounds after every pan/zoom — the viewport itself
+   *  scopes the left rail (in-view summary + suggestions), Tom 2026-08-18:
+   *  "the map, not the origin or players, informs the suggestions". */
+  onViewportChange?: (b: { south: number; west: number; north: number; east: number }) => void
 }
 
-export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey, doubleUps = [], selectedDoubleUp = null, showAirports = false, duLabelByGameId }: MapContainerProps) {
+export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey, doubleUps = [], selectedDoubleUp = null, showAirports = false, duLabelByGameId, onViewportChange }: MapContainerProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<import('leaflet').Map | null>(null)
   const leafletRef = useRef<typeof import('leaflet') | null>(null)
@@ -201,6 +205,8 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   const heartbeatPlayers = useHeartbeatStore((s) => s.players)
   const timeMode = useTimeStore((s) => s.mode)
   const dragOriginRef = useRef(false) // suppress map re-center after drag
+  const onViewportChangeRef = useRef(onViewportChange)
+  onViewportChangeRef.current = onViewportChange
 
   // Initialize Leaflet. The cleanup function tears down any map instance so
   // that React StrictMode's double-mount in dev doesn't leak a dead init.
@@ -241,10 +247,16 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       const map = savedMapView
         ? L.map(mapRef.current).setView([savedMapView.lat, savedMapView.lng], savedMapView.zoom)
         : L.map(mapRef.current).setView([37.8, -96.9], 4)
+      const emitBounds = () => {
+        const b = map.getBounds()
+        onViewportChangeRef.current?.({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() })
+      }
       map.on('moveend', () => {
         const c = map.getCenter()
         savedMapView = { lat: c.lat, lng: c.lng, zoom: map.getZoom() }
+        emitBounds()
       })
+      emitBounds()
 
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; OpenStreetMap &copy; CARTO',

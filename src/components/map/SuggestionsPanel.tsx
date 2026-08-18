@@ -16,9 +16,16 @@ export type SuggestTab = 'when' | 'where' | 'doubleups'
 const TIER_DOT_COLORS: Record<number, string> = { 1: 'bg-[#ef4444]', 2: 'bg-[#f97316]', 3: 'bg-gray-500' }
 
 const TAB_SUBTITLES: Record<SuggestTab, string> = {
-  when: 'The best dates to visit the starred area, within your drive radius.',
+  when: 'The best dates across all client games in this range. Zoom or move the map to scope this to an area.',
   where: 'The best areas in the US for this date range.',
   doubleups: 'See 2+ clients in one outing. Same-venue = one park covers everyone; drivable = a drive between parks (reach follows your Drive radius).',
+}
+
+// Subtitles while the map is zoomed into an area — the viewport is the scope
+const VIEWPORT_SUBTITLES: Record<SuggestTab, string> = {
+  when: 'The best dates for the area you are viewing on the map. Move or zoom to change it.',
+  where: 'The best spots within your current map view for this date range.',
+  doubleups: 'Double ups fully inside your current map view. Same-venue = one park covers everyone; drivable = a drive between parks.',
 }
 
 // Trimmed to the strategies that give DIFFERENT answers (Tom 2026-07-23:
@@ -105,9 +112,9 @@ interface Props {
   /** Trip origin name + radius — used to say WHY "When to go" is empty. */
   originName?: string
   driveHours?: number
-  /** True when games exist in the date range but all sit outside the drive
-   *  radius — the empty state must not claim "no games" (honesty rule). */
-  gamesBeyondRadius?: boolean
+  /** True while the map is zoomed into an area (and no player filter) —
+   *  the viewport is what scopes the suggestions, and copy says so. */
+  viewportScoped?: boolean
   activeTab: SuggestTab
   setActiveTab: (t: SuggestTab) => void
   selectedDoubleUp: number | null
@@ -118,17 +125,16 @@ interface Props {
 export default function SuggestionsPanel(props: Props) {
   const { activeTab, setActiveTab, doubleUps } = props
   const scoped = (props.scopedPlayers?.length ?? 0) > 0
-  const hasOrigin = !!props.originName
-  // Player-scoped subtitles — the star/radius no longer bounds the answer.
-  // No origin set = no star to talk about; suggestions are roster-wide.
+  // Player-scoped subtitles — the star/radius no longer bounds the answer;
+  // otherwise the VIEWPORT is the scope (Tom + colleague 2026-08-18).
   const subtitle = scoped
     ? {
         when: `The best dates to see ${props.scopedPlayers!.join(' + ')} — wherever they play.`,
         where: `The best areas to see ${props.scopedPlayers!.join(' + ')} in this date range.`,
         doubleups: TAB_SUBTITLES.doubleups,
       }[activeTab]
-    : !hasOrigin && activeTab === 'when'
-      ? 'The best dates across all client games in this range. Set a Trip origin in Filters to scope this to your area.'
+    : props.viewportScoped
+      ? VIEWPORT_SUBTITLES[activeTab]
       : TAB_SUBTITLES[activeTab]
   // Collated until asked for (Tom 2026-08-18): the panel starts as one
   // compact row and unfurls only when Suggestions or one of its tabs is
@@ -202,7 +208,7 @@ export default function SuggestionsPanel(props: Props) {
 
 /* ────────────────────────── WHEN ────────────────────────── */
 
-function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onPlanWindow, stillLoading, scopedPlayers, originName, driveHours, gamesBeyondRadius }: Props) {
+function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, onPlanWindow, stillLoading, scopedPlayers, viewportScoped }: Props) {
   const topPick = windows[0]
   const currentStrategy = STRATEGY_OPTIONS.find((o) => o.value === strategy) ?? STRATEGY_OPTIONS[0]!
   const scoped = (scopedPlayers?.length ?? 0) > 0
@@ -262,18 +268,14 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
                 Schedules are still loading — dates for this area will appear once games arrive.
               </p>
             </>
-          ) : gamesBeyondRadius ? (
-            // Games EXIST in this range — they're just outside the drive
-            // radius from the star. Claiming "no games" here sent Tom
-            // hunting a data bug that didn't exist (2026-08-12).
+          ) : viewportScoped ? (
+            // Games may EXIST elsewhere — they're just outside what the map
+            // is showing. Never claim "no games" when the view is the scope.
             <>
-              <p className="font-medium text-text">
-                No games within {driveHours ?? '?'}h of {originName ?? 'your trip origin'}
-              </p>
+              <p className="font-medium text-text">No games in the area you are viewing</p>
               <p className="mt-1 text-text-dim/80 leading-relaxed">
-                Players do have games in this date range, just farther out — drag the star,
-                pick a different Trip origin, widen the Drive radius, or filter to a player
-                to see their dates wherever they play.
+                Clients may have games elsewhere in this date range. Zoom out (US view)
+                or move the map, or filter to a player to see their dates wherever they play.
               </p>
             </>
           ) : scoped ? (

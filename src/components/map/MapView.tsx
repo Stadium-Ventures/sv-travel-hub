@@ -16,6 +16,7 @@ import { useBestWindows } from './hooks/useBestWindows'
 import type { BestWindowStrategy } from './hooks/useBestWindows'
 import { useDestinationPicks } from './hooks/useDestinationPicks'
 import SuggestionsPanel, { type SuggestTab } from './SuggestionsPanel'
+import InViewSummary from './InViewSummary'
 import MapFilters, { DEFAULT_MAP_FILTERS, applyMapFilters, HeartbeatLegend, type MapFilterState } from './MapFilters'
 import SummerCoverageNotice from './SummerCoverageNotice'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
@@ -129,30 +130,63 @@ export default function MapView() {
   }, [scopedDoubleUps])
   const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey, doubleUpCoords, doubleUpGameIds)
 
+  // ── Viewport scope (Tom + colleague 2026-08-18): the map view itself
+  // informs the left rail. Pan or zoom and the in-view summary + all three
+  // suggestion tabs re-scope to what you're looking at — no origin or
+  // player filter needed. At US view this is simply everything.
+  const [viewport, setViewport] = useState<{ south: number; west: number; north: number; east: number } | null>(null)
+  const inViewport = (lat: number, lng: number) =>
+    !viewport || (lat >= viewport.south && lat <= viewport.north && lng >= viewport.west && lng <= viewport.east)
+  const visibleMarkers = useMemo(
+    () => (viewport ? tierMarkers.filter((m) => inViewport(m.coords.lat, m.coords.lng)) : tierMarkers),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tierMarkers, viewport],
+  )
+  const zoomedWide = !viewport || viewport.east - viewport.west > 45
+  // Double ups fully inside the view (player scope wins when active —
+  // "wherever they play" beats "where I'm looking")
+  const viewDoubleUps = useMemo(
+    () => scopedDoubleUps.filter((du) => du.games.every((g) => inViewport(g.venue.coords.lat, g.venue.coords.lng))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopedDoubleUps, viewport],
+  )
+
   // Filtering to specific players re-scopes the question: "when/where can I
   // see THEM", not "what's near my star". The drive radius is skipped so a
   // stale origin can't blank the answer (Tom 2026-08-12: two FL players
   // filtered, star still in NC, panel claimed "no games in this range").
   const playerScoped = filterState.selectedPlayers.length > 0
-  // No origin set = no radius to scope by — suggestions stay broad
-  // (roster-wide) until the user enables the origin filter (Tom 2026-08-18).
-  const bestWindows = useBestWindows(tierMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, doubleUps, playerScoped || homeBase == null)
+  // The VIEWPORT scopes suggestions (radius no longer does — the star keeps
+  // distances and trip generation, the view says where you're interested).
+  // Player filter still wins: those players wherever they play.
+  const suggestionMarkers = playerScoped ? tierMarkers : visibleMarkers
+  const suggestionDoubleUps = playerScoped ? scopedDoubleUps : viewDoubleUps
+  const bestWindows = useBestWindows(suggestionMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, suggestionDoubleUps, true)
 
-  // Destination picks — scans ALL tier markers (not drive-filtered) because
-  // the whole point of "Where to go?" is to look beyond the current radius.
-  // With a player filter active, scan only THOSE players' markers.
-  const destinationPicks = useDestinationPicks(playerScoped ? tierMarkers : allTierMarkers, 180, 5)
+  // Destination picks — the best areas within what you're looking at (the
+  // whole US when zoomed out).
+  const destinationPicks = useDestinationPicks(suggestionMarkers, 180, 5)
   const playerMap = useMemo(() => {
     const m = new Map<string, RosterPlayer>()
     for (const p of players) m.set(p.playerName, p)
     return m
   }, [players])
   const [suggestTab, setSuggestTab] = useState<SuggestTab>('when')
-  const [selectedDoubleUp, setSelectedDoubleUp] = useState<number | null>(null)
-  // Player filter changes re-scope the Double Ups list, so a remembered
-  // index would highlight the wrong pair — clear it.
+  // Selection is tracked by a stable KEY, not an index — the visible list
+  // re-scopes on every pan/zoom, so an index would drift onto the wrong
+  // pair (selecting a pair zooms the map, which itself re-scopes the list).
+  const duKey = (du: DoubleUp) => `${du.date}|${du.playerNames.join('+')}|${du.games.map((g) => g.venue.name).join('>')}`
+  const [selectedDuKey, setSelectedDuKey] = useState<string | null>(null)
+  const selectedDoubleUp = useMemo(() => {
+    if (!selectedDuKey) return null
+    const i = suggestionDoubleUps.findIndex((du) => duKey(du) === selectedDuKey)
+    return i >= 0 ? i : null
+  }, [suggestionDoubleUps, selectedDuKey])
+  const setSelectedDoubleUp = (i: number | null) =>
+    setSelectedDuKey(i == null ? null : duKey(suggestionDoubleUps[i]!))
+  // Player filter changes re-scope the Double Ups list — clear selection.
   const selectedPlayersKey = filterState.selectedPlayers.join('|')
-  useEffect(() => { setSelectedDoubleUp(null) }, [selectedPlayersKey])
+  useEffect(() => { setSelectedDuKey(null) }, [selectedPlayersKey])
 
   function handlePlanDoubleUp(du: DoubleUp) {
     useTripStore.getState().setPriorityPlayers(du.playerNames.slice(0, 5))
@@ -419,6 +453,19 @@ export default function MapView() {
             </div>
           )}
 
+          {/* In this view — live inventory of the current viewport (Tom +
+              colleague 2026-08-18): names the players you're looking at as
+              you pan/zoom. Always visible, never behind a tab. */}
+          {(allTierMarkers.length > 0 || anyScheduleLoading) && (
+            <InViewSummary
+              markers={visibleMarkers}
+              filterStart={filterStart}
+              filterEnd={filterEnd}
+              onPlayerClick={(n) => setSchedulePanelPlayer(n)}
+              zoomedWide={zoomedWide}
+            />
+          )}
+
           {/* Suggestions — one tabbed panel replacing the old stacked Best
               Windows + Where to go? pair (Tom 2026-07-21: consolidate). Tabs:
               When (dates from the star) · Where (cities, radius-agnostic) ·
@@ -451,12 +498,12 @@ export default function MapView() {
                 }, 100)
               }}
               picks={destinationPicks}
-              doubleUps={scopedDoubleUps}
+              doubleUps={suggestionDoubleUps}
               playerMap={playerMap}
               scopedPlayers={filterState.selectedPlayers}
               originName={homeBaseName}
               driveHours={Math.round(maxDriveMinutes / 60)}
-              gamesBeyondRadius={homeBase != null && !playerScoped && bestWindows.length === 0 && tierMarkers.length > 0}
+              viewportScoped={!playerScoped && !zoomedWide}
               activeTab={suggestTab}
               setActiveTab={(t) => {
                 setSuggestTab(t)
@@ -486,11 +533,12 @@ export default function MapView() {
               duLabelByGameId={duLabelByGameId}
               eventMarkers={eventMarkers}
               fitToMarkersKey={filterState.selectedPlayers.join('|') || undefined}
+              onViewportChange={setViewport}
               doubleUps={
                 // Only the SELECTED pair draws on the map — all 30 at once
                 // was a spaghetti of triangles (Tom 2026-07-22)
-                suggestTab === 'doubleups' && selectedDoubleUp != null && scopedDoubleUps[selectedDoubleUp]
-                  ? [scopedDoubleUps[selectedDoubleUp]!]
+                suggestTab === 'doubleups' && selectedDoubleUp != null && suggestionDoubleUps[selectedDoubleUp]
+                  ? [suggestionDoubleUps[selectedDoubleUp]!]
                   : []
               }
               selectedDoubleUp={selectedDoubleUp != null ? 0 : null}
