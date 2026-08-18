@@ -47,6 +47,7 @@ export default function MapView() {
     setFilterEnd,
     setNext7Days,
     setNext30Days,
+    setFilterRange,
   } = useMapDateRange()
 
   // Data hooks
@@ -108,6 +109,24 @@ export default function MapView() {
     () => new Set(scopedDoubleUps.flatMap((du) => du.games.map((g) => g.id))),
     [scopedDoubleUps],
   )
+  // Per-game double-up kind for popup rows (Tom 2026-08-18: "drivable"
+  // could be misread as same-venue — name which one it is on every game).
+  const duLabelByGameId = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const du of scopedDoubleUps) {
+      const sameVenue = du.type === 'same-venue-matchup' || du.type === 'tournament-cluster'
+      for (const g of du.games) {
+        if (m.has(g.id)) continue
+        if (sameVenue) {
+          m.set(g.id, 'Same-venue double up: one seat covers multiple clients')
+        } else {
+          const partners = [...new Set(du.games.filter((o) => o.id !== g.id && o.venue.name !== g.venue.name).map((o) => o.venue.name))]
+          m.set(g.id, partners.length > 0 ? `Drivable double up: pairs with ${partners.join(' / ')}` : 'Drivable double up')
+        }
+      }
+    }
+    return m
+  }, [scopedDoubleUps])
   const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey, doubleUpCoords, doubleUpGameIds)
 
   // Filtering to specific players re-scopes the question: "when/where can I
@@ -318,6 +337,7 @@ export default function MapView() {
             filterEnd,
             setFilterStart,
             setFilterEnd,
+            setRange: setFilterRange,
             onNext7Days: setNext7Days,
             onNext30Days: setNext30Days,
           }}
@@ -463,6 +483,7 @@ export default function MapView() {
               tierMarkers={tierMarkers}
               colorBy={filterState.colorBy}
               showAirports={filterState.showAirports}
+              duLabelByGameId={duLabelByGameId}
               eventMarkers={eventMarkers}
               fitToMarkersKey={filterState.selectedPlayers.join('|') || undefined}
               doubleUps={

@@ -18,7 +18,7 @@ const TIER_DOT_COLORS: Record<number, string> = { 1: 'bg-[#ef4444]', 2: 'bg-[#f9
 const TAB_SUBTITLES: Record<SuggestTab, string> = {
   when: 'The best dates to visit the starred area, within your drive radius.',
   where: 'The best areas in the US for this date range.',
-  doubleups: 'See 2+ clients in one outing — head-to-heads, same-day doubles, triple ups, stay-overs. Reach follows your Drive radius.',
+  doubleups: 'See 2+ clients in one outing. Same-venue = one park covers everyone; drivable = a drive between parks (reach follows your Drive radius).',
 }
 
 // Trimmed to the strategies that give DIFFERENT answers (Tom 2026-07-23:
@@ -68,11 +68,11 @@ function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult
 
 // Plain gray type labels — color is reserved for the drive tier (green/yellow)
 const DU_TYPE_LABELS: Record<string, { label: string; hint: string }> = {
-  'nearby-venues': { label: 'Same-Day Double', hint: 'Two games a reasonable drive apart on the same day' },
-  'same-venue-matchup': { label: 'Head-to-Head', hint: 'Clients on opposing teams — one game covers both visits' },
-  'tournament-cluster': { label: 'Tournament', hint: '3+ games at the same complex on the same day' },
-  'stay-over': { label: 'Stay-Over', hint: 'Back-to-back days a short drive apart — one hotel covers both' },
-  'triple-up': { label: 'Triple Up', hint: '3+ clients reachable in one day, driving stop to stop within your drive radius' },
+  'nearby-venues': { label: 'Drivable Double Up', hint: 'Two different venues a drive apart on the same day: see one client, drive to the other' },
+  'same-venue-matchup': { label: 'Same-Venue Double Up', hint: 'Head-to-head: clients on opposing teams, one game and one seat covers both visits' },
+  'tournament-cluster': { label: 'Same-Venue Tournament', hint: '3+ games at one complex on the same day: camp out, no driving between clients' },
+  'stay-over': { label: 'Drivable Stay-Over', hint: 'Different venues on back-to-back days, a short drive apart: one hotel covers both' },
+  'triple-up': { label: 'Drivable Triple Up', hint: '3+ clients reachable in one day, driving stop to stop within your drive radius' },
 }
 
 interface Props {

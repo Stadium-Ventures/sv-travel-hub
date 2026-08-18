@@ -70,13 +70,15 @@ function placeOriginAt(lat: number, lng: number) {
   })
 }
 
-function measureLabelHtml(fromName: string, toName: string | null, miles: number, minutes: number, mode: 'drive' | 'flight'): string {
+function measureLabelHtml(fromName: string, toName: string | null, miles: number, minutes: number, mode: 'drive' | 'flight', clearable = false): string {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const dest = toName ? esc(toName) : 'dropped point'
   const accent = mode === 'flight' ? '#7dd3fc' : '#60a5fa'
-  return `<div style="background:rgba(15,23,42,0.92);border:1px solid ${accent}80;border-radius:6px;padding:4px 8px;font-family:system-ui,sans-serif;font-size:11px;color:#f1f5f9;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.5);transform:translate(14px,-50%);pointer-events:none">`
+  const pointer = clearable ? 'pointer-events:auto;cursor:pointer' : 'pointer-events:none'
+  return `<div style="background:rgba(15,23,42,0.92);border:1px solid ${accent}80;border-radius:6px;padding:4px 8px;font-family:system-ui,sans-serif;font-size:11px;color:#f1f5f9;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.5);transform:translate(14px,-50%);${pointer}">`
     + `<div style="color:#94a3b8">${esc(fromName)} to ${dest}</div>`
     + `<div style="font-weight:700">${Math.round(miles)} mi <span style="color:${accent}">· ${formatDriveTime(minutes)} est. ${mode}</span></div>`
+    + (clearable ? `<div style="margin-top:2px;font-size:9px;color:#94a3b8">✕ click to clear</div>` : '')
     + `</div>`
 }
 
@@ -163,9 +165,12 @@ interface MapContainerProps {
   selectedDoubleUp?: number | null
   /** Overlay major-airport badges (Filters toggle, Tom 2026-08-18). */
   showAirports?: boolean
+  /** Game id -> double-up kind line for popup rows ("Same-venue double up"
+   *  vs "Drivable double up: pairs with X"), Tom 2026-08-18. */
+  duLabelByGameId?: Map<string, string>
 }
 
-export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey, doubleUps = [], selectedDoubleUp = null, showAirports = false }: MapContainerProps) {
+export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey, doubleUps = [], selectedDoubleUp = null, showAirports = false, duLabelByGameId }: MapContainerProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<import('leaflet').Map | null>(null)
   const leafletRef = useRef<typeof import('leaflet') | null>(null)
@@ -484,6 +489,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     let group: import('leaflet').LayerGroup | null = null
     let line: import('leaflet').Polyline | null = null
     let label: import('leaflet').Marker | null = null
+    let last: { endName: string | null; miles: number; minutes: number; mode: 'drive' | 'flight' } | null = null
     const popup = marker?.getPopup()
 
     const onMove = (e: MouseEvent) => {
@@ -515,8 +521,9 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         : Math.round(estimateDriveMinutes(start, endCoords))
       line!.setLatLngs([startLL, end])
       line!.setStyle({ color: isFlight ? '#7dd3fc' : '#60a5fa' })
+      last = { endName, miles, minutes, mode: isFlight ? 'flight' : 'drive' }
       label!.setLatLng(end)
-      label!.setIcon(L.divIcon({ className: '', html: measureLabelHtml(start.name, endName, miles, minutes, isFlight ? 'flight' : 'drive'), iconSize: [0, 0] }))
+      label!.setIcon(L.divIcon({ className: '', html: measureLabelHtml(start.name, endName, miles, minutes, last.mode), iconSize: [0, 0] }))
     }
     const onUp = () => {
       document.removeEventListener('mousemove', onMove)
@@ -525,6 +532,24 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       measureActiveRef.current = false
       if (!dragged) return // plain click — popup opens normally
       setTimeout(() => { if (popup && marker) marker.bindPopup(popup) }, 80)
+      // Swap the live label for a CLICKABLE one — clicking the pill clears
+      // the measurement (Tom 2026-08-18: "clear the dotted line easily").
+      // Panning or clicking the map still clears it too.
+      if (group && label && last) {
+        const pos = label.getLatLng()
+        group.removeLayer(label)
+        const clearable = L.marker(pos, {
+          icon: L.divIcon({ className: '', html: measureLabelHtml(start.name, last.endName, last.miles, last.minutes, last.mode, true), iconSize: [0, 0] }),
+          interactive: true,
+          zIndexOffset: 1200,
+        }).addTo(group)
+        clearable.on('click', () => {
+          if (measureLayerRef.current) {
+            map.removeLayer(measureLayerRef.current)
+            measureLayerRef.current = null
+          }
+        })
+      }
       measureLayerRef.current = group // stays until the next map interaction
     }
     document.addEventListener('mousemove', onMove)
@@ -659,6 +684,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         daysByPlayer,
         plannedByPlayer,
         timeMode,
+        duLabelByGameId,
         // Drive-from-origin line only exists once an origin does
         origin: homeBase ? { name: homeBaseName || 'trip origin', driveMinutes: estimateDriveMinutes(homeBase, tm.coords) } : undefined,
       }), {
@@ -671,7 +697,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
 
     map.addLayer(layerGroup)
     clusterGroupRef.current = layerGroup as any
-  }, [loaded, tierMarkers, colorBy, heartbeatPlayers, timeMode, homeBase, homeBaseName])
+  }, [loaded, tierMarkers, colorBy, heartbeatPlayers, timeMode, homeBase, homeBaseName, duLabelByGameId])
 
   // Render non-game event pins — distinct amber 📌 markers, separate from the
   // round player-venue dots, so "who's where" reads at a glance.

@@ -90,15 +90,16 @@ interface Props {
 }
 
 // Categories are named for what Kent physically does, not the data shape:
-// Head-to-Head = one seat sees two clients; Same-Day Double = two parks,
-// short drive between; Tournament = camp out at one complex. Plain gray
-// labels (2026-07-21 polish pass) — color is reserved for the drive tier.
+// Two families (Tom 2026-08-18): Same-Venue = one park covers everyone
+// (head-to-head, tournament); Drivable = a drive between parks (same-day
+// double, stay-over, triple up). Plain gray labels (2026-07-21 polish
+// pass) — color is reserved for the drive tier.
 const TYPE_LABELS: Record<string, { label: string; hint: string }> = {
-  'nearby-venues': { label: 'Same-Day Double', hint: 'Two games a reasonable drive apart on the same day — even with overlapping times, double with a game + a meal' },
-  'same-venue-matchup': { label: 'Head-to-Head', hint: 'Clients on opposing teams — one game covers both visits' },
-  'tournament-cluster': { label: 'Tournament', hint: '3+ games at the same complex on the same day' },
-  'stay-over': { label: 'Stay-Over Double', hint: 'Games on back-to-back days a short drive apart — one hotel covers both visits' },
-  'triple-up': { label: 'Triple Up', hint: '3+ clients reachable in one day, driving stop to stop within your drive radius' },
+  'nearby-venues': { label: 'Drivable Double Up', hint: 'Two different venues a drive apart on the same day: even with overlapping times, double with a game + a meal' },
+  'same-venue-matchup': { label: 'Same-Venue Double Up', hint: 'Head-to-head: clients on opposing teams, one game and one seat covers both visits' },
+  'tournament-cluster': { label: 'Same-Venue Tournament', hint: '3+ games at one complex on the same day: camp out, no driving between clients' },
+  'stay-over': { label: 'Drivable Stay-Over', hint: 'Different venues on back-to-back days, a short drive apart: one hotel covers both visits' },
+  'triple-up': { label: 'Drivable Triple Up', hint: '3+ clients reachable in one day, driving stop to stop within your drive radius' },
 }
 
 /** Kent's proximity tiers (2026-07-21): green within 45 min, yellow 46–90,

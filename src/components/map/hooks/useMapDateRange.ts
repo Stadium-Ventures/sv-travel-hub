@@ -80,6 +80,18 @@ export function useMapDateRange() {
     [setDateRange, filterStart],
   )
 
+  // Atomic range set — the calendar picker commits start AND end together.
+  // (Calling setFilterStart then setFilterEnd in one tick let the second
+  // call read a stale start from its render closure.)
+  const setFilterRange = useCallback(
+    (s: string, e: string) => {
+      const start = clampStart(s)
+      const end = clampStart(e)
+      setDateRange(start, end >= start ? end : start)
+    },
+    [setDateRange],
+  )
+
   const setNext7Days = useCallback(() => {
     const r = next7Days()
     setDateRange(r.start, r.end)
@@ -98,6 +110,7 @@ export function useMapDateRange() {
     filterEnd,
     setFilterStart,
     setFilterEnd,
+    setFilterRange,
     setNext7Days,
     setNext30Days,
     syncFromTrip,

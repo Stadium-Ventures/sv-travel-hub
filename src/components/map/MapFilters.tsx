@@ -11,13 +11,10 @@ import type { TierMarker } from './hooks/useTierMarkers'
 import { TIER_COLORS } from './hooks/useTierMarkers'
 import PlayerSearchPicker from '../ui/PlayerSearchPicker'
 import CityPicker from '../ui/CityPicker'
+import DateRangeCalendar from '../ui/DateRangeCalendar'
 import { STARTING_LOCATIONS } from '../../data/cityPresets'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 import { formatDate } from '../../lib/formatters'
-
-function todayISO(): string {
-  return new Date().toISOString().split('T')[0]!
-}
 
 export type MapLevelFilter = 'Pro' | 'NCAA' | 'HS'
 /** How to color venue dots — by player tier (default), or by Heartbeat
@@ -99,6 +96,8 @@ interface MapFiltersProps {
     filterEnd: string
     setFilterStart: (v: string) => void
     setFilterEnd: (v: string) => void
+    /** Atomic set of both ends — used by the calendar picker. */
+    setRange: (start: string, end: string) => void
     onNext7Days: () => void
     onNext30Days: () => void
   }
@@ -170,19 +169,6 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
 
-  // Draft-buffered date inputs — same guard as the old toolbar inputs:
-  // the store clamps past dates on EVERY change, but typing "10"-"12" in
-  // the month segment passes through a past month on the first keystroke,
-  // and the clamp wiped the second digit (Tom 2026-08-11).
-  const [draftStart, setDraftStart] = useState<string | null>(null)
-  const [draftEnd, setDraftEnd] = useState<string | null>(null)
-  // Closing the popover unmounts the inputs WITHOUT a blur, which could
-  // strand a half-typed draft on screen next open while the store never
-  // heard about it — the inputs must always reopen showing the store truth.
-  useEffect(() => {
-    if (!open) { setDraftStart(null); setDraftEnd(null) }
-  }, [open])
-
   // Venue typeahead — Kent types "Dayt" hoping for Daytona; the venue is
   // named "Jackie Robinson Ballpark", so raw substring match found nothing.
   // Suggest matching venue names as he types; picking one fills the filter.
@@ -243,37 +229,14 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
         <div className="absolute left-0 top-full z-40 mt-1 w-[400px] max-w-[calc(100vw-2rem)] space-y-3 rounded-xl border border-border bg-surface p-3.5 shadow-xl">
           {/* The big three first — dates, origin, player (Tom 2026-08-18) */}
 
-          {/* Date range */}
+          {/* Date range — a calendar picker, so days of the week are
+              visible while choosing (Tom 2026-08-18). */}
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Dates</span>
-            <input
-              type="date"
-              value={draftStart ?? dateProps.filterStart}
-              onChange={(e) => {
-                const v = e.target.value
-                setDraftStart(v || null)
-                if (v && v >= todayISO()) dateProps.setFilterStart(v)
-              }}
-              onBlur={() => {
-                if (draftStart) dateProps.setFilterStart(draftStart)
-                setDraftStart(null)
-              }}
-              className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
-            />
-            <span className="text-text-dim text-xs">to</span>
-            <input
-              type="date"
-              value={draftEnd ?? dateProps.filterEnd}
-              onChange={(e) => {
-                const v = e.target.value
-                setDraftEnd(v || null)
-                if (v && v >= todayISO()) dateProps.setFilterEnd(v)
-              }}
-              onBlur={() => {
-                if (draftEnd) dateProps.setFilterEnd(draftEnd)
-                setDraftEnd(null)
-              }}
-              className="rounded bg-gray-950/50 border border-border px-2 py-1 text-xs text-text"
+            <DateRangeCalendar
+              start={dateProps.filterStart}
+              end={dateProps.filterEnd}
+              onChange={dateProps.setRange}
             />
             <button
               onClick={dateProps.onNext7Days}

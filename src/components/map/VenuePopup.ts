@@ -11,6 +11,9 @@ export interface PopupEnrichment {
   /** Drive from the star/Trip Origin to this venue (Tom 2026-08-17: "can
    *  we get distance from star location if we tap on a dot?"). */
   origin?: { name: string; driveMinutes: number }
+  /** Game id -> double-up kind ("Same-venue..." / "Drivable..."), so each
+   *  row says WHICH kind it is part of (Tom 2026-08-18). */
+  duLabelByGameId?: Map<string, string>
 }
 
 function heartbeatBadgeColor(days: number | null): string {
@@ -117,6 +120,10 @@ export function buildVenuePopupHtml(marker: TierMarker, enrich?: PopupEnrichment
       html += who
         ? `<div style="font-size:10px;color:#60a5fa;white-space:normal">${who}</div>`
         : `<div style="font-size:10px;color:#64748b">no tracked player in this one</div>`
+      const duLabel = enrich?.duLabelByGameId?.get(g.id)
+      if (duLabel) {
+        html += `<div style="font-size:10px;color:#22c55e;white-space:normal">${duLabel}</div>`
+      }
       html += `</span>`
       html += `</div>`
     }
