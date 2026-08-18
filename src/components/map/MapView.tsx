@@ -456,6 +456,7 @@ export default function MapView() {
             <MapContainer
               tierMarkers={tierMarkers}
               colorBy={filterState.colorBy}
+              showAirports={filterState.showAirports}
               eventMarkers={eventMarkers}
               fitToMarkersKey={filterState.selectedPlayers.join('|') || undefined}
               doubleUps={

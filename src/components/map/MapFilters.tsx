@@ -13,6 +13,7 @@ import PlayerSearchPicker from '../ui/PlayerSearchPicker'
 import CityPicker from '../ui/CityPicker'
 import { STARTING_LOCATIONS } from '../../data/cityPresets'
 import { dispatchMapEvent } from '../../lib/mapEvents'
+import { formatDate } from '../../lib/formatters'
 
 function todayISO(): string {
   return new Date().toISOString().split('T')[0]!
@@ -43,6 +44,10 @@ export interface MapFilterState {
    *  from the Mike D Maptive debrief: "our filters should also include
    *  player and double ups." */
   doubleUpsOnly: boolean
+  /** Overlay of major-airport badges on the map (Tom 2026-08-18: toggleable
+   *  airport markers, like the US view button). Overlay, not a filter — it
+   *  never hides venues and doesn't count toward the Filters badge. */
+  showAirports: boolean
 }
 
 export const DEFAULT_MAP_FILTERS: MapFilterState = {
@@ -53,6 +58,7 @@ export const DEFAULT_MAP_FILTERS: MapFilterState = {
   colorBy: 'tier',
   overdueOnly: false,
   doubleUpsOnly: false,
+  showAirports: false,
 }
 
 /** Heartbeat color thresholds (days since in-person visit).
@@ -170,6 +176,12 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
   // and the clamp wiped the second digit (Tom 2026-08-11).
   const [draftStart, setDraftStart] = useState<string | null>(null)
   const [draftEnd, setDraftEnd] = useState<string | null>(null)
+  // Closing the popover unmounts the inputs WITHOUT a blur, which could
+  // strand a half-typed draft on screen next open while the store never
+  // heard about it — the inputs must always reopen showing the store truth.
+  useEffect(() => {
+    if (!open) { setDraftStart(null); setDraftEnd(null) }
+  }, [open])
 
   // Venue typeahead — Kent types "Dayt" hoping for Daytona; the venue is
   // named "Jackie Robinson Ballpark", so raw substring match found nothing.
@@ -367,6 +379,15 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
             >
               Double ups only
             </button>
+            <button
+              onClick={() => setState({ ...state, showAirports: !state.showAirports })}
+              className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                state.showAirports ? 'bg-sky-500/15 text-sky-400' : 'text-text-dim/60 hover:text-text hover:bg-gray-800/50'
+              }`}
+              title="Overlay major-airport badges on the map (never hides venues)"
+            >
+              Airports
+            </button>
           </div>
 
           {/* Tier pills — dots double as the legend in Tier color mode */}
@@ -461,20 +482,31 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
             ))}
           </div>
 
-          {/* Footer: count + clear */}
-          <div className="flex items-center justify-between border-t border-border/30 pt-2 text-[10px] text-text-dim">
+          {/* Footer: live result count + range readout (proof the filters
+              applied — changes are live, no submit needed) + Done to close. */}
+          <div className="flex items-center justify-between gap-2 border-t border-border/30 pt-2 text-[10px] text-text-dim">
             <span>
               {markerCount} venue{markerCount !== 1 ? 's' : ''}
               {filtered && <span className="text-text-dim/40"> of {totalCount}</span>}
+              <span className="text-text-dim/40"> · {formatDate(dateProps.filterStart)} to {formatDate(dateProps.filterEnd)} · applied live</span>
             </span>
-            {activeCount > 0 && (
+            <span className="flex shrink-0 items-center gap-2">
+              {activeCount > 0 && (
+                <button
+                  onClick={() => setState({ ...DEFAULT_MAP_FILTERS, colorBy: state.colorBy, showAirports: state.showAirports })}
+                  className="text-accent-blue/80 hover:text-accent-blue underline-offset-2 hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
               <button
-                onClick={() => setState({ ...DEFAULT_MAP_FILTERS, colorBy: state.colorBy })}
-                className="text-accent-blue/80 hover:text-accent-blue underline-offset-2 hover:underline"
+                onClick={() => setOpen(false)}
+                className="rounded-lg bg-accent-blue px-3 py-1 text-[11px] font-semibold text-white hover:bg-accent-blue/80 transition-colors"
+                title="Filters apply as you change them; this just closes the panel"
               >
-                Clear filters
+                Done
               </button>
-            )}
+            </span>
           </div>
         </div>
       )}

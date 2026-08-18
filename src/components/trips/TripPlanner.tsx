@@ -18,6 +18,7 @@ import { groupAndNumberTrips, itemHasPriorityPlayer, itemPlayerNames, type Unifi
 import { estimateDriveMinutes } from '../../lib/tripEngine'
 import CityPicker from '../ui/CityPicker'
 import NearbyGamesFacts from './NearbyGamesFacts'
+import PriorityFacts from './PriorityFacts'
 import { STARTING_LOCATIONS } from '../../data/cityPresets'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
@@ -797,6 +798,13 @@ export default function TripPlanner() {
             )}
           </div>
         </div>
+
+        {/* Facts before planning (Kent via Tom 2026-08-18): with priority
+            players picked — including arriving via a map popup's "Plan this
+            trip" — lay out each player's venue per date and the distances
+            involved BEFORE any suggestion. Generation stays the explicit
+            button below. */}
+        <PriorityFacts playerMap={playerMap} onPlayerClick={(n) => setSelectedPlayer(n)} />
 
         {/* Trip Anchor moved below results */}
 

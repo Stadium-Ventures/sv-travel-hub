@@ -21,6 +21,14 @@ import { heartbeatColorFor, type MapColorMode } from './MapFilters'
 import { estimateDriveMinutes } from '../../lib/tripEngine'
 import { formatDriveTime } from '../../lib/formatters'
 import type { EventMarker } from './hooks/useEventMarkers'
+import { MAJOR_AIRPORTS } from '../../data/airports'
+
+// Last viewport (center + zoom), survives tab switches: the Map unmounts
+// whenever another tab is active, and re-initializing at the default US
+// view threw away where the user was working (Tom 2026-08-18: "click back
+// to the map, it should save where I left off"). Module-level on purpose —
+// outlives the component, resets on full page reload.
+let savedMapView: { lat: number; lng: number; zoom: number } | null = null
 
 /** Straight-line miles — for the click-and-drag measure readout. */
 function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -30,6 +38,29 @@ function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: 
     Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(toRad(b.lng - a.lng) / 2) ** 2,
   ))
   return km * 0.621371
+}
+
+/** Compact pill for a route leg or connector — centered on its point. */
+function legLabelHtml(miles: number, driveMin: number, accent = '#fbbf24'): string {
+  return `<div style="transform:translate(-50%,-130%);background:rgba(15,23,42,0.9);border:1px solid ${accent}80;border-radius:6px;padding:2px 7px;font-family:system-ui,sans-serif;font-size:10px;font-weight:700;color:${accent};white-space:nowrap;pointer-events:none">${Math.round(miles)} mi · ${formatDriveTime(driveMin)} est. drive</div>`
+}
+
+/** Set the trip origin at a point: optimistic preset-proximity label now,
+ *  upgraded via Nominatim reverse geocode when it returns (same guard as
+ *  star-drag: only if the origin hasn't moved again since). */
+function placeOriginAt(lat: number, lng: number) {
+  const optimistic = nearestCityLabel(lat, lng)
+  useTripStore.getState().setHomeBase({ lat, lng }, optimistic)
+  void reverseGeocodeLabel(lat, lng).then((label) => {
+    if (!label) return
+    const cur = useTripStore.getState()
+    if (!cur.homeBase) return
+    const dlat = Math.abs(cur.homeBase.lat - lat)
+    const dlng = Math.abs(cur.homeBase.lng - lng)
+    if (dlat < 0.001 && dlng < 0.001) {
+      cur.setHomeBase({ lat, lng }, label)
+    }
+  })
 }
 
 function measureLabelHtml(fromName: string, toName: string | null, miles: number, driveMin: number): string {
@@ -122,9 +153,11 @@ interface MapContainerProps {
   doubleUps?: DoubleUp[]
   /** Index into doubleUps to zoom/highlight ("Show on map"). */
   selectedDoubleUp?: number | null
+  /** Overlay major-airport badges (Filters toggle, Tom 2026-08-18). */
+  showAirports?: boolean
 }
 
-export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey, doubleUps = [], selectedDoubleUp = null }: MapContainerProps) {
+export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], fitToMarkersKey, doubleUps = [], selectedDoubleUp = null, showAirports = false }: MapContainerProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<import('leaflet').Map | null>(null)
   const leafletRef = useRef<typeof import('leaflet') | null>(null)
@@ -191,7 +224,14 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       if (cancelled || !mapRef.current) return
 
       setInitStatus('Creating map...')
-      const map = L.map(mapRef.current).setView([37.8, -96.9], 4)
+      // Restore where the user left off (tab switches unmount the map)
+      const map = savedMapView
+        ? L.map(mapRef.current).setView([savedMapView.lat, savedMapView.lng], savedMapView.zoom)
+        : L.map(mapRef.current).setView([37.8, -96.9], 4)
+      map.on('moveend', () => {
+        const c = map.getCenter()
+        savedMapView = { lat: c.lat, lng: c.lng, zoom: map.getZoom() }
+      })
 
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; OpenStreetMap &copy; CARTO',
@@ -363,19 +403,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       const pos = homeMarkerRef.current?.getLatLng()
       if (!pos) return
       dragOriginRef.current = true // prevent map re-center
-      const optimistic = nearestCityLabel(pos.lat, pos.lng)
-      useTripStore.getState().setHomeBase({ lat: pos.lat, lng: pos.lng }, optimistic)
-      void reverseGeocodeLabel(pos.lat, pos.lng).then((label) => {
-        if (!label) return
-        const cur = useTripStore.getState()
-        // Only upgrade if user hasn't moved again, cleared, or set a preset since.
-        if (!cur.homeBase) return
-        const dlat = Math.abs(cur.homeBase.lat - pos.lat)
-        const dlng = Math.abs(cur.homeBase.lng - pos.lng)
-        if (dlat < 0.001 && dlng < 0.001) {
-          cur.setHomeBase({ lat: pos.lat, lng: pos.lng }, label)
-        }
-      })
+      placeOriginAt(pos.lat, pos.lng)
     })
 
     // Drive radius circle
@@ -399,8 +427,9 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   }, [loaded, homeBase, homeBaseName, maxDriveMinutes])
 
   // First-load fit: frame the roster's venues once (the star effect above
-  // recenters on origin changes after that).
-  const didInitialFit = useRef(false)
+  // recenters on origin changes after that). Skipped entirely when a saved
+  // viewport exists — restoring where the user left off wins.
+  const didInitialFit = useRef(savedMapView != null)
   useEffect(() => {
     if (!loaded || !mapInstance.current || !leafletRef.current) return
     if (didInitialFit.current || tierMarkers.length === 0) return
@@ -441,17 +470,22 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
           spiderfyOnMaxZoom: true,
           iconCreateFunction: (cluster: { getAllChildMarkers: () => L.Marker[] }) => {
             const children = cluster.getAllChildMarkers()
-            const count = children.length
             let bestTier = 4
+            let totalGames = 0
             for (const m of children) {
               const t = (m as unknown as { svTier?: number }).svTier
               if (t && t < bestTier) bestTier = t
+              totalGames += (m as unknown as { svGameCount?: number }).svGameCount ?? 0
             }
+            // Big number = GAMES in the area within your dates (Maptive-style
+            // record counts, Tom 2026-08-18) — same meaning as the numbers on
+            // individual dots. Falls back to venue count if no game data.
+            const count = totalGames > 0 ? totalGames : children.length
             const color = TIER_COLORS[bestTier] ?? TIER_COLORS[4]!
-            const size = count >= 10 ? 44 : count >= 5 ? 36 : 28
+            const size = count >= 30 ? 48 : count >= 10 ? 40 : 30
             return L.divIcon({
               className: '',
-              html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color}2e;border:2px solid ${color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:${count >= 10 ? 13 : 12}px;text-shadow:0 1px 2px rgba(0,0,0,0.8);box-shadow:0 0 10px ${color}55">${count}</div>`,
+              html: `<div title="${count} games in this area in your dates. Zoom in to split." style="width:${size}px;height:${size}px;border-radius:50%;background:${color}2e;border:2px solid ${color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:${count >= 100 ? 11 : count >= 10 ? 13 : 12}px;text-shadow:0 1px 2px rgba(0,0,0,0.8);box-shadow:0 0 10px ${color}55">${count}</div>`,
               iconSize: [size, size],
               iconAnchor: [size / 2, size / 2],
             })
@@ -496,6 +530,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
           .filter((t) => t.key !== startTm.key)
           .map((t) => ({ name: t.venueName, ll: L.latLng(t.coords.lat, t.coords.lng) })),
         ...(homeBase ? [{ name: homeBaseName || 'Trip origin', ll: L.latLng(homeBase.lat, homeBase.lng) }] : []),
+        ...(showAirports ? MAJOR_AIRPORTS.map((a) => ({ name: `${a.iata} (${a.name})`, ll: L.latLng(a.lat, a.lng) })) : []),
       ].map((c) => ({ ...c, pt: map.latLngToContainerPoint(c.ll) }))
       const startPt = map.latLngToContainerPoint(start)
 
@@ -564,17 +599,28 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       } else {
         color = TIER_COLORS[tm.bestTier] ?? TIER_COLORS[4]!
       }
-      const icon = L.divIcon({
-        className: '',
-        html: `<div class="sv-venue-dot" style="width:10px;height:10px;background:${color}" title="Click for details. Hold and drag to measure distance"></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7],
-      })
+      // Every dot carries its game count for the selected dates, at all
+      // times (Tom 2026-08-18) — the number IS the date-filter feedback.
+      const gameCount = tm.games.length || tm.gameDates.length
+      const icon = gameCount > 0
+        ? L.divIcon({
+            className: '',
+            html: `<div title="${tm.venueName}: ${gameCount} game${gameCount === 1 ? '' : 's'} in your dates. Click for details. Hold and drag to measure" style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.85);color:#fff;font-weight:700;font-size:${gameCount >= 100 ? 9 : 11}px;box-shadow:0 1px 6px rgba(0,0,0,0.6);cursor:pointer">${gameCount}</div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          })
+        : L.divIcon({
+            className: '',
+            html: `<div class="sv-venue-dot" style="width:10px;height:10px;background:${color}" title="Click for details. Hold and drag to measure distance"></div>`,
+            iconSize: [14, 14],
+            iconAnchor: [7, 7],
+          })
 
       const marker = L.marker([tm.coords.lat, tm.coords.lng], { icon })
-      // Tag the marker with its tier so cluster bubbles can color by the
-      // best tier they contain (read in iconCreateFunction above).
+      // Tag the marker with its tier + game count so cluster bubbles can
+      // color by best tier and sum games (read in iconCreateFunction above).
       ;(marker as unknown as { svTier?: number }).svTier = tm.bestTier
+      ;(marker as unknown as { svGameCount?: number }).svGameCount = gameCount
 
       // Click-and-hold measure (Tom 2026-08-18): hold on a dot and drag to
       // another venue, the star, or any point → live miles + est. drive.
@@ -601,7 +647,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
 
     map.addLayer(layerGroup)
     clusterGroupRef.current = layerGroup as any
-  }, [loaded, tierMarkers, colorBy, heartbeatPlayers, timeMode, homeBase, homeBaseName])
+  }, [loaded, tierMarkers, colorBy, heartbeatPlayers, timeMode, homeBase, homeBaseName, showAirports])
 
   // Render non-game event pins — distinct amber 📌 markers, separate from the
   // round player-venue dots, so "who's where" reads at a glance.
@@ -648,6 +694,42 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     map.addLayer(layer)
     eventLayerRef.current = layer
   }, [loaded, eventMarkers])
+
+  // Airports overlay — toggled from Filters (Tom 2026-08-18). IATA-code
+  // badges for the hubs a scout flies into; popup names the airport and,
+  // once an origin exists, the est. drive from it. Text badges, no emojis.
+  const airportsLayerRef = useRef<import('leaflet').LayerGroup | null>(null)
+  useEffect(() => {
+    if (!loaded || !mapInstance.current || !leafletRef.current) return
+    const L = leafletRef.current
+    const map = mapInstance.current
+    if (airportsLayerRef.current) {
+      map.removeLayer(airportsLayerRef.current)
+      airportsLayerRef.current = null
+    }
+    if (!showAirports) return
+    const layer = L.layerGroup()
+    for (const a of MAJOR_AIRPORTS) {
+      const icon = L.divIcon({
+        className: '',
+        html: `<div title="${a.name} (${a.iata})" style="display:flex;align-items:center;justify-content:center;padding:1px 4px;border-radius:4px;background:rgba(14,165,233,0.18);border:1px solid rgba(56,189,248,0.7);color:#7dd3fc;font-family:system-ui,sans-serif;font-size:9px;font-weight:800;letter-spacing:0.03em;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.5)">${a.iata}</div>`,
+        iconSize: [30, 16],
+        iconAnchor: [15, 8],
+      })
+      let html = `<div style="font-family:system-ui,sans-serif;font-size:12px;color:#f1f5f9;min-width:150px">`
+        + `<div style="font-weight:700;color:#7dd3fc">${a.iata} · ${a.name}</div>`
+      if (homeBase) {
+        const mins = Math.round(estimateDriveMinutes(homeBase, a))
+        html += `<div style="margin-top:2px;font-size:11px;color:#94a3b8">${formatDriveTime(mins)} est. drive from ${homeBaseName || 'trip origin'}</div>`
+      }
+      html += `</div>`
+      L.marker([a.lat, a.lng], { icon, zIndexOffset: 300 })
+        .bindPopup(html, { className: 'sv-dark-popup' })
+        .addTo(layer)
+    }
+    map.addLayer(layer)
+    airportsLayerRef.current = layer
+  }, [loaded, showAirports, homeBase, homeBaseName])
 
   // Auto-fit the map to the visible markers whenever the filter narrows in
   // a "find this for me" way (e.g. user picks a specific player). Keyed off
@@ -707,6 +789,18 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         )
           .bindTooltip(`${label} · ${Math.round(du.driveMinutesBetween)} min apart`, { sticky: true })
           .addTo(layer)
+        // Permanent distance pill at the midpoint — the connector between
+        // the pair's venues explains itself (Tom 2026-08-18 asked if this
+        // line came from an airport; it is venue-to-venue).
+        const duMiles = haversineMiles(g1.venue.coords, g2.venue.coords)
+        L.marker([
+          (g1.venue.coords.lat + g2.venue.coords.lat) / 2,
+          (g1.venue.coords.lng + g2.venue.coords.lng) / 2,
+        ], {
+          icon: L.divIcon({ className: '', html: legLabelHtml(duMiles, Math.round(du.driveMinutesBetween), tierColor), iconSize: [0, 0] }),
+          interactive: false,
+          zIndexOffset: 950,
+        }).addTo(layer)
       } else {
         // Shared venue (head-to-head / tournament) — ×2 badge
         const v = du.games[0]!.venue
@@ -799,6 +893,20 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         opacity: 0.85,
         dashArray: '4,6',
       }).addTo(highlight)
+      // Every leg names its distance + est. drive right on the map
+      // (Tom 2026-08-18: "show on map should always have the distance and
+      // drive length above it").
+      for (let i = 1; i < stops.length; i++) {
+        const a = stops[i - 1]!
+        const b = stops[i]!
+        const miles = haversineMiles(a, b)
+        const driveMin = Math.round(estimateDriveMinutes(a, b))
+        L.marker([(a.lat + b.lat) / 2, (a.lng + b.lng) / 2], {
+          icon: L.divIcon({ className: '', html: legLabelHtml(miles, driveMin), iconSize: [0, 0] }),
+          interactive: false,
+          zIndexOffset: 950,
+        }).addTo(highlight)
+      }
     }
 
     // Numbered halo on each stop
@@ -827,7 +935,15 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       <div ref={mapRef} className="absolute inset-0 rounded-lg" />
 
       {/* Drive-radius chip — adjusts the dashed circle around the star */}
-      <DriveRadiusChip />
+      <DriveRadiusChip
+        onSetStartingLocation={() => {
+          const map = mapInstance.current
+          if (!map) return
+          const c = map.getCenter()
+          dragOriginRef.current = true // keep the current viewport
+          placeOriginAt(c.lat, c.lng)
+        }}
+      />
 
 
       {(initStatus || initError) && (
@@ -850,7 +966,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
  * the map so visual cause-and-effect (slider → dashed circle) happens in
  * the same place. Click to expand the slider, click outside to close.
  */
-function DriveRadiusChip() {
+function DriveRadiusChip({ onSetStartingLocation }: { onSetStartingLocation: () => void }) {
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
   // The radius is measured FROM the origin — no origin, no Drive chip
@@ -881,6 +997,15 @@ function DriveRadiusChip() {
       >
         US view
       </button>
+      {!homeBase && (
+        <button
+          onClick={onSetStartingLocation}
+          className="rounded-md border border-border/80 bg-surface/95 backdrop-blur px-2.5 py-1.5 text-[11px] font-medium text-text shadow-md hover:border-accent-blue/50 transition-colors"
+          title="Drop a draggable star at the center of the map as your starting location. The drive radius appears with it."
+        >
+          Set starting location
+        </button>
+      )}
       {homeBase && (
         <button
           onClick={() => setOpen((v) => !v)}
