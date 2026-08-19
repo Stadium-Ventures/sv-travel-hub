@@ -15,18 +15,20 @@ import { useHeartbeatStore } from './heartbeatStore'
 import { useSummerStore } from './summerStore'
 import { isInSummerWindow } from '../data/summerLeagues'
 
-// Default: 3-day trip starting 1 week from now
 function toISO(d: Date): string {
   return d.toISOString().split('T')[0]!
 }
-// Default window: today → +14 days (Tom 2026-07-22 — Kent plans ~2 weeks out)
+// Default window: today → end of the season (Tom 2026-08-19: every fresh
+// load or refresh starts from the FULL rest-of-season picture; narrowing is
+// a per-session choice, never remembered). Sep 30 matches the pro-schedule
+// fetch window; after Sep 30 "rest of season" rolls to next year's.
 function defaultStart(): string {
   return toISO(new Date())
 }
 function defaultEnd(): string {
-  const d = new Date()
-  d.setDate(d.getDate() + 14)
-  return toISO(d)
+  const now = new Date()
+  const seasonEnd = `${now.getFullYear()}-09-30`
+  return toISO(now) <= seasonEnd ? seasonEnd : `${now.getFullYear() + 1}-09-30`
 }
 
 export type TripStatus = 'planned' | 'completed'
@@ -574,8 +576,6 @@ export const useTripStore = create<TripState>()(
       // persist normally.
       version: 9,
       migrate: (persisted: any) => ({
-        startDate: defaultStart(),
-        endDate: defaultEnd(),
         maxDriveMinutes: persisted?.maxDriveMinutes === 180 ? MAX_DRIVE_MINUTES : (persisted?.maxDriveMinutes ?? MAX_DRIVE_MINUTES),
         maxFlightHours: persisted?.maxFlightHours ?? 4,
         useHeartbeatBoost: persisted?.useHeartbeatBoost ?? false,
@@ -589,9 +589,9 @@ export const useTripStore = create<TripState>()(
       }),
       partialize: (state) => ({
         // tripPlan is NOT persisted — it's computed data that should be
-        // regenerated each session to avoid stale results and schema mismatches
-        startDate: state.startDate,
-        endDate: state.endDate,
+        // regenerated each session to avoid stale results and schema mismatches.
+        // startDate/endDate are NOT persisted either — every session starts
+        // at the rest-of-season default (Tom 2026-08-19).
         maxDriveMinutes: state.maxDriveMinutes,
         maxFlightHours: state.maxFlightHours,
         useHeartbeatBoost: state.useHeartbeatBoost,
@@ -602,14 +602,13 @@ export const useTripStore = create<TripState>()(
         homeBase: state.homeBase,
         homeBaseName: state.homeBaseName,
       }),
-      // Stale-date self-heal: a persisted range whose dates slipped into the
-      // past resets to the fresh default (today → +14d) on every load, not
-      // just on version bumps.
+      // Every load starts at the rest-of-season default (Tom 2026-08-19) —
+      // dates are no longer partialized, but blobs written before that
+      // change still carry them and merge() would restore them, so the
+      // reset here is unconditional.
       onRehydrateStorage: () => (state) => {
         if (!state) return
-        const today = defaultStart()
-        if (state.endDate < today) state.setDateRange(defaultStart(), defaultEnd())
-        else if (state.startDate < today) state.setDateRange(today, state.endDate)
+        state.setDateRange(defaultStart(), defaultEnd())
         // Nights UI removed 2026-07-23 — pin persisted values to Kent's
         // 3-day rule (2 nights) so old 1/3 settings don't silently differ.
         if (state.maxNights !== 2) state.maxNights = 2
