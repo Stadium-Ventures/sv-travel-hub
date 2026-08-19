@@ -19,6 +19,7 @@ import type { TierMarker } from './hooks/useTierMarkers'
 import type { TripCandidate, DoubleUp } from '../../types/schedule'
 import { heartbeatColorFor, type MapColorMode } from './MapFilters'
 import { estimateDriveMinutes } from '../../lib/tripEngine'
+import { orderedTripStops } from '../../lib/routeOrder'
 import { formatDriveTime } from '../../lib/formatters'
 import type { EventMarker } from './hooks/useEventMarkers'
 import { MAJOR_AIRPORTS } from '../../data/airports'
@@ -974,17 +975,12 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     const trip: TripCandidate | undefined = tripPlan.trips[selectedTripIndex]
     if (!trip) return
 
-    // Collect unique venues in route order: anchor first, then nearby games
-    const stops: Array<{ lat: number; lng: number; name: string }> = []
-    const seen = new Set<string>()
-    const pushStop = (coords: { lat: number; lng: number }, name: string) => {
-      const key = `${coords.lat.toFixed(4)},${coords.lng.toFixed(4)}`
-      if (seen.has(key)) return
-      seen.add(key)
-      stops.push({ ...coords, name })
-    }
-    pushStop(trip.anchorGame.venue.coords, trip.anchorGame.venue.name)
-    for (const g of trip.nearbyGames) pushStop(g.venue.coords, g.venue.name)
+    // Unique venues in shortest-drive order — the SAME order the trip
+    // card's lines use, so the map's numbered stops match what's read on
+    // the card (they disagreed before: card by first pitch, map
+    // anchor-first — a Jupiter/Tampa/Port St. Lucie trip drew 6h+ of legs
+    // where 3.5h covers the same parks, Tom 2026-08-19).
+    const stops = orderedTripStops(trip)
     if (stops.length === 0) return
 
     const highlight = L.layerGroup()

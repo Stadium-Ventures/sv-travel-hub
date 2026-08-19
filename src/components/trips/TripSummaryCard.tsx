@@ -3,6 +3,7 @@ import type { TripCandidate, FlyInVisit, GameEvent } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
 import { haversineKm } from '../../lib/tripEngine'
+import { orderLinesByDrive } from '../../lib/routeOrder'
 import { driveTierClass, driveTierTitle } from './DoubleUpSection'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useTimeStore } from '../../store/timeStore'
@@ -42,7 +43,11 @@ function linesForRoadTrip(trip: TripCandidate): GameLine[] {
       source: g.source,
     })
   }
-  return lines.sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''))
+  // Time sort first so same-venue lines stay in first-pitch order, then the
+  // day's venues get re-sequenced for the shortest drive (Tom 2026-08-19:
+  // Kent visits guys around the games — he won't chase every first pitch).
+  lines.sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''))
+  return orderLinesByDrive(lines)
 }
 
 function linesForFlyIn(visit: FlyInVisit): GameLine[] {
@@ -275,6 +280,19 @@ export default function TripSummaryCard({
             </p>
           )
         })}
+        {/* Only when a day actually has multiple parks — otherwise noise */}
+        {(() => {
+          const venuesByDate = new Map<string, Set<string>>()
+          for (const l of lines) {
+            if (!venuesByDate.has(l.date)) venuesByDate.set(l.date, new Set())
+            venuesByDate.get(l.date)!.add(l.venue)
+          }
+          return [...venuesByDate.values()].some((v) => v.size >= 2) ? (
+            <p className="mt-1 text-[10px] text-text-dim/50">
+              Same-day stops run in shortest-drive order, not by first pitch — pick which games to sit and which are a visit around the game.
+            </p>
+          ) : null
+        })()}
       </div>
 
       {/* A series where the same players line up on other dates too — say
