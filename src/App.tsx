@@ -76,24 +76,23 @@ export default function App() {
  *  its own cadence whenever it's stale. Order matters — Roster + Affiliates
  *  must be loaded before Rehab fetches kick in. */
 function AutoFetchData() {
-  // Per-source staleness thresholds — Roster barely changes (24h); Heartbeat
-  // logs visits throughout the day (6h); Rehab posts ~once a day (12h).
+  // Per-source staleness thresholds — Roster always refetches on mount (it
+  // is the source of truth for pruning removed players); Heartbeat logs
+  // visits throughout the day (6h); Rehab posts ~once a day (12h).
   const SIX_H = 6 * 3600_000
   const TWELVE_H = 12 * 3600_000
   const TWENTY_FOUR_H = 24 * 3600_000
 
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
-  const rosterFetched = useRosterStore((s) => s.lastFetchedAt)
   useEffect(() => {
-    const stale = !rosterFetched || (Date.now() - new Date(rosterFetched).getTime() > TWENTY_FOUR_H)
-    // Corrupt-roster self-heal: a persisted roster where most orgs are
-    // blank came from a parse bug (e.g. the 2026-07-23 "Org Temp" column
-    // shadowing "Org"), and its fresh timestamp would otherwise block a
-    // refetch for 24h — the fixed parser never gets a chance to run.
-    const ps = useRosterStore.getState().players
-    const corrupt = ps.length > 0 && ps.filter((p) => !p.org?.trim()).length > ps.length / 2
-    if (stale || corrupt) fetchRoster()
-  }, [fetchRoster, rosterFetched, TWENTY_FOUR_H])
+    // ALWAYS refetch the roster on mount — no staleness gate. The master
+    // sheet is the source of truth for who's on the roster; a session that
+    // runs entirely off the persisted snapshot never fires the
+    // prune-removed-players hook, so removed clients keep surfacing. The
+    // persisted snapshot still gives instant first paint, and fetchRoster
+    // deliberately keeps it when the fetch fails or parses 0 players.
+    fetchRoster()
+  }, [fetchRoster])
 
   const fetchHeartbeat = useHeartbeatStore((s) => s.fetchHeartbeat)
   const heartbeatFetched = useHeartbeatStore((s) => s.lastFetchedAt)

@@ -8,6 +8,10 @@ import {
   todayISO,
 } from '../lib/rehab'
 import { useScheduleStore } from './scheduleStore'
+// Cycle with rosterStore (it imports us for pruning) — safe under ESM
+// because both sides only ACCESS the binding at runtime, never at module
+// init (same pattern as the scheduleStore ↔ rehabStore cycle).
+import { useRosterStore } from './rosterStore'
 
 interface RehabState {
   /** Player name (lowercased trim) → rehab window. Only present for players
@@ -20,6 +24,9 @@ interface RehabState {
     candidates: Array<{ playerName: string; teamId: number; sportId: number; parentOrgId?: number }>,
   ) => Promise<void>
   refreshedAt: number | null
+  /** Drop persisted rehab windows for players no longer on the master
+   *  roster. Called by rosterStore after every successful roster fetch. */
+  pruneRemovedPlayers: () => void
 }
 
 const KEY = (name: string) => name.trim().toLowerCase()
@@ -145,6 +152,21 @@ export const useRehabStore = create<RehabState>()(
         } catch (e) {
           console.warn('[rehab] regenerateProGames failed:', e)
         }
+      },
+
+      pruneRemovedPlayers: () => {
+        // Roster master sheet is the source of truth (Tom 2026-08-17) —
+        // windows are persisted keyed by lowercased name, so an ex-client's
+        // entry outlives the roster otherwise.
+        const rosterPlayers = useRosterStore.getState().players
+        if (rosterPlayers.length === 0) return // roster not loaded — never wipe on an empty read
+        const rosterKeys = new Set(rosterPlayers.map((p) => KEY(p.playerName)))
+        const windows = get().windows
+        const removed = Object.keys(windows).filter((k) => !rosterKeys.has(k))
+        if (removed.length === 0) return
+        const pruned = { ...windows }
+        for (const k of removed) delete pruned[k]
+        set({ windows: pruned })
       },
     }),
     {

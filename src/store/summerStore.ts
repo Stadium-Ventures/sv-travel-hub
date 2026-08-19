@@ -16,6 +16,10 @@ import { SUMMER_LEAGUES, type SummerLeagueCode } from '../data/summerLeagues'
 import { lookupSummerVenueCoords } from '../data/summerVenues'
 import { fetchManualSummerSchedule, isManualCsvConfigured } from '../lib/summerManualSchedule'
 import { useDiagnosticsStore } from './diagnosticsStore'
+// Cycle with rosterStore (it imports us for pruning) — safe under ESM
+// because both sides only ACCESS the binding at runtime, never at module
+// init (same pattern as the scheduleStore ↔ rehabStore cycle).
+import { useRosterStore } from './rosterStore'
 
 export interface ResolvedSummerTeam {
   team: PartnerLeagueTeam
@@ -38,6 +42,22 @@ interface SummerState {
 
   loadAssignments: () => Promise<void>
   loadSchedules: (startDate: string, endDate: string, opts?: { force?: boolean }) => Promise<void>
+  /** Drop persisted summer assignments (and any in-memory games/warnings
+   *  built from them) for players no longer on the master roster. Called by
+   *  rosterStore after every successful roster fetch. */
+  pruneRemovedPlayers: () => void
+}
+
+/** Case-insensitive, trimmed name key — the Summer Ball Placement sheet is
+ *  hand-maintained, so its spellings can drift from the roster master. */
+const nameKey = (n: string) => n.trim().toLowerCase()
+
+/** Set of roster-name keys, or null while the roster hasn't loaded (never
+ *  treat an empty roster read as "everyone was removed"). */
+function rosterNameKeys(): Set<string> | null {
+  const players = useRosterStore.getState().players
+  if (players.length === 0) return null
+  return new Set(players.map((p) => nameKey(p.playerName)))
 }
 
 function gameToEvent(
@@ -95,16 +115,30 @@ export const useSummerStore = create<SummerState>()(
         diag.clearSource('summer')
         try {
           const result = await fetchSummerAssignments()
+          // The Summer Ball Placement sheet has no cross-check against the
+          // roster master — removed clients linger on it. The roster is the
+          // source of truth (Tom 2026-08-17): ignore assignments for names
+          // not on it. Skip the filter only while the roster hasn't loaded.
+          const rosterKeys = rosterNameKeys()
+          const assignments = rosterKeys
+            ? result.assignments.filter((a) => rosterKeys.has(nameKey(a.playerName)))
+            : result.assignments
+          // Warnings are persisted and can quote sheet names verbatim —
+          // drop any that mention a filtered-out (ex-roster) player.
+          const removedNames = result.assignments
+            .filter((a) => !assignments.includes(a))
+            .map((a) => a.playerName.trim())
+          const warnings = result.warnings.filter((w) => !removedNames.some((n) => n && w.includes(n)))
           const byPlayer: Record<string, SummerAssignment> = {}
-          for (const a of result.assignments) byPlayer[a.playerName] = a
+          for (const a of assignments) byPlayer[a.playerName] = a
           set({
-            assignments: result.assignments,
+            assignments,
             byPlayer,
             fetchedAt: result.fetchedAt,
-            warnings: result.warnings,
+            warnings,
             loading: false,
           })
-          for (const w of result.warnings) {
+          for (const w of warnings) {
             diag.addIssue({ level: 'warning', source: 'summer', message: w })
           }
         } catch (e) {
@@ -280,6 +314,34 @@ export const useSummerStore = create<SummerState>()(
 
         // Silence unused-var warning when opts is not supplied
         void opts
+      },
+
+      pruneRemovedPlayers: () => {
+        // Roster master sheet is the source of truth (Tom 2026-08-17) —
+        // persisted summer assignments (and the games/warnings built from
+        // them this session) must not keep an ex-client's name alive.
+        const rosterKeys = rosterNameKeys()
+        if (!rosterKeys) return // roster not loaded — never wipe on an empty read
+        const state = get()
+        const kept = state.assignments.filter((a) => rosterKeys.has(nameKey(a.playerName)))
+        if (kept.length === state.assignments.length) return
+        const removedNames = state.assignments
+          .filter((a) => !rosterKeys.has(nameKey(a.playerName)))
+          .map((a) => a.playerName.trim())
+        const byPlayer: Record<string, SummerAssignment> = {}
+        for (const [name, a] of Object.entries(state.byPlayer)) {
+          if (rosterKeys.has(nameKey(name))) byPlayer[name] = a
+        }
+        const summerGames = state.summerGames
+          .map((g) => ({ ...g, playerNames: g.playerNames.filter((n) => rosterKeys.has(nameKey(n))) }))
+          .filter((g) => g.playerNames.length > 0)
+        set({
+          assignments: kept,
+          byPlayer,
+          summerGames,
+          unresolvedPlayers: state.unresolvedPlayers.filter((n) => rosterKeys.has(nameKey(n))),
+          warnings: state.warnings.filter((w) => !removedNames.some((n) => n && w.includes(n))),
+        })
       },
     }),
     {

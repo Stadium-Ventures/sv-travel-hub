@@ -66,7 +66,7 @@ export function useVenuePlayerMap() {
         const player = players.find((p) => p.playerName === name)
         // A name stamped on a cached game but absent from the roster is a
         // ghost — a player removed from the master sheet whose persisted
-        // schedule data hasn't been pruned yet (Davis Sharpe, 2026-08-17).
+        // schedule data hasn't been pruned yet (2026-08-17).
         // The roster is the source of truth; never surface ghosts. (Skip
         // the guard only while the roster hasn't loaded at all.)
         if (!player && players.length > 0) continue

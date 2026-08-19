@@ -666,26 +666,30 @@ export const useScheduleStore = create<ScheduleState>()(
         // removed from the sheet = removed from the app). Assignments are
         // persisted and keyed by name, and auto-assign only ever UPDATES
         // names still on the roster — spreading the old map kept removed
-        // players (Davis Sharpe) alive forever, and regenerateProGames kept
-        // stamping them onto games, where they surfaced as tier-4 ghosts.
+        // players alive forever, and regenerateProGames kept stamping them
+        // onto games, where they surfaced as tier-4 ghosts. rosterMoves and
+        // assignmentLog are persisted too, so ex-roster names must be
+        // dropped from them as well (not even logged — removed from the
+        // sheet means not stored anywhere).
         const rosterPlayers = useRosterStore.getState().players
         if (rosterPlayers.length === 0) return // roster not loaded — never wipe on an empty read
         const rosterNames = new Set(rosterPlayers.map((p) => p.playerName))
         const assignments = get().playerTeamAssignments
         const removed = Object.keys(assignments).filter((n) => !rosterNames.has(n))
-        if (removed.length === 0) return
+        const oldMoves = get().rosterMoves
+        const prunedMoves = oldMoves.filter((m) => rosterNames.has(m.player.fullName))
+        const oldLog = get().assignmentLog ?? []
+        const prunedLog = oldLog.filter((e) => rosterNames.has(e.playerName))
+        if (removed.length === 0 && prunedMoves.length === oldMoves.length && prunedLog.length === oldLog.length) return
         const pruned = { ...assignments }
         for (const n of removed) delete pruned[n]
-        const logTimestamp = Date.now()
         set({
           playerTeamAssignments: pruned,
-          assignmentLog: [
-            ...(get().assignmentLog ?? []),
-            ...removed.map((playerName) => ({ playerName, action: 'removed' as const, timestamp: logTimestamp })),
-          ],
+          rosterMoves: prunedMoves,
+          assignmentLog: prunedLog,
         })
-        debugLog(`[roster-prune] dropped ${removed.length} ex-roster assignment(s): ${removed.join(', ')}`)
-        get().regenerateProGames()
+        debugLog(`[roster-prune] dropped ${removed.length} ex-roster assignment(s), ${oldMoves.length - prunedMoves.length} roster move(s), ${oldLog.length - prunedLog.length} log entrie(s)`)
+        if (removed.length > 0) get().regenerateProGames()
       },
 
       regenerateProGames: () => {

@@ -6,3 +6,6 @@ dist
 tsconfig.tsbuildinfo
 .vercel
 .env*
+
+# Client-name snapshots — never commit (roster hygiene, 2026-08-19)
+src/data/clientSchedule.csv

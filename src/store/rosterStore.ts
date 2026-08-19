@@ -3,10 +3,13 @@ import { persist } from 'zustand/middleware'
 import type { RosterPlayer } from '../types/roster'
 import { fetchRoster } from '../lib/csv'
 import { useDiagnosticsStore } from './diagnosticsStore'
-// Cycle with scheduleStore (it imports us) — safe under ESM because both
-// sides only ACCESS the binding at runtime, never at module init (same
+// Cycles with the stores below (they import us) — safe under ESM because
+// both sides only ACCESS the binding at runtime, never at module init (same
 // pattern as the scheduleStore ↔ rehabStore cycle).
 import { useScheduleStore } from './scheduleStore'
+import { useTripStore } from './tripStore'
+import { useRehabStore } from './rehabStore'
+import { useSummerStore } from './summerStore'
 
 interface VisitOverride {
   visitsCompleted: number
@@ -81,9 +84,15 @@ export const useRosterStore = create<RosterState>()(
           set({ players, loading: false, lastFetchedAt: new Date().toISOString(), parseWarnings: result.warnings, visitOverrides: prunedOverrides })
 
           // Removed from the master sheet = removed from the app (Tom
-          // 2026-08-17, Davis Sharpe). Persisted team assignments outlive
-          // the roster otherwise and keep stamping ex-clients onto games.
+          // 2026-08-17). Persisted names outlive the roster otherwise —
+          // team assignments keep stamping ex-clients onto games, and
+          // priority picks / rehab windows / summer assignments keep
+          // surfacing them elsewhere. Prune every persisted name store
+          // against the fresh roster.
           useScheduleStore.getState().pruneRemovedPlayers()
+          useTripStore.getState().pruneRemovedPlayers()
+          useRehabStore.getState().pruneRemovedPlayers()
+          useSummerStore.getState().pruneRemovedPlayers()
 
           // Diagnostics
           const diag = useDiagnosticsStore.getState()

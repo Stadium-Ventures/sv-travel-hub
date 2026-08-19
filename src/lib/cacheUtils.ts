@@ -1,3 +1,5 @@
+import { keys as idbKeys, del as idbDel } from 'idb-keyval'
+
 /**
  * Clear all localStorage caches used by the app.
  * This does NOT clear Zustand persisted state (settings, assignments, etc.)
@@ -18,12 +20,26 @@ export function clearScheduleCaches(): void {
 }
 
 /**
- * Clear EVERYTHING — all sv-travel localStorage keys including Zustand stores.
- * Use with caution: this resets all settings and assignments.
+ * Clear EVERYTHING — all sv-travel localStorage keys including Zustand stores,
+ * plus the IndexedDB-persisted stores (sv-travel-schedule, sv-travel-summer —
+ * see idbStorage.ts: they live as keys in idb-keyval's default DB, not in
+ * localStorage, so clearing localStorage alone leaves proGames and summer
+ * assignments behind). Use with caution: this resets all settings and
+ * assignments.
  */
-export function clearAllData(): void {
-  const keys = Object.keys(localStorage).filter((k) => k.startsWith('sv-travel'))
-  for (const key of keys) {
+export async function clearAllData(): Promise<void> {
+  const lsKeys = Object.keys(localStorage).filter((k) => k.startsWith('sv-travel'))
+  for (const key of lsKeys) {
     localStorage.removeItem(key)
+  }
+  try {
+    const allIdbKeys = await idbKeys()
+    await Promise.all(
+      allIdbKeys
+        .filter((k): k is string => typeof k === 'string' && k.startsWith('sv-travel'))
+        .map((k) => idbDel(k)),
+    )
+  } catch {
+    // IndexedDB unavailable (e.g. private mode) — localStorage is already cleared
   }
 }

@@ -11,9 +11,12 @@
  * Run:  npx tsx scripts/generateHsFromCsv.ts
  *       npx tsx scripts/generateHsFromCsv.ts --fetch   (download fresh CSV first)
  *
- * Input: src/data/clientSchedule.csv
- * Exit codes: 0 = OK (warnings allowed), 1 = hard failure (HTML body,
- * parse errors, missing required headers, or zero HS/JUCO rows).
+ * Input: src/data/clientSchedule.csv — NOT committed (it names clients;
+ * roster hygiene 2026-08-19, gitignored). Run with --fetch to download a
+ * fresh local copy; without one the script skips validation cleanly.
+ * Exit codes: 0 = OK (warnings allowed, or no local CSV to validate),
+ * 1 = hard failure (HTML body, parse errors, missing required headers,
+ * or zero HS/JUCO rows).
  */
 
 import * as fs from 'fs'
@@ -77,11 +80,13 @@ async function main() {
     console.log(`  Saved ${CSV_PATH} (${text.split('\n').length} lines)`)
   }
 
-  // Read CSV
+  // Read CSV — optional. The snapshot is deliberately not committed (it
+  // names clients, including ones since removed from the roster), so a
+  // fresh checkout has nothing to validate. That's a skip, not a failure.
   if (!fs.existsSync(CSV_PATH)) {
-    console.error(`CSV not found at ${CSV_PATH}`)
-    console.error('Run with --fetch to download, or place the CSV manually.')
-    process.exit(1)
+    console.log(`No local CSV at ${CSV_PATH} — skipping validation.`)
+    console.log('(The snapshot is intentionally not committed. Run with --fetch to download a fresh copy and validate it.)')
+    process.exit(0)
   }
 
   const csvText = fs.readFileSync(CSV_PATH, 'utf-8')

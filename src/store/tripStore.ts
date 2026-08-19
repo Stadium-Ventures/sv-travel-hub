@@ -132,6 +132,9 @@ interface TripState {
   setUseHeartbeatBoost: (v: boolean) => void
   setSelectedTripIndex: (index: number | null) => void
   setMapFocus: (focus: TripState['mapFocus']) => void
+  /** Drop persisted priority picks for players no longer on the master
+   *  roster. Called by rosterStore after every successful roster fetch. */
+  pruneRemovedPlayers: () => void
 }
 
 // Track active worker for cancel support
@@ -173,6 +176,16 @@ export const useTripStore = create<TripState>()(
   setMaxFlightHours: (maxFlightHours) => set({ maxFlightHours }),
   setUseHeartbeatBoost: (useHeartbeatBoost: boolean) => set({ useHeartbeatBoost }),
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
+  pruneRemovedPlayers: () => {
+    // Roster master sheet is the source of truth (Tom 2026-08-17) —
+    // persisted priority picks must not keep an ex-client's name alive.
+    const rosterPlayers = useRosterStore.getState().players
+    if (rosterPlayers.length === 0) return // roster not loaded — never wipe on an empty read
+    const rosterNames = new Set(rosterPlayers.map((p) => p.playerName))
+    const current = get().priorityPlayers
+    const kept = current.filter((n) => rosterNames.has(n))
+    if (kept.length !== current.length) set({ priorityPlayers: kept })
+  },
   setHomeBase: (homeBase, homeBaseName) => set({ homeBase, homeBaseName }),
   clearHomeBase: () => set({ homeBase: null, homeBaseName: '' }),
   setMaxNights: (maxNights: number) => set({ maxNights }),
