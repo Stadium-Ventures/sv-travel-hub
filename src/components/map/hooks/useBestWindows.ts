@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { TierMarker } from './useTierMarkers'
 import type { DoubleUp } from '../../../types/schedule'
 import { useScheduleStore } from '../../../store/scheduleStore'
+import { isSameVenueDoubleUp } from '../../../lib/doubleUps'
 import { useHeartbeatStore } from '../../../store/heartbeatStore'
 
 const TIER_WEIGHTS: Record<number, number> = { 1: 5, 2: 3, 3: 1, 4: 0 }
@@ -29,8 +30,12 @@ export interface WindowResult {
    *  record (per Heartbeat). Drives a small "N overdue" boost in scoring. */
   overdueCount: number
   /** Double-up opportunities (reachable within the drive radius) with at
-   *  least one game date inside this window. */
+   *  least one game date inside this window — BOTH families combined. */
   doubleUpCount: number
+  /** How many of doubleUpCount are same-venue (plain "double ups"); the
+   *  rest are drivable. Split so UI chips never label drivable combos as
+   *  plain double ups (Tom 2026-08-19). */
+  sameVenueDoubleUpCount: number
 }
 
 
@@ -139,12 +144,16 @@ export function useBestWindows(
       : doubleUps.filter((du) =>
           du.games.every((g) => driveMinutesFromHome(g.venue.coords) <= maxDriveMinutes),
         )
-    function countDoubleUpsInWindow(start: string, end: string): number {
-      let n = 0
+    function countDoubleUpsInWindow(start: string, end: string): { total: number; sameVenue: number } {
+      let total = 0
+      let sameVenue = 0
       for (const du of reachableDoubleUps) {
-        if (du.dates.some((d) => d >= start && d <= end)) n++
+        if (du.dates.some((d) => d >= start && d <= end)) {
+          total++
+          if (isSameVenueDoubleUp(du.type)) sameVenue++
+        }
       }
-      return n
+      return { total, sameVenue }
     }
 
     // Heartbeat lookup
@@ -271,6 +280,7 @@ export function useBestWindows(
         // Trim the advertised span to where the games actually are — sliding
         // windows that catch the same single game date all collapse to that
         // date (the overlap dedupe below then keeps only the best one).
+        const duCounts = countDoubleUpsInWindow(gameDates[0]!, gameDates[gameDates.length - 1]!)
         results.push({
           startDate: gameDates[0]!,
           endDate: gameDates[gameDates.length - 1]!,
@@ -285,7 +295,8 @@ export function useBestWindows(
           hasTuesday,
           timeConflictCount,
           overdueCount,
-          doubleUpCount: countDoubleUpsInWindow(gameDates[0]!, gameDates[gameDates.length - 1]!),
+          doubleUpCount: duCounts.total,
+          sameVenueDoubleUpCount: duCounts.sameVenue,
         })
       }
 

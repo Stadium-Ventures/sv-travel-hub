@@ -10,11 +10,21 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout'
+import { MAJOR_AIRPORTS } from '../../data/airports'
 
 export interface CityPreset {
   name: string
   coords: { lat: number; lng: number }
 }
+
+// Agents often fly in and start the trip AT the airport (Tom 2026-08-19),
+// so every origin picker offers the major-airport list alongside cities.
+// Searchable by IATA code ("mco") or city name; unfiltered view shows the
+// biggest hubs (the list is roughly ordered by traffic).
+const AIRPORT_PRESETS: CityPreset[] = MAJOR_AIRPORTS.map((a) => ({
+  name: `${a.iata} — ${a.name}`,
+  coords: { lat: a.lat, lng: a.lng },
+}))
 
 interface CitySuggestion {
   lat: number
@@ -39,6 +49,8 @@ interface CityPickerProps {
   placeholder?: string
   /** When provided AND a city is set, renders a small ✕ that unsets it. */
   onClear?: () => void
+  /** Tooltip for the ✕ — say what clearing means on THIS surface. */
+  clearTitle?: string
 }
 
 export default function CityPicker({
@@ -50,6 +62,7 @@ export default function CityPicker({
   title = 'Click to change starting city. Type any city or pick from common ones.',
   placeholder = 'Pick a city...',
   onClear,
+  clearTitle = 'Clear the trip origin (removes the star and drive radius)',
 }: CityPickerProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -59,7 +72,7 @@ export default function CityPicker({
   const abortRef = useRef<AbortController | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const isPreset = presets.some((p) => p.name === value)
+  const isPreset = presets.some((p) => p.name === value) || AIRPORT_PRESETS.some((a) => a.name === value)
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -166,6 +179,12 @@ export default function CityPicker({
     ? presets
     : presets.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()))
 
+  // Airports: all 50 are searchable, but the unfiltered dropdown only shows
+  // the top hubs so cities stay one scroll away.
+  const filteredAirports = !query.trim()
+    ? AIRPORT_PRESETS.slice(0, 8)
+    : AIRPORT_PRESETS.filter((a) => a.name.toLowerCase().includes(query.trim().toLowerCase()))
+
   return (
     <div className="relative" ref={containerRef}>
       <label className="flex items-center gap-1.5">
@@ -184,7 +203,7 @@ export default function CityPicker({
             type="button"
             onClick={() => { onClear(); setOpen(false); setQuery('') }}
             className="text-text-dim/50 hover:text-text text-xs px-0.5"
-            title="Clear the trip origin (removes the star and drive radius)"
+            title={clearTitle}
           >
             ✕
           </button>
@@ -227,6 +246,7 @@ export default function CityPicker({
               </div>
             )}
 
+            {(filteredPresets.length > 0 || filteredAirports.length === 0) && (
             <div>
               <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-dim/50 bg-gray-950/40">
                 Common cities
@@ -250,6 +270,32 @@ export default function CityPicker({
                 )
               })}
             </div>
+            )}
+
+            {filteredAirports.length > 0 && (
+              <div>
+                <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-dim/50 bg-gray-950/40">
+                  Airports{!query.trim() ? ' · type a code or city to search all' : ''}
+                </div>
+                {filteredAirports.map((a) => {
+                  const isCurrent = a.name === value
+                  return (
+                    <button
+                      key={a.name}
+                      type="button"
+                      onClick={() => pickPreset(a)}
+                      className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-accent-blue/10 transition-colors ${
+                        isCurrent ? 'bg-accent-blue/10 text-accent-blue font-medium' : 'text-text'
+                      }`}
+                      title={`Start from ${a.name} — useful when you're flying in`}
+                    >
+                      {a.name}
+                      {isCurrent && <span className="ml-1.5 text-[10px] text-accent-blue/70">· current</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
 
             {value !== '' && !isPreset && !query.trim() && (
               <div className="border-t border-border/40">

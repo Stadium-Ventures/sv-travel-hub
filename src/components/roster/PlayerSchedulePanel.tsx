@@ -5,6 +5,9 @@ import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useVenueStore } from '../../store/venueStore'
 import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, estimateDriveMinutes } from '../../lib/tripEngine'
 import { formatDate, formatDriveTime } from '../../lib/formatters'
+import { dispatchMapEvent } from '../../lib/mapEvents'
+import CityPicker from '../ui/CityPicker'
+import { STARTING_LOCATIONS } from '../../data/cityPresets'
 import type { GameEvent } from '../../types/schedule'
 import type { Coordinates } from '../../types/roster'
 
@@ -48,6 +51,15 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
   const venueState = useVenueStore((s) => s.venues)
 
   const [viewMode, setViewMode] = useState<ViewMode>('summary')
+
+  // Panel-local drive-time origin. Setting the GLOBAL Trip origin from here
+  // would move the map's star and auto-focus the whole app on that spot,
+  // losing the player focus the user is in the middle of (Tom 2026-08-19).
+  // This one lives and dies with the panel: drive times only, no star, no
+  // filters touched. Falls back to the global origin when unset.
+  const [localOrigin, setLocalOrigin] = useState<{ coords: Coordinates; name: string } | null>(null)
+  const driveOrigin = localOrigin?.coords ?? homeBase
+  const driveOriginName = localOrigin?.name ?? homeBaseName
 
   // Close on click outside
   useEffect(() => {
@@ -140,19 +152,54 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
       .filter(Boolean) as Array<{ tripNum: number; trip: import('../../types/schedule').TripCandidate; status?: string }>
   }, [tripPlan, tripStatuses, playerName])
 
-  // Compute drive minutes from home base for each game (for full schedule view)
+  // Compute drive minutes from the panel-local origin (or the global Trip
+  // origin) for each game (for full schedule view)
   const gamesWithDrive = useMemo(() => {
     return allGames.map((g) => {
       // No origin set — no "from where" for a drive estimate (Tom 2026-08-18)
-      const driveMin = homeBase ? estimateDriveMinutes(homeBase, g.venue.coords) : null
+      const driveMin = driveOrigin ? estimateDriveMinutes(driveOrigin, g.venue.coords) : null
       return { game: g, driveMin }
     })
-  }, [allGames, homeBase])
+  }, [allGames, driveOrigin])
+
+  // "Build a trip around this game" — same one-click loop as the Schedule
+  // tab's Plan trip button: pin the game so the engine anchors on THIS
+  // date/venue, narrow the window around it, jump to the planner.
+  function planTripAroundGame(g: GameEvent) {
+    const store = useTripStore.getState()
+    store.setPriorityPlayers([playerName])
+    store.setPinnedGame({ playerName, date: g.date, venueName: g.venue.name })
+    const d = new Date(g.date + 'T12:00:00Z')
+    const start = new Date(d); start.setUTCDate(start.getUTCDate() - 2)
+    const end = new Date(d); end.setUTCDate(end.getUTCDate() + 5)
+    const today = new Date().toISOString().slice(0, 10)
+    const startIso = start.toISOString().slice(0, 10)
+    store.setDateRange(startIso < today ? today : startIso, end.toISOString().slice(0, 10))
+    dispatchMapEvent('app:switch-tab', { tab: 'trips' })
+    window.scrollTo({ top: 0 })
+    setTimeout(() => { store.generateTrips().catch((e) => console.warn('[schedule-panel] auto-generate failed:', e)) }, 100)
+    onClose()
+  }
+
+  // "What else is nearby on this date?" — put the map on this venue with
+  // the dates narrowed to the game day. mapFocus is store-driven because
+  // the Map tab is unmounted right now (a dispatched map event would be
+  // lost, same lesson as trip cards' Show on map).
+  function showGameOnMap(g: GameEvent) {
+    useTripStore.getState().setMapFocus({
+      points: [g.venue.coords],
+      startDate: g.date,
+      endDate: g.date,
+      label: `${playerName} at ${g.venue.name}`,
+    })
+    dispatchMapEvent('app:switch-tab', { tab: 'map' })
+    onClose()
+  }
 
   // Determine range color for a drive time
   function getRangeInfo(driveMin: number | null): { label: string; color: string; borderColor: string; bgColor: string } {
     if (driveMin == null) {
-      return { label: 'No trip origin set', color: 'text-text-dim', borderColor: 'border-border/30', bgColor: '' }
+      return { label: 'No drive-time origin set', color: 'text-text-dim', borderColor: 'border-border/30', bgColor: '' }
     }
     if (driveMin <= maxDriveMinutes) {
       return { label: 'Drive', color: 'text-accent-green', borderColor: 'border-accent-green/30', bgColor: 'bg-accent-green/5' }
@@ -185,7 +232,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40">
-      <div ref={panelRef} className="w-full max-w-lg bg-surface border-l border-border overflow-y-auto shadow-2xl">
+      <div ref={panelRef} className={`w-full bg-surface border-l border-border overflow-y-auto shadow-2xl ${viewMode === 'full-schedule' ? 'max-w-2xl' : 'max-w-lg'}`}>
         {/* Header */}
         <div className="sticky top-0 z-10 bg-surface border-b border-border p-5">
           <div className="flex items-center justify-between">
@@ -380,6 +427,24 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                           {g.confidenceNote && (
                             <p className="mt-0.5 text-[10px] italic text-text-dim/60">{g.confidenceNote}</p>
                           )}
+                          {!isPostponed && (
+                            <div className="mt-1.5 flex items-center gap-2">
+                              <button
+                                onClick={() => planTripAroundGame(g)}
+                                className="rounded bg-accent-blue/15 px-2 py-0.5 text-[10px] font-semibold text-accent-blue hover:bg-accent-blue/25 transition-colors"
+                                title={`Build a trip around this game — jumps to the Trip Planner anchored on ${formatDate(g.date)} at ${g.venue.name}`}
+                              >
+                                Plan trip →
+                              </button>
+                              <button
+                                onClick={() => showGameOnMap(g)}
+                                className="rounded px-2 py-0.5 text-[10px] font-semibold text-text-dim hover:text-text hover:bg-gray-800/60 transition-colors"
+                                title={`See ${g.venue.name} on the map with dates narrowed to ${formatDate(g.date)} — what else is nearby that day`}
+                              >
+                                Show on map
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )
                     })}
@@ -432,9 +497,32 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                   </span>
                 </h3>
                 <p className="mt-0.5 text-[11px] text-text-dim">
-                  {formatDate(startDate)} — {formatDate(endDate)}{homeBase ? ` | Drive times from ${homeBaseName}` : ' | Set a Trip origin for drive times'}
+                  {formatDate(startDate)} — {formatDate(endDate)}
                 </p>
               </div>
+            </div>
+
+            {/* Drive-time origin for THIS view only — never moves the map's
+                Trip origin (which would refocus the whole app, Tom 2026-08-19) */}
+            <div className="flex flex-wrap items-center gap-2">
+              <CityPicker
+                label="Drive times from"
+                value={driveOriginName}
+                onChange={(coords, name) => setLocalOrigin({ coords, name })}
+                presets={STARTING_LOCATIONS}
+                buttonClass="min-w-[150px]"
+                title="Pick a city or airport to see drive times in this schedule. Only affects this panel — your Trip origin on the map stays put."
+                placeholder="Pick a city or airport..."
+                onClear={localOrigin ? () => setLocalOrigin(null) : undefined}
+                clearTitle={homeBase ? 'Back to drive times from your Trip origin' : 'Clear (removes drive times from this view)'}
+              />
+              <span className="text-[10px] text-text-dim/60">
+                {localOrigin
+                  ? 'This view only — your Trip origin is unchanged.'
+                  : driveOrigin
+                    ? 'Using your Trip origin. Pick another spot to compare — the Trip origin stays put.'
+                    : 'Drive times only — does not set a Trip origin.'}
+              </span>
             </div>
 
             {/* Legend */}
@@ -458,13 +546,14 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
             ) : (
               <div className="space-y-1 overflow-y-auto">
                 {/* Table header */}
-                <div className="grid grid-cols-[70px_36px_36px_1fr_1fr_70px] gap-1 px-2 py-1 text-[10px] font-semibold text-text-dim uppercase tracking-wider border-b border-border/30">
+                <div className="grid grid-cols-[70px_36px_36px_1fr_1fr_70px_88px] gap-1 px-2 py-1 text-[10px] font-semibold text-text-dim uppercase tracking-wider border-b border-border/30">
                   <span>Date</span>
                   <span>Day</span>
                   <span>H/A</span>
                   <span>Opponent</span>
                   <span>Venue</span>
                   <span className="text-right">Drive</span>
+                  <span className="text-right">Actions</span>
                 </div>
 
                 {gamesWithDrive.map(({ game: g, driveMin }) => {
@@ -480,7 +569,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                   return (
                     <div
                       key={g.id}
-                      className={`grid grid-cols-[70px_36px_36px_1fr_1fr_70px] gap-1 items-center rounded-md border px-2 py-1.5 text-[11px] ${
+                      className={`grid grid-cols-[70px_36px_36px_1fr_1fr_70px_88px] gap-1 items-center rounded-md border px-2 py-1.5 text-[11px] ${
                         isPostponed
                           ? 'border-accent-red/30 bg-accent-red/5 line-through opacity-60'
                           : isPast
@@ -523,9 +612,32 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                       </span>
 
                       {/* Drive time + range badge */}
-                      <span className={`text-right font-medium ${range.color} whitespace-nowrap`} title={driveMin == null ? 'Set a Trip origin to see drive times' : `${range.label} — ${formatDriveTime(driveMin)} from ${homeBaseName}`}>
+                      <span className={`text-right font-medium ${range.color} whitespace-nowrap`} title={driveMin == null ? 'Pick a drive-times-from spot above to see drive times' : `${range.label} — ${formatDriveTime(driveMin)} from ${driveOriginName}`}>
                         {driveMin == null ? '—' : formatDriveTime(driveMin)}
                       </span>
+
+                      {/* Per-game actions: build a trip around this date, or
+                          see the map on this date to find what else is nearby */}
+                      {isPast || isPostponed ? (
+                        <span />
+                      ) : (
+                        <span className="flex justify-end gap-1">
+                          <button
+                            onClick={() => planTripAroundGame(g)}
+                            className="rounded bg-accent-blue/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-blue hover:bg-accent-blue/25 transition-colors"
+                            title={`Build a trip around this game — jumps to the Trip Planner anchored on ${formatDate(g.date)} at ${g.venue.name}`}
+                          >
+                            Plan
+                          </button>
+                          <button
+                            onClick={() => showGameOnMap(g)}
+                            className="rounded bg-gray-800/60 px-1.5 py-0.5 text-[10px] font-semibold text-text-dim hover:text-text hover:bg-gray-800 transition-colors"
+                            title={`See ${g.venue.name} on the map with dates narrowed to ${formatDate(g.date)} — what else is nearby that day`}
+                          >
+                            Map
+                          </button>
+                        </span>
+                      )}
                     </div>
                   )
                 })}
@@ -540,7 +652,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                 const approxKm = (driveMin / 60) * 95 / 1.2
                 return (approxKm / 800 + 3) <= maxFlightHours
               }).length
-              const remoteCount = homeBase ? allGames.length - driveCount - flyInCount : 0
+              const remoteCount = driveOrigin ? allGames.length - driveCount - flyInCount : 0
               const homeCount = allGames.filter((g) => g.isHome).length
               return (
                 <div className="mt-3 rounded-lg bg-gray-950/50 px-3 py-2 text-xs">
@@ -548,7 +660,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                     <span className="text-text-dim">Home / Away</span>
                     <span className="text-text">{homeCount}H / {allGames.length - homeCount}A</span>
                   </div>
-                  {homeBase && (
+                  {driveOrigin && (
                     <>
                       <div className="flex justify-between mt-1">
                         <span className="text-accent-green">Drivable</span>

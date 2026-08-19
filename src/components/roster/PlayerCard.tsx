@@ -103,7 +103,7 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
           {plannedDate && (
             <span
               className="ml-1.5 rounded bg-accent-blue/15 px-1.5 py-0.5 text-[9px] font-medium text-accent-blue"
-              title={`${plannedAgent ?? 'Someone'} has a planned visit to ${player.playerName} on ${plannedDate}. Trip planner will down-weight this player so you don't double up.`}
+              title={`${plannedAgent ?? 'Someone'} has a planned visit to ${player.playerName} on ${plannedDate}. Trip planner will down-weight this player so you don't duplicate the visit.`}
             >
               {plannedAgent ? `${plannedAgent.split(' ')[0]} ` : ''}visiting {formatPlannedDate(plannedDate)}
             </span>

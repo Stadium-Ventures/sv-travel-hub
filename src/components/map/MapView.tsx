@@ -22,7 +22,7 @@ import MapFilters, { DEFAULT_MAP_FILTERS, applyMapFilters, HeartbeatLegend, type
 import SummerCoverageNotice from './SummerCoverageNotice'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { useSummerStore } from '../../store/summerStore'
-import { findDoubleUps } from '../../lib/doubleUps'
+import { findDoubleUps, isSameVenueDoubleUp } from '../../lib/doubleUps'
 import { formatDate } from '../../lib/formatters'
 import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
@@ -118,9 +118,8 @@ export default function MapView() {
   // The map toggles filter by family; only games in the ACTIVE families
   // survive (count badges, popups, and date ranges follow).
   const activeFamilyDus = useMemo(() => {
-    const sameVenueType = (t: string) => t === 'same-venue-matchup' || t === 'tournament-cluster'
     return chipDoubleUps.filter((du) =>
-      sameVenueType(du.type) ? filterState.doubleUpsOnly : filterState.drivableDoubleUpsOnly)
+      isSameVenueDoubleUp(du.type) ? filterState.doubleUpsOnly : filterState.drivableDoubleUpsOnly)
   }, [chipDoubleUps, filterState.doubleUpsOnly, filterState.drivableDoubleUpsOnly])
   const doubleUpCoords = useMemo(
     () => activeFamilyDus.flatMap((du) => du.games.map((g) => g.venue.coords)),
@@ -135,7 +134,7 @@ export default function MapView() {
   const duLabelByGameId = useMemo(() => {
     const m = new Map<string, string>()
     for (const du of scopedDoubleUps) {
-      const sameVenue = du.type === 'same-venue-matchup' || du.type === 'tournament-cluster'
+      const sameVenue = isSameVenueDoubleUp(du.type)
       for (const g of du.games) {
         if (m.has(g.id)) continue
         if (sameVenue) {
@@ -496,7 +495,7 @@ export default function MapView() {
                   <span className="text-yellow-200/70">
                     {' '}· {mapFocus.startDate === mapFocus.endDate
                       ? formatDate(mapFocus.startDate)
-                      : `${formatDate(mapFocus.startDate)} – ${formatDate(mapFocus.endDate)}`} · dates narrowed to this trip
+                      : `${formatDate(mapFocus.startDate)} – ${formatDate(mapFocus.endDate)}`} · map dates narrowed to this
                   </span>
                 )}
               </span>
@@ -678,7 +677,7 @@ function MapHelp() {
             <li>Each dot = a venue with at least one of your players. Click for who, when, and recency. Zoom in to split the numbered clusters.</li>
             <li>Set a <strong className="text-text">Trip origin</strong> to get the star, drive radius, and distances. Drag the star to move it.</li>
             <li><strong className="text-text">Click and hold a dot, then drag</strong> to another venue (or anywhere) to measure miles and est. drive. With Airports on, dragging airport to airport shows est. flight time.</li>
-            <li>Open <em>Suggestions</em> for when to go, where to go, and double ups.</li>
+            <li>Open <em>Suggestions</em> for when to go, where to go, and double ups (same venue) plus drivable double ups.</li>
           </ol>
           <p className="mt-2 text-[11px] text-text-dim/60">
             In Filters, switch <strong className="text-text">Color by</strong> to <em>Heartbeat</em> to see overdue players (magenta).

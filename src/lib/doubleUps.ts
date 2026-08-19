@@ -1,6 +1,15 @@
-import type { GameEvent, DoubleUp } from '../types/schedule'
+import type { GameEvent, DoubleUp, DoubleUpType } from '../types/schedule'
 import type { RosterPlayer } from '../types/roster'
 import { haversineKm, estimateDriveMinutes, TIER_WEIGHTS } from './tripEngine'
+
+/** Nomenclature is structural (Tom 2026-08-18/19): plain "double up" means
+ *  SAME VENUE — one park, one seat covers everyone. Anything that requires
+ *  driving between parks is a "drivable double up" and must always carry
+ *  the qualifier in UI copy. Umbrella surfaces show both families with
+ *  their own counts, never a plain "Double Ups" total that mixes them. */
+export function isSameVenueDoubleUp(type: DoubleUpType): boolean {
+  return type === 'same-venue-matchup' || type === 'tournament-cluster'
+}
 
 /**
  * Find double-up opportunities: dates where 2+ SV-relevant games can be attended.

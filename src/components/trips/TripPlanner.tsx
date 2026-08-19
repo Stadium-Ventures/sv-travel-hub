@@ -1348,7 +1348,7 @@ export default function TripPlanner() {
 const APP_TIPS = [
   'Click any player name to see their full schedule and upcoming games.',
   'Use Priority Players to build trips around specific guys first.',
-  'Green dates on a trip card are double ups — 2+ clients in one outing.',
+  'Green dates on a trip card mean 2+ clients that day — a double up at one park, or a drivable double up between parks.',
   'Set the star and drive radius on the Map to control where trips are built.',
   'Estimated pro assignments auto-correct once official rosters are published.',
 ]

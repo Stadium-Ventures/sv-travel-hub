@@ -6,6 +6,7 @@ import type { RosterPlayer } from '../../types/roster'
 import { useTripStore } from '../../store/tripStore'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 import { formatDate, formatDriveTime } from '../../lib/formatters'
+import { isSameVenueDoubleUp } from '../../lib/doubleUps'
 import { DatesAndTimes, byStartTime, airportLabelFor, driveTierClass, driveTierTitle } from '../trips/DoubleUpSection'
 
 // One panel, three questions: WHEN should I travel, WHERE should I go,
@@ -18,14 +19,14 @@ const TIER_DOT_COLORS: Record<number, string> = { 1: 'bg-[#ef4444]', 2: 'bg-[#f9
 const TAB_SUBTITLES: Record<SuggestTab, string> = {
   when: 'The best dates across all client games in this range. Zoom or move the map to scope this to an area.',
   where: 'The best areas in the US for this date range.',
-  doubleups: 'See 2+ clients in one outing. Same-venue = one park covers everyone; drivable = a drive between parks (reach follows your Drive radius).',
+  doubleups: 'See 2+ clients in one outing. Double ups = one park covers everyone; drivable double ups = a drive between parks (reach follows your Drive radius).',
 }
 
 // Subtitles while the map is zoomed into an area — the viewport is the scope
 const VIEWPORT_SUBTITLES: Record<SuggestTab, string> = {
   when: 'The best dates for the area you are viewing on the map. Move or zoom to change it.',
   where: 'The best spots within your current map view for this date range.',
-  doubleups: 'Double ups fully inside your current map view. Same-venue = one park covers everyone; drivable = a drive between parks.',
+  doubleups: 'Double ups and drivable double ups fully inside your current map view. Double ups = one park covers everyone; drivable = a drive between parks.',
 }
 
 // Trimmed to the strategies that give DIFFERENT answers (Tom 2026-07-23:
@@ -65,8 +66,8 @@ function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult
     }
     case 'double-ups': {
       const total = windows.reduce((s, w) => s + w.doubleUpCount, 0)
-      if (total === 0) return 'No windows with a reachable double up in this date range.'
-      return `Top pick contains ${top.doubleUpCount} double up${top.doubleUpCount === 1 ? '' : 's'}. ${total} across all ${windows.length} window${windows.length === 1 ? '' : 's'} — see the Double Ups tab for details.`
+      if (total === 0) return 'No windows with a reachable double up or drivable double up in this date range.'
+      return `Top pick contains ${top.doubleUpCount} way${top.doubleUpCount === 1 ? '' : 's'} to see 2+ clients (double ups + drivable). ${total} across all ${windows.length} window${windows.length === 1 ? '' : 's'} — see the Double Ups · Drivable tab for details.`
     }
     default:
       return ''
@@ -141,10 +142,14 @@ export default function SuggestionsPanel(props: Props) {
   // clicked — the map is the first read of the page.
   const [open, setOpen] = useState(false)
 
+  // Plain "Double Ups" must never be the umbrella for drivable combos
+  // (Tom 2026-08-19) — the tab names both families with their own counts.
+  const sameVenueCount = doubleUps.filter((du) => isSameVenueDoubleUp(du.type)).length
+  const drivableCount = doubleUps.length - sameVenueCount
   const TABS: { key: SuggestTab; label: string }[] = [
     { key: 'when', label: 'When to go' },
     { key: 'where', label: 'Where to go' },
-    { key: 'doubleups', label: `Double Ups${doubleUps.length > 0 ? ` (${doubleUps.length})` : ''}` },
+    { key: 'doubleups', label: `Double Ups${sameVenueCount > 0 ? ` (${sameVenueCount})` : ''} · Drivable${drivableCount > 0 ? ` (${drivableCount})` : ''}` },
   ]
 
   return (
@@ -344,10 +349,16 @@ function WhenTab({ windows, windowDays, setWindowDays, strategy, setStrategy, on
                     {w.overdueCount} overdue
                   </span>
                 )}
-                {w.doubleUpCount > 0 && (
+                {w.sameVenueDoubleUpCount > 0 && (
                   <span className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-green"
-                    title={`${w.doubleUpCount} double-up opportunit${w.doubleUpCount === 1 ? 'y' : 'ies'} fall inside this window — see the Double Ups tab.`}>
-                    {w.doubleUpCount} double up{w.doubleUpCount !== 1 ? 's' : ''}
+                    title={`${w.sameVenueDoubleUpCount} double up${w.sameVenueDoubleUpCount === 1 ? '' : 's'} (one park covers 2+ clients) inside this window — see the Double Ups · Drivable tab.`}>
+                    {w.sameVenueDoubleUpCount} double up{w.sameVenueDoubleUpCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {w.doubleUpCount - w.sameVenueDoubleUpCount > 0 && (
+                  <span className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-green"
+                    title={`${w.doubleUpCount - w.sameVenueDoubleUpCount} drivable double up${w.doubleUpCount - w.sameVenueDoubleUpCount === 1 ? '' : 's'} (drive between parks) inside this window — see the Double Ups · Drivable tab.`}>
+                    {w.doubleUpCount - w.sameVenueDoubleUpCount} drivable
                   </span>
                 )}
               </div>
@@ -498,21 +509,28 @@ function WhereTab({ picks, stillLoading }: { picks: DestinationPick[]; stillLoad
 
 function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubleUp, onPlanDoubleUp, stillLoading, driveHours }: Props) {
   const [showAll, setShowAll] = useState(false)
-  const visible = showAll ? doubleUps : doubleUps.slice(0, 6)
+  // Grouped by family so plain "double ups" and drivable ones never blur
+  // together (Tom 2026-08-19). Original indices are preserved — selection
+  // (and the map's pair connector) is keyed by position in the FULL list.
+  const indexed = doubleUps.map((du, idx) => ({ du, idx }))
+  const sameVenueAll = indexed.filter(({ du }) => isSameVenueDoubleUp(du.type))
+  const drivableAll = indexed.filter(({ du }) => !isSameVenueDoubleUp(du.type))
+  const CAP = 4
+  const sameVenueVisible = showAll ? sameVenueAll : sameVenueAll.slice(0, CAP)
+  const drivableVisible = showAll ? drivableAll : drivableAll.slice(0, CAP)
+  const hiddenCount = (sameVenueAll.length - sameVenueVisible.length) + (drivableAll.length - drivableVisible.length)
 
   if (doubleUps.length === 0) {
     return (
       <p className="text-xs text-text-dim">
         {stillLoading
-          ? 'Schedules are still loading — double ups will appear once games arrive.'
-          : `No double ups in this date range — no two clients playing each other, or near enough (within your ${driveHours ?? 2}h drive radius, same day or back-to-back days). Widen the dates or raise the Drive radius to check further out.`}
+          ? 'Schedules are still loading — double ups and drivable double ups will appear once games arrive.'
+          : `No double ups (clients at one park) and no drivable double ups (parks within your ${driveHours ?? 2}h drive radius, same day or back-to-back days) in this date range. Widen the dates or raise the Drive radius to check further out.`}
       </p>
     )
   }
 
-  return (
-    <div className="space-y-2">
-      {visible.map((du, i) => {
+  const renderCard = ({ du, idx: i }: { du: DoubleUp; idx: number }) => {
         const typeInfo = DU_TYPE_LABELS[du.type] ?? { label: du.type, hint: '' }
         const isSeries = du.dates.length > 1
         const dateLabel = isSeries
@@ -599,13 +617,32 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
             </div>
           </div>
         )
-      })}
-      {doubleUps.length > 6 && !showAll && (
+  }
+
+  return (
+    <div className="space-y-2">
+      {sameVenueAll.length > 0 && (
+        <>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-text-dim/50">
+            Double ups — one park covers everyone ({sameVenueAll.length})
+          </p>
+          {sameVenueVisible.map(renderCard)}
+        </>
+      )}
+      {drivableAll.length > 0 && (
+        <>
+          <p className={`text-[10px] font-semibold uppercase tracking-wider text-text-dim/50 ${sameVenueAll.length > 0 ? 'pt-1.5' : ''}`}>
+            Drivable double ups — drive between parks ({drivableAll.length})
+          </p>
+          {drivableVisible.map(renderCard)}
+        </>
+      )}
+      {hiddenCount > 0 && !showAll && (
         <button
           onClick={() => setShowAll(true)}
           className="w-full rounded-lg bg-gray-800/50 py-1.5 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
         >
-          Show {doubleUps.length - 6} more
+          Show {hiddenCount} more
         </button>
       )}
       <p className="text-[10px] text-text-dim/40">

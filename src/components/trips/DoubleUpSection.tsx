@@ -43,9 +43,9 @@ export function PairVerdictBanner({ verdicts, swingTripNumber }: { verdicts: Pai
 
   const missLine = (v: PairVerdict) => (
     <p key={`${v.a}|${v.b}`} className="rounded-lg bg-gray-900/40 px-3 py-1.5 text-xs text-text-dim">
-      <strong className="text-text">{v.a} + {v.b}:</strong> no double up in your dates.{' '}
+      <strong className="text-text">{v.a} + {v.b}:</strong> no double up or drivable double up in your dates.{' '}
       {v.outsideDates && v.outsideDates.length > 0
-        ? <>They double up <strong className="text-accent-green">{formatDate(v.outsideDates[0]!)}</strong>{v.outsideDates.length > 1 ? ` (+${v.outsideDates.length - 1} more date${v.outsideDates.length > 2 ? 's' : ''})` : ''} — shift your dates to catch it.</>
+        ? <>They line up <strong className="text-accent-green">{formatDate(v.outsideDates[0]!)}</strong>{v.outsideDates.length > 1 ? ` (+${v.outsideDates.length - 1} more date${v.outsideDates.length > 2 ? 's' : ''})` : ''} — shift your dates to catch it.</>
         : v.swingNote
         ? <>Closest: <strong className="text-text">{formatDate(v.swingNote.dateA)}</strong> & <strong className="text-text">{formatDate(v.swingNote.dateB)}</strong> ({daysApartLabel(v.swingNote.dateA, v.swingNote.dateB)}){swingTripNumber != null ? <> — see Trip #{swingTripNumber} below</> : null}.</>
         : v.closest
@@ -167,14 +167,14 @@ export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers,
         <button onClick={() => setCollapsed(!collapsed)} className="text-left">
           <h3 className="text-sm font-semibold text-accent-green">
             <span className={`mr-1.5 inline-block text-xs text-text-dim transition-transform ${collapsed ? '' : 'rotate-90'}`}>&#9654;</span>
-            Double Up Opportunities
+            Double Ups · Drivable Double Ups
             <span className="ml-2 rounded-full bg-accent-green/20 px-2 py-0.5 text-xs font-bold text-accent-green">
               {filtered.length}
             </span>
           </h3>
           {!collapsed && (
             <p className="text-[10px] text-text-dim/60">
-              {windowDays ? `Next ${windowDays} days · ` : ''}see 2+ clients in one outing — same game, or a short drive apart
+              {windowDays ? `Next ${windowDays} days · ` : ''}see 2+ clients in one outing — a double up at one park, or a drivable double up between parks
             </p>
           )}
         </button>
@@ -210,7 +210,7 @@ export default function DoubleUpSection({ doubleUps, playerMap, priorityPlayers,
       <PairVerdictBanner verdicts={pairVerdicts} />
 
       {filtered.length === 0 ? (
-        <p className="py-2 text-center text-xs text-text-dim">No double ups match the selected filter.</p>
+        <p className="py-2 text-center text-xs text-text-dim">No double ups or drivable double ups match the selected filter.</p>
       ) : (
         <div className="space-y-2">
           {visible.map((du, i) => (
