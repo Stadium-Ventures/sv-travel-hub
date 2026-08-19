@@ -398,7 +398,8 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   }, [loaded])
 
   // Pulse a player's visible venues (Tom 2026-08-18): halos flash on every
-  // marker containing them for ~1.5s before their schedule panel opens.
+  // marker containing them for ~0.5s before their schedule panel opens
+  // (shortened from 1.5s — Tom 2026-08-19: card should come up faster).
   useEffect(() => {
     if (!loaded) return
     return addMapEventListener('map:pulse-player', ({ playerName }) => {
@@ -415,7 +416,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
           zIndexOffset: 1100,
         }).addTo(layer)
       }
-      setTimeout(() => { map.removeLayer(layer) }, 1500)
+      setTimeout(() => { map.removeLayer(layer) }, 520)
     })
   }, [loaded, tierMarkers])
 

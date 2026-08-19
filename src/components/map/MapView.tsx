@@ -540,11 +540,12 @@ export default function MapView() {
               onSolo={(n) => setSoloPlayer((cur) => (cur === n ? null : n))}
               onOpenSchedule={(n) => {
                 // Locate before detail (Tom 2026-08-18): pulse the player's
-                // visible venues for ~1.5s, THEN open their schedule.
+                // visible venues, THEN open their schedule. 0.5s — quick
+                // flash, fast card (Tom 2026-08-19).
                 const visible = visibleMarkers.some((m) => m.players.some((p) => p.name === n))
                 if (visible) {
                   dispatchMapEvent('map:pulse-player', { playerName: n })
-                  setTimeout(() => setSchedulePanelPlayer(n), 1500)
+                  setTimeout(() => setSchedulePanelPlayer(n), 500)
                 } else {
                   setSchedulePanelPlayer(n)
                 }

@@ -23,7 +23,7 @@ export function injectMapStyles() {
       border-radius: 50%;
       border: 3px solid #60a5fa;
       box-shadow: 0 0 20px rgba(96,165,250,0.9), inset 0 0 12px rgba(96,165,250,0.5);
-      animation: svPulse 0.72s ease-out 2;
+      animation: svPulse 0.5s ease-out 1;
     }
 
     /* Venue dot markers */

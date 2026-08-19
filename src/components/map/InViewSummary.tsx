@@ -76,7 +76,7 @@ export default function InViewSummary({
   const isFaded = (name: string) => (soloPlayer ? name !== soloPlayer : hiddenPlayers.has(name))
 
   // Single-click waits briefly so a double-click (solo) can win; the wait
-  // is invisible inside the 1.5s locate pulse that follows.
+  // is invisible inside the locate pulse that follows.
   function handleNameClick(name: string) {
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current)
     clickTimerRef.current = setTimeout(() => {
