@@ -6,8 +6,10 @@
 // pulse + player card), IN ADDITION to the Filters:
 //   - click the DOT   → hide that player's events (dot hollows, name
 //                       fades; click again to bring them back — a toggle)
+//   - HOLD the DOT    → SOLO: hide everyone else (Tom 2026-08-19)
 //   - click the name  → pulse their venues + open their player card
-//   - double-click name → SOLO: show only their events (again to exit)
+//   - double-click name → also SOLO (again to exit)
+//   - "show all"      → bring everyone back
 // The full list scrolls when there are too many players for the card.
 
 import { useMemo, useRef } from 'react'
@@ -51,6 +53,10 @@ export default function InViewSummary({
 }) {
   // Single-click waits briefly so a double-click can win (solo)
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Press-and-hold on the dot solos; the flag swallows the click that
+  // fires on release so it doesn't ALSO toggle hide.
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const heldRef = useRef(false)
 
   const { players, totalGames, venueCount } = useMemo(() => {
     const byName = new Map<string, ViewPlayer>()
@@ -88,6 +94,22 @@ export default function InViewSummary({
     if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null }
     onSolo(name)
   }
+  function handleDotPress(name: string) {
+    heldRef.current = false
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current)
+    holdTimerRef.current = setTimeout(() => {
+      heldRef.current = true
+      holdTimerRef.current = null
+      onSolo(name)
+    }, 420)
+  }
+  function handleDotRelease() {
+    if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null }
+  }
+  function handleDotClick(name: string) {
+    if (heldRef.current) { heldRef.current = false; return } // the hold already soloed
+    onToggleHide(name)
+  }
 
   return (
     <div className="rounded-xl bg-surface border border-border/50 px-4 py-3">
@@ -101,10 +123,10 @@ export default function InViewSummary({
             {soloPlayer ? `only ${soloPlayer}` : `${hiddenPlayers.size} hidden`}
             <button
               onClick={onResetChips}
-              className="ml-1.5 text-accent-blue/80 underline-offset-2 hover:underline"
-              title="Show everyone again"
+              className="ml-1.5 rounded bg-accent-blue/15 px-1.5 py-0.5 font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
+              title="Bring everyone back"
             >
-              reset
+              show all
             </button>
           </span>
         )}
@@ -132,9 +154,12 @@ export default function InViewSummary({
                   }`}
                 >
                   <button
-                    onClick={() => onToggleHide(p.name)}
+                    onClick={() => handleDotClick(p.name)}
+                    onPointerDown={() => handleDotPress(p.name)}
+                    onPointerUp={handleDotRelease}
+                    onPointerLeave={handleDotRelease}
                     className="-m-1 cursor-pointer p-1"
-                    title={faded && !soloPlayer ? `Show ${p.name}'s events again` : `Hide ${p.name}'s events from the map (click again to restore)`}
+                    title={faded && !soloPlayer ? `Show ${p.name}'s events again` : `Click to hide ${p.name}'s events (click again to restore). Hold to show ONLY ${p.name}.`}
                   >
                     <span
                       className="block h-2.5 w-2.5 rounded-full transition-all"
@@ -159,7 +184,7 @@ export default function InViewSummary({
             })}
           </div>
           <p className="mt-1.5 text-[10px] text-text-dim/40">
-            Click a name for their venues + card · double-click to show only them · click the colored dot to hide them (again to restore).
+            Click a name for their venues + card · click the colored dot to hide them · hold the dot (or double-click the name) to show only them.
           </p>
         </>
       )}
