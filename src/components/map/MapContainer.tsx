@@ -20,6 +20,7 @@ import type { TripCandidate, DoubleUp } from '../../types/schedule'
 import { heartbeatColorFor, type MapColorMode } from './MapFilters'
 import { estimateDriveMinutes } from '../../lib/tripEngine'
 import { orderedTripStops } from '../../lib/routeOrder'
+import { getRealDrive } from '../../lib/osrm'
 import { formatDriveTime } from '../../lib/formatters'
 import type { EventMarker } from './hooks/useEventMarkers'
 import { MAJOR_AIRPORTS } from '../../data/airports'
@@ -1005,11 +1006,18 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         const b = stops[i]!
         const miles = haversineMiles(a, b)
         const driveMin = Math.round(estimateDriveMinutes(a, b))
-        L.marker([(a.lat + b.lat) / 2, (a.lng + b.lng) / 2], {
+        const legMarker = L.marker([(a.lat + b.lat) / 2, (a.lng + b.lng) / 2], {
           icon: L.divIcon({ className: '', html: legLabelHtml(miles, driveMin), iconSize: [0, 0] }),
           interactive: false,
           zIndexOffset: 950,
         }).addTo(highlight)
+        // Upgrade the pill to OSRM road routing when it resolves — only if
+        // this highlight is still the one on the map (the straight-line
+        // number stays if OSRM is down; cached pairs resolve instantly).
+        getRealDrive(a, b).then((real) => {
+          if (!real || tripHighlightRef.current !== highlight) return
+          legMarker.setIcon(L.divIcon({ className: '', html: legLabelHtml(real.miles, real.minutes), iconSize: [0, 0] }))
+        })
       }
     }
 

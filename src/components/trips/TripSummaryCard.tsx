@@ -4,6 +4,7 @@ import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
 import { haversineKm } from '../../lib/tripEngine'
 import { orderLinesByDrive } from '../../lib/routeOrder'
+import { useRealDrive } from '../../lib/osrm'
 import { driveTierClass, driveTierTitle } from './DoubleUpSection'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useTimeStore } from '../../store/timeStore'
@@ -260,23 +261,13 @@ export default function TripSummaryCard({
       <div className="mt-1 space-y-0.5">
         {lines.map((l, i) => {
           const prev = i > 0 ? lines[i - 1]! : null
-          const driveMin = prev ? Math.round((haversineKm(prev.coords, l.coords) * 1.2 / 95) * 60) : 0
           return (
             <p key={`${l.date}-${l.venue}-${i}`} className="truncate text-[11px] text-text-dim/70">
               <span className={`inline-block w-24 font-medium ${(duDates.sameVenue.includes(l.date) || duDates.drivable.includes(l.date)) ? 'text-accent-green' : 'text-text-dim'}`}>{formatDate(l.date)}</span>
               <span className="text-text-dim">{l.venue}</span>
               {l.time && <span className="text-text-dim/60"> {formatGameTimeDisplay(l.time, timeMode, { coords: l.coords, tz: l.tz })}</span>}
               {l.players.length > 0 && <span> · {l.players.join(', ')}</span>}
-              {driveMin >= 10 && (
-                <span
-                  className={`font-medium ${driveTierClass(driveMin)}`}
-                  title={`${driveTierTitle(driveMin)} — estimated drive from ${prev!.venue} (straight-line based; real traffic can add time)`}
-                >
-                  {/* Name the leg's origin inline — a bare "1h 6m drive" read
-                      as from-the-trip-origin and confused Kent (2026-08-17) */}
-                  {' '}· {formatDriveTime(driveMin)} from {prev!.venue}
-                </span>
-              )}
+              {prev && <LegDrive from={prev.coords} to={l.coords} fromName={prev.venue} />}
             </p>
           )
         })}
@@ -307,5 +298,32 @@ export default function TripSummaryCard({
 
       {swing && <SwingOptions swing={swing} pickedIdx={pickedOption} onPick={setPickedOption} />}
     </div>
+  )
+}
+
+/** One leg's drive label. Renders the instant straight-line estimate, then
+ *  upgrades in place to OSRM road routing once it resolves (cached pairs
+ *  show road numbers from the first frame). Legs under 10 minutes stay
+ *  hidden — same venue or across a parking lot. Naming the leg's origin
+ *  inline is deliberate: a bare "1h 6m drive" read as from-the-trip-origin
+ *  and confused Kent (2026-08-17). */
+function LegDrive({ from, to, fromName }: {
+  from: { lat: number; lng: number }
+  to: { lat: number; lng: number }
+  fromName: string
+}) {
+  const real = useRealDrive(from, to)
+  const estMin = Math.round((haversineKm(from, to) * 1.2 / 95) * 60)
+  const driveMin = real?.minutes ?? estMin
+  if (driveMin < 10) return null
+  return (
+    <span
+      className={`font-medium ${driveTierClass(driveMin)}`}
+      title={`${driveTierTitle(driveMin)} — ${real
+        ? `road-routed drive from ${fromName} (no live traffic)`
+        : `estimated drive from ${fromName} (straight-line based; real traffic can add time)`}`}
+    >
+      {' '}· {formatDriveTime(driveMin)} from {fromName}
+    </span>
   )
 }

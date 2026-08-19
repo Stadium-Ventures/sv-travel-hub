@@ -11,6 +11,16 @@ import { useScheduleStore } from '../../store/scheduleStore'
 import { useSummerStore } from '../../store/summerStore'
 import { useTimeStore } from '../../store/timeStore'
 import { estimateDriveMinutes } from '../../lib/tripEngine'
+import { useRealDrive } from '../../lib/osrm'
+
+interface TrackerLeg {
+  from: string
+  to: string
+  fromCoords: { lat: number; lng: number }
+  toCoords: { lat: number; lng: number }
+  miles: number
+  driveMin: number
+}
 import { formatDate, formatMonthDay, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
 import type { RosterPlayer } from '../../types/roster'
 
@@ -92,12 +102,14 @@ export default function PriorityFacts({
     // Distance tracker: origin to each venue first (when set), then every
     // venue pair — the numbers Kent decides visit order with.
     const venues = [...venueByName.entries()].slice(0, 8)
-    const legs: Array<{ from: string; to: string; miles: number; driveMin: number }> = []
+    const legs: TrackerLeg[] = []
     if (homeBase) {
       for (const [name, coords] of venues) {
         legs.push({
           from: homeBaseName || 'Trip origin',
           to: name,
+          fromCoords: homeBase,
+          toCoords: coords,
           miles: milesBetween(homeBase, coords),
           driveMin: Math.round(estimateDriveMinutes(homeBase, coords)),
         })
@@ -110,6 +122,8 @@ export default function PriorityFacts({
         legs.push({
           from: aName,
           to: bName,
+          fromCoords: a,
+          toCoords: b,
           miles: milesBetween(a, b),
           driveMin: Math.round(estimateDriveMinutes(a, b)),
         })
@@ -204,20 +218,33 @@ export default function PriorityFacts({
           </button>
           {trackerOpen && (
             <div className="divide-y divide-border/20 pb-1">
-              {legs.map((l, i) => (
-                <div key={i} className="flex flex-wrap items-baseline justify-between gap-x-3 px-4 py-1.5 text-xs">
-                  <span className="text-text-dim">
-                    <span className="text-text">{l.from}</span> to <span className="text-text">{l.to}</span>
-                  </span>
-                  <span className="whitespace-nowrap font-medium text-text">
-                    {Math.round(l.miles)} mi · {formatDriveTime(l.driveMin)} <span className="font-normal text-text-dim/60">est. drive</span>
-                  </span>
-                </div>
-              ))}
+              {legs.map((l, i) => <TrackerLegRow key={i} leg={l} />)}
             </div>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/** Distance-tracker row — shows the straight-line estimate immediately and
+ *  upgrades to OSRM road routing when it resolves. Rows only mount while
+ *  the tracker is open, so nothing is fetched for a collapsed tracker. */
+function TrackerLegRow({ leg }: { leg: TrackerLeg }) {
+  const real = useRealDrive(leg.fromCoords, leg.toCoords)
+  const miles = real ? Math.round(real.miles) : Math.round(leg.miles)
+  const driveMin = real?.minutes ?? leg.driveMin
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 px-4 py-1.5 text-xs">
+      <span className="text-text-dim">
+        <span className="text-text">{leg.from}</span> to <span className="text-text">{leg.to}</span>
+      </span>
+      <span
+        className="whitespace-nowrap font-medium text-text"
+        title={real ? 'Road-routed distance and drive time (no live traffic)' : 'Straight-line estimate; real traffic can add time'}
+      >
+        {miles} mi · {formatDriveTime(driveMin)} <span className="font-normal text-text-dim/60">est. drive</span>
+      </span>
     </div>
   )
 }
