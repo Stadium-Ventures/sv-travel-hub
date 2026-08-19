@@ -3,6 +3,7 @@ import type { TierMarker } from './useTierMarkers'
 import type { DoubleUp } from '../../../types/schedule'
 import { useScheduleStore } from '../../../store/scheduleStore'
 import { isSameVenueDoubleUp } from '../../../lib/doubleUps'
+import { estimateDriveMinutes } from '../../../lib/tripEngine'
 import { useHeartbeatStore } from '../../../store/heartbeatStore'
 
 const TIER_WEIGHTS: Record<number, number> = { 1: 5, 2: 3, 3: 1, 4: 0 }
@@ -96,12 +97,7 @@ export function useBestWindows(
     // the starred spot" — only venues within the drive radius count.
     function driveMinutesFromHome(coords: { lat: number; lng: number }): number {
       if (!homeBase) return 0 // unreachable in practice: ignoreRadius is true whenever origin is unset
-      const km = 6371 * 2 * Math.asin(Math.sqrt(
-        Math.sin(((coords.lat - homeBase.lat) * Math.PI / 180) / 2) ** 2 +
-        Math.cos(homeBase.lat * Math.PI / 180) * Math.cos(coords.lat * Math.PI / 180) *
-        Math.sin(((coords.lng - homeBase.lng) * Math.PI / 180) / 2) ** 2,
-      ))
-      return (km * 1.2 / 95) * 60
+      return estimateDriveMinutes(homeBase, coords)
     }
     const reachableMarkers = ignoreRadius
       ? tierMarkers

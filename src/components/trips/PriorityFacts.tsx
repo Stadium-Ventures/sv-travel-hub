@@ -219,6 +219,9 @@ export default function PriorityFacts({
           {trackerOpen && (
             <div className="divide-y divide-border/20 pb-1">
               {legs.map((l, i) => <TrackerLegRow key={i} leg={l} />)}
+              <p className="px-4 py-1.5 text-[10px] text-text-dim/50">
+                Times marked "est." are straight-line guesses. Unmarked times are road-routed (no live traffic) — legs upgrade as routing loads.
+              </p>
             </div>
           )}
         </div>
@@ -241,9 +244,9 @@ function TrackerLegRow({ leg }: { leg: TrackerLeg }) {
       </span>
       <span
         className="whitespace-nowrap font-medium text-text"
-        title={real ? 'Road-routed distance and drive time (no live traffic)' : 'Straight-line estimate; real traffic can add time'}
+        title={real ? 'Road-routed distance and drive time (no live traffic)' : 'Straight-line estimate; real roads and traffic add time'}
       >
-        {miles} mi · {formatDriveTime(driveMin)} <span className="font-normal text-text-dim/60">est. drive</span>
+        {miles} mi · {formatDriveTime(driveMin)} <span className="font-normal text-text-dim/60">{real ? 'drive' : 'est. drive'}</span>
       </span>
     </div>
   )

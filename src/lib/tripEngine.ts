@@ -56,28 +56,41 @@ export function haversineKm(a: Coordinates, b: Coordinates): number {
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
 }
 
-// Estimate drive time in minutes from straight-line distance
-// Uses a gradual detour factor that increases with distance:
-//   <200km: 1.2x (local/regional, calibrated for Florida)
-//   200-600km: linear ramp from 1.2x to 1.35x
-//   >600km: 1.4x (cross-region, accounts for route indirection)
+// Estimate drive time in minutes from straight-line distance.
+// The old flat "1.2x detour at 95 km/h" was optimistic for anything short
+// of open highway — a 5 km crosstown hop is surface streets at 40 km/h,
+// not interstate (Tom 2026-08-19; Kent got burned by ShoreTown→Yankee
+// reading 1h 6m vs a real 1h 45m+). Detour factor and average speed now
+// scale with distance (continuous linear ramps, no cliffs between bands),
+// plus a 4-minute pad for parking and local streets. Deliberately errs a
+// touch HIGH: displayed trip legs get corrected by OSRM road routing
+// (lib/osrm.ts) anyway, and an over-estimate never strands anyone.
+// Same-point / same-complex pairs stay 0 (double-up semantics rely on it).
 export function estimateDriveMinutes(a: Coordinates, b: Coordinates): number {
   const km = haversineKm(a, b)
+  if (km < 0.5) return 0
   let detourFactor: number
   let avgSpeed: number
-  if (km <= 200) {
-    detourFactor = 1.2
-    avgSpeed = 95
+  if (km <= 40) {
+    // City/suburban: winding streets, lights
+    const t = km / 40
+    detourFactor = 1.32 - t * 0.08 // 1.32 → 1.24
+    avgSpeed = 48 + t * 28 // 48 → 76 km/h
+  } else if (km <= 200) {
+    // Regional: mostly highway with local ends
+    const t = (km - 40) / 160
+    detourFactor = 1.24 - t * 0.02 // 1.24 → 1.22
+    avgSpeed = 76 + t * 14 // 76 → 90 km/h
   } else if (km <= 600) {
-    // Linear ramp: 1.2 at 200km → 1.35 at 600km
+    // Cross-region: route indirection grows
     const t = (km - 200) / 400
-    detourFactor = 1.2 + t * 0.15
-    avgSpeed = 95 - t * 5 // 95 → 90
+    detourFactor = 1.22 + t * 0.18 // 1.22 → 1.40
+    avgSpeed = 90 + t * 2 // 90 → 92 km/h
   } else {
     detourFactor = 1.4
-    avgSpeed = 88
+    avgSpeed = 92
   }
-  return Math.round((km * detourFactor / avgSpeed) * 60)
+  return Math.round((km * detourFactor / avgSpeed) * 60 + 4)
 }
 
 // Estimate total travel time for a fly-in visit (hours)

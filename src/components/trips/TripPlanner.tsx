@@ -1349,6 +1349,7 @@ const APP_TIPS = [
   'Click any player name to see their full schedule and upcoming games.',
   'Use Priority Players to build trips around specific guys first.',
   'Green dates on a trip card mean 2+ clients that day — a double up at one park, or a drivable double up between parks.',
+  'Drive times marked "est." are straight-line guesses; unmarked ones are road-routed. Trip legs upgrade to road routing as it loads.',
   'Set the star and drive radius on the Map to control where trips are built.',
   'Estimated pro assignments auto-correct once official rosters are published.',
 ]

@@ -148,8 +148,8 @@ describe('findDoubleUps — nearby venues', () => {
     const g2 = game({
       id: 'z2', date: '2026-07-22', playerNames: ['B'], playerSides: { B: 'home' },
       homeTeam: 'Other Team', awayTeam: 'Visitors',
-      // ~100km south of Beloit → ~75 min estimated drive
-      venue: { name: 'Yellow Band Park', coords: { lat: 41.59, lng: -89.03 } },
+      // ~80km south of Beloit → ~79 min estimated drive
+      venue: { name: 'Yellow Band Park', coords: { lat: 41.77, lng: -89.03 } },
     })
     const result = findDoubleUps([g1, g2], players, '2026-07-20', '2026-07-30')
     const nearby = result.filter((r) => r.type === 'nearby-venues')
@@ -164,8 +164,8 @@ describe('findDoubleUps — nearby venues', () => {
     const g2 = game({
       id: 'o2', date: '2026-07-22', playerNames: ['B'], playerSides: { B: 'home' },
       homeTeam: 'Other Team', awayTeam: 'Visitors',
-      // ~145km south of Beloit → ~105 min estimated drive
-      venue: { name: 'Orange Band Park', coords: { lat: 41.19, lng: -89.03 } },
+      // ~110km south of Beloit → ~103 min estimated drive
+      venue: { name: 'Orange Band Park', coords: { lat: 41.50, lng: -89.03 } },
     })
     const result = findDoubleUps([g1, g2], players, '2026-07-20', '2026-07-30')
     const nearby = result.filter((r) => r.type === 'nearby-venues')

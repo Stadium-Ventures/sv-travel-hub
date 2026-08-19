@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { TripCandidate, FlyInVisit, GameEvent } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import { formatDate, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
-import { haversineKm } from '../../lib/tripEngine'
+import { estimateDriveMinutes } from '../../lib/tripEngine'
 import { orderLinesByDrive } from '../../lib/routeOrder'
 import { useRealDrive } from '../../lib/osrm'
 import { driveTierClass, driveTierTitle } from './DoubleUpSection'
@@ -313,17 +313,18 @@ function LegDrive({ from, to, fromName }: {
   fromName: string
 }) {
   const real = useRealDrive(from, to)
-  const estMin = Math.round((haversineKm(from, to) * 1.2 / 95) * 60)
-  const driveMin = real?.minutes ?? estMin
+  const driveMin = real?.minutes ?? estimateDriveMinutes(from, to)
   if (driveMin < 10) return null
   return (
     <span
       className={`font-medium ${driveTierClass(driveMin)}`}
       title={`${driveTierTitle(driveMin)} — ${real
         ? `road-routed drive from ${fromName} (no live traffic)`
-        : `estimated drive from ${fromName} (straight-line based; real traffic can add time)`}`}
+        : `straight-line estimate from ${fromName}; real roads and traffic add time`}`}
     >
-      {' '}· {formatDriveTime(driveMin)} from {fromName}
+      {/* App-wide convention (Tom 2026-08-19): "est." marks a straight-line
+          guess; an unmarked time is road-routed. */}
+      {' '}· {real ? '' : 'est. '}{formatDriveTime(driveMin)} from {fromName}
     </span>
   )
 }

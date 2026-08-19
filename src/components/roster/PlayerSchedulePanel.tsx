@@ -3,7 +3,7 @@ import { useRosterStore } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useVenueStore } from '../../store/venueStore'
-import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, estimateDriveMinutes } from '../../lib/tripEngine'
+import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, estimateDriveMinutes, haversineKm } from '../../lib/tripEngine'
 import { formatDate, formatDriveTime } from '../../lib/formatters'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 import CityPicker from '../ui/CityPicker'
@@ -158,7 +158,8 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
     return allGames.map((g) => {
       // No origin set — no "from where" for a drive estimate (Tom 2026-08-18)
       const driveMin = driveOrigin ? estimateDriveMinutes(driveOrigin, g.venue.coords) : null
-      return { game: g, driveMin }
+      const km = driveOrigin ? haversineKm(driveOrigin, g.venue.coords) : null
+      return { game: g, driveMin, km }
     })
   }, [allGames, driveOrigin])
 
@@ -197,17 +198,14 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
   }
 
   // Determine range color for a drive time
-  function getRangeInfo(driveMin: number | null): { label: string; color: string; borderColor: string; bgColor: string } {
-    if (driveMin == null) {
+  function getRangeInfo(driveMin: number | null, km: number | null): { label: string; color: string; borderColor: string; bgColor: string } {
+    if (driveMin == null || km == null) {
       return { label: 'No drive-time origin set', color: 'text-text-dim', borderColor: 'border-border/30', bgColor: '' }
     }
     if (driveMin <= maxDriveMinutes) {
       return { label: 'Drive', color: 'text-accent-green', borderColor: 'border-accent-green/30', bgColor: 'bg-accent-green/5' }
     }
-    // Estimate flight hours: convert drive minutes back to approximate km, then to flight hours
-    // Using the inverse of estimateDriveMinutes: km = (driveMin / 60) * 95 / 1.2
-    const approxKm = (driveMin / 60) * 95 / 1.2
-    const flightHrs = approxKm / 800 + 3 // Same formula as estimateFlightHours
+    const flightHrs = km / 800 + 3 // Same formula as estimateFlightHours
     if (flightHrs <= maxFlightHours) {
       return { label: 'Fly-in', color: 'text-accent-orange', borderColor: 'border-accent-orange/30', bgColor: 'bg-accent-orange/5' }
     }
@@ -552,12 +550,12 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                   <span>H/A</span>
                   <span>Opponent</span>
                   <span>Venue</span>
-                  <span className="text-right">Drive</span>
+                  <span className="text-right" title="Straight-line estimates — real roads and traffic add time">Drive (est.)</span>
                   <span className="text-right">Actions</span>
                 </div>
 
-                {gamesWithDrive.map(({ game: g, driveMin }) => {
-                  const range = getRangeInfo(driveMin)
+                {gamesWithDrive.map(({ game: g, driveMin, km }) => {
+                  const range = getRangeInfo(driveMin, km)
                   const dayName = DAY_NAMES[new Date(g.date + 'T12:00:00Z').getUTCDay()]
                   const isPostponed = g.gameStatus === 'Postponed' || g.gameStatus === 'Suspended'
                   const today = new Date().toISOString().split('T')[0]!
@@ -647,10 +645,9 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
             {/* Summary stats */}
             {allGames.length > 0 && (() => {
               const driveCount = gamesWithDrive.filter(({ driveMin }) => driveMin != null && driveMin <= maxDriveMinutes).length
-              const flyInCount = gamesWithDrive.filter(({ driveMin }) => {
-                if (driveMin == null || driveMin <= maxDriveMinutes) return false
-                const approxKm = (driveMin / 60) * 95 / 1.2
-                return (approxKm / 800 + 3) <= maxFlightHours
+              const flyInCount = gamesWithDrive.filter(({ driveMin, km }) => {
+                if (driveMin == null || km == null || driveMin <= maxDriveMinutes) return false
+                return (km / 800 + 3) <= maxFlightHours
               }).length
               const remoteCount = driveOrigin ? allGames.length - driveCount - flyInCount : 0
               const homeCount = allGames.filter((g) => g.isHome).length

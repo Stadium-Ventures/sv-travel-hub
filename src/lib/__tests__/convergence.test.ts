@@ -108,13 +108,14 @@ describe('findConvergenceWindows', () => {
   })
 
   it("keeps same-venue date combos as variants (Kent's Option A / Option B)", () => {
-    // A plays SD once; B is home in Ontario three straight nights — the
-    // combos differ only in which B night, and all must surface as choices.
+    // A plays SD once; B is home three straight nights ~100 est. minutes
+    // away (inside the 120-min same-day cap) — the combos differ only in
+    // which B night, and all must surface as choices.
     const games = [
       game({ id: 'a1', date: '2026-07-29', playerNames: ['A'], venue: { name: 'Petco Park', coords: SAN_DIEGO } }),
-      game({ id: 'b1', date: '2026-07-29', playerNames: ['B'], venue: { name: 'ONT Field', coords: { lat: 34.0185, lng: -117.6033 } } }),
-      game({ id: 'b2', date: '2026-07-30', playerNames: ['B'], venue: { name: 'ONT Field', coords: { lat: 34.0185, lng: -117.6033 } } }),
-      game({ id: 'b3', date: '2026-07-31', playerNames: ['B'], venue: { name: 'ONT Field', coords: { lat: 34.0185, lng: -117.6033 } } }),
+      game({ id: 'b1', date: '2026-07-29', playerNames: ['B'], venue: { name: 'ONT Field', coords: { lat: 33.65, lng: -117.34 } } }),
+      game({ id: 'b2', date: '2026-07-30', playerNames: ['B'], venue: { name: 'ONT Field', coords: { lat: 33.65, lng: -117.34 } } }),
+      game({ id: 'b3', date: '2026-07-31', playerNames: ['B'], venue: { name: 'ONT Field', coords: { lat: 33.65, lng: -117.34 } } }),
     ]
     const result = findConvergenceWindows(games, ['A', 'B'], '2026-07-24', '2026-09-30')
     expect(result).toHaveLength(1)

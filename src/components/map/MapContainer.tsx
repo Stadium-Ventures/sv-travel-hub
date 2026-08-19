@@ -49,10 +49,12 @@ function estimateFlightMinutes(a: { lat: number; lng: number }, b: { lat: number
   return Math.round(km / 13 + 35)
 }
 
-/** Compact pill for a route leg or connector — centered on its point. */
-function legLabelHtml(miles: number, driveMin: number, accent = '#fbbf24', clearable = false): string {
+/** Compact pill for a route leg or connector — centered on its point.
+ *  "est." marks a straight-line guess; road-routed (OSRM) pills drop it —
+ *  the app-wide convention (Tom 2026-08-19). */
+function legLabelHtml(miles: number, driveMin: number, accent = '#fbbf24', clearable = false, road = false): string {
   const pointer = clearable ? 'pointer-events:auto;cursor:pointer' : 'pointer-events:none'
-  return `<div style="transform:translate(-50%,-130%);background:rgba(15,23,42,0.9);border:1px solid ${accent}80;border-radius:6px;padding:2px 7px;font-family:system-ui,sans-serif;font-size:10px;font-weight:700;color:${accent};white-space:nowrap;${pointer}">${Math.round(miles)} mi · ${formatDriveTime(driveMin)} est. drive${clearable ? `<span style="margin-left:6px;color:#94a3b8;font-weight:400">✕ clear</span>` : ''}</div>`
+  return `<div style="transform:translate(-50%,-130%);background:rgba(15,23,42,0.9);border:1px solid ${accent}80;border-radius:6px;padding:2px 7px;font-family:system-ui,sans-serif;font-size:10px;font-weight:700;color:${accent};white-space:nowrap;${pointer}">${Math.round(miles)} mi · ${formatDriveTime(driveMin)} ${road ? 'drive' : 'est. drive'}${clearable ? `<span style="margin-left:6px;color:#94a3b8;font-weight:400">✕ clear</span>` : ''}</div>`
 }
 
 /** Set the trip origin at a point: optimistic preset-proximity label now,
@@ -1016,7 +1018,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         // number stays if OSRM is down; cached pairs resolve instantly).
         getRealDrive(a, b).then((real) => {
           if (!real || tripHighlightRef.current !== highlight) return
-          legMarker.setIcon(L.divIcon({ className: '', html: legLabelHtml(real.miles, real.minutes), iconSize: [0, 0] }))
+          legMarker.setIcon(L.divIcon({ className: '', html: legLabelHtml(real.miles, real.minutes, '#fbbf24', false, true), iconSize: [0, 0] }))
         })
       }
     }

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { TierMarker } from './useTierMarkers'
 import type { Coordinates } from '../../../types/roster'
-import { haversineKm } from '../../../lib/tripEngine'
+import { haversineKm, estimateDriveMinutes } from '../../../lib/tripEngine'
 
 const TIER_WEIGHTS: Record<number, number> = { 1: 5, 2: 3, 3: 1, 4: 0 }
 
@@ -30,10 +30,6 @@ export interface DestinationPick {
   venues: Array<{ name: string; coords: Coordinates }>
 }
 
-function estimateDriveMinutes(from: Coordinates, to: Coordinates): number {
-  const km = haversineKm(from, to)
-  return (km * 1.2 / 95) * 60
-}
 
 
 /** Friendly label for a destination. Picks the nearest US city from a

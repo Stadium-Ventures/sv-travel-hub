@@ -131,7 +131,7 @@ export default function NearbyGamesFacts({
           className={`ml-auto shrink-0 font-medium ${driveTierClass(driveMinutes)}`}
           title={`Estimated drive from ${homeBaseName} (straight-line based; real traffic can add time)`}
         >
-          {formatDriveTime(driveMinutes)} from {homeBaseName}
+          est. {formatDriveTime(driveMinutes)} from {homeBaseName}
         </span>
         {players.some((p) => !priorityPlayers.includes(p.playerName)) && (
           <button
