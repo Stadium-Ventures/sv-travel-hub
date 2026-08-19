@@ -47,7 +47,9 @@ export function findDoubleUps(
   // riding along on an eligible game aren't listed.
   const isEligiblePlayer = (n: string): boolean => {
     const p = playerMap.get(n)
-    if (!p || p.visitsRemaining <= 0) return false
+    // visitsRemaining does NOT exclude (Tom 2026-08-19: "0 visits remaining
+    // can be handled by the SV agent, not logic here") — it only weights.
+    if (!p) return false
     if (filterPlayerNames && filterPlayerNames.length > 0 && !filterPlayerNames.includes(n)) return false
     if (filterTiers && filterTiers.length > 0 && !filterTiers.includes(p.tier)) return false
     return true

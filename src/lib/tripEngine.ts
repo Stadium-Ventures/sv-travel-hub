@@ -308,7 +308,7 @@ export function generateSpringTrainingEvents(
   // Group Pro players by parent org
   const playersByOrg = new Map<number, string[]>()
   for (const p of players) {
-    if (p.level !== 'Pro' || p.visitsRemaining <= 0) continue
+    if (p.level !== 'Pro') continue
     const orgId = resolveMLBTeamId(p.org, customMlbAliases)
     if (!orgId) continue
     const existing = playersByOrg.get(orgId)
@@ -381,7 +381,7 @@ export function generateNcaaEvents(
   // Group NCAA players by school
   const playersBySchool = new Map<string, { players: string[]; venue: typeof NCAA_VENUES[string] }>()
   for (const p of players) {
-    if (p.level !== 'NCAA' || p.visitsRemaining <= 0) continue
+    if (p.level !== 'NCAA') continue
     const canonical = resolveNcaaName(p.org, customNcaaAliases)
     if (!canonical) continue
     const venue = NCAA_VENUES[canonical]
@@ -456,7 +456,7 @@ export function generateHsEvents(
   // Group HS players by school+state
   const playersBySchool = new Map<string, { players: string[]; venue: { name: string; coords: Coordinates } }>()
   for (const p of players) {
-    if (p.level !== 'HS' || p.visitsRemaining <= 0) continue
+    if (p.level !== 'HS') continue
     const key = `${p.org.toLowerCase().trim()}|${p.state.toLowerCase().trim()}`
     const venue = hsVenues.get(key)
     if (!venue) continue
@@ -597,7 +597,10 @@ export async function generateTrips(
     playerMap.set(p.playerName, p)
   }
 
-  // Track players skipped — Tier 4 with no visits, or inactive status (Injured/Transferred/Drafted)
+  // Track players skipped — inactive status only (Injured/Transferred/
+  // Drafted). visitsRemaining NEVER excludes anyone (Tom 2026-08-19: the
+  // SV agent decides what 0-remaining means, not the logic) — it only
+  // lowers scoring weight.
   const skippedPlayers: Array<{ name: string; reason: string }> = []
   for (const p of players) {
     if (p.status && isPlayerInactive(p.status)) {
@@ -605,23 +608,14 @@ export async function generateTrips(
         name: p.playerName,
         reason: p.status,
       })
-    } else if (p.tier === 4 && p.visitsRemaining <= 0) {
-      skippedPlayers.push({
-        name: p.playerName,
-        reason: 'Tier 4 — no visits required',
-      })
     }
   }
 
-  // ALL players are eligible for trip planning (not just those with visits remaining).
-  // Players with completed visits still appear but score lower via visitsRemaining weight.
+  // ALL players are eligible for trip planning. Players with completed
+  // visits still appear but score lower via the visitsRemaining weight.
   // Players with inactive status are excluded entirely.
   const eligiblePlayers = new Set(
-    players.filter((p) => {
-      if (p.status && isPlayerInactive(p.status)) return false
-      if (p.tier === 4 && p.visitsRemaining <= 0) return false
-      return true
-    }).map((p) => p.playerName),
+    players.filter((p) => !(p.status && isPlayerInactive(p.status))).map((p) => p.playerName),
   )
 
   // Clamp start date to today if in the past — no point planning trips to yesterday
@@ -1845,9 +1839,8 @@ export function analyzeBestWeeks(
   const playerMap = new Map<string, RosterPlayer>()
   for (const p of players) playerMap.set(p.playerName, p)
 
-  const eligiblePlayers = new Set(
-    players.filter((p) => p.visitsRemaining > 0).map((p) => p.playerName),
-  )
+  // visitsRemaining never excludes (Tom 2026-08-19)
+  const eligiblePlayers = new Set(players.map((p) => p.playerName))
 
   // Include all games with eligible players (drivable + fly-in) for week analysis
   const eligibleGames = games.filter(

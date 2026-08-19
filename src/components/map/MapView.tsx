@@ -12,6 +12,7 @@ import { useEventMarkers } from './hooks/useEventMarkers'
 import { useDateFilteredVenues } from './hooks/useDateFilteredVenues'
 import { useMapDateRange } from './hooks/useMapDateRange'
 import { useTierMarkers } from './hooks/useTierMarkers'
+import type { TierMarker } from './hooks/useTierMarkers'
 import { useBestWindows } from './hooks/useBestWindows'
 import type { BestWindowStrategy } from './hooks/useBestWindows'
 import { useDestinationPicks } from './hooks/useDestinationPicks'
@@ -59,6 +60,11 @@ export default function MapView() {
 
   // Tier / level / search / overdue filter (Maptive Stage 1 polish)
   const [filterState, setFilterState] = useState<MapFilterState>(DEFAULT_MAP_FILTERS)
+  // "In this view" chip toggles (Tom 2026-08-19), separate from Filters:
+  // click a name = hide their events (faded, toggle back); double-click =
+  // SOLO (only their events). Session-only state.
+  const [hiddenPlayers, setHiddenPlayers] = useState<Set<string>>(new Set())
+  const [soloPlayer, setSoloPlayer] = useState<string | null>(null)
   const heartbeatPlayers = useHeartbeatStore((s) => s.players)
   const daysByPlayerKey = useMemo(() => {
     const m = new Map<string, number | null>()
@@ -98,6 +104,14 @@ export default function MapView() {
     return doubleUps.filter((du) => du.playerNames.some((n) => picked.has(n.trim().toLowerCase())))
   }, [doubleUps, filterState.selectedPlayers])
 
+  // Chip toggles prune double ups too: solo keeps only combos featuring
+  // them; hiding a player drops combos featuring them.
+  const chipDoubleUps = useMemo(() => {
+    if (!soloPlayer && hiddenPlayers.size === 0) return scopedDoubleUps
+    return scopedDoubleUps.filter((du) =>
+      soloPlayer ? du.playerNames.includes(soloPlayer) : !du.playerNames.some((n) => hiddenPlayers.has(n)))
+  }, [scopedDoubleUps, soloPlayer, hiddenPlayers])
+
   // Two double-up families (Tom 2026-08-18): "double up" plain = SAME
   // VENUE, same game (head-to-head, tournament); "drivable" = a drive
   // between venues within the Drive-radius parameter, origin not needed.
@@ -105,9 +119,9 @@ export default function MapView() {
   // survive (count badges, popups, and date ranges follow).
   const activeFamilyDus = useMemo(() => {
     const sameVenueType = (t: string) => t === 'same-venue-matchup' || t === 'tournament-cluster'
-    return scopedDoubleUps.filter((du) =>
+    return chipDoubleUps.filter((du) =>
       sameVenueType(du.type) ? filterState.doubleUpsOnly : filterState.drivableDoubleUpsOnly)
-  }, [scopedDoubleUps, filterState.doubleUpsOnly, filterState.drivableDoubleUpsOnly])
+  }, [chipDoubleUps, filterState.doubleUpsOnly, filterState.drivableDoubleUpsOnly])
   const doubleUpCoords = useMemo(
     () => activeFamilyDus.flatMap((du) => du.games.map((g) => g.venue.coords)),
     [activeFamilyDus],
@@ -135,6 +149,30 @@ export default function MapView() {
     return m
   }, [scopedDoubleUps])
   const tierMarkers = applyMapFilters(allTierMarkers, filterState, daysByPlayerKey, doubleUpCoords, doubleUpGameIds)
+  // Chip toggles applied on top of the Filters output: hidden players'
+  // events drop out (or everyone but the solo player), per-marker player
+  // lists, games, counts, and dates all follow.
+  const effectiveMarkers = useMemo(() => {
+    if (!soloPlayer && hiddenPlayers.size === 0) return tierMarkers
+    const keep = (name: string) => (soloPlayer ? name === soloPlayer : !hiddenPlayers.has(name))
+    return tierMarkers
+      .map((m) => {
+        const players = m.players.filter((p) => keep(p.name))
+        if (players.length === 0) return null
+        const games = m.games.filter((g) => g.players.some(keep))
+        if (m.games.length > 0 && games.length === 0) return null
+        return {
+          ...m,
+          players,
+          playerCount: players.length,
+          bestTier: Math.min(...players.map((p) => p.tier)),
+          games,
+          gameDates: m.games.length > 0 ? [...new Set(games.map((g) => g.date))].sort() : m.gameDates,
+        }
+      })
+      .filter((m): m is TierMarker => m !== null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tierMarkers, hiddenPlayers, soloPlayer])
 
   // ── Viewport scope (Tom + colleague 2026-08-18): the map view itself
   // informs the left rail. Pan or zoom and the in-view summary + all three
@@ -143,18 +181,25 @@ export default function MapView() {
   const [viewport, setViewport] = useState<{ south: number; west: number; north: number; east: number } | null>(null)
   const inViewport = (lat: number, lng: number) =>
     !viewport || (lat >= viewport.south && lat <= viewport.north && lng >= viewport.west && lng <= viewport.east)
-  const visibleMarkers = useMemo(
+  // Pre-hide list for the summary card (hidden players must stay listed,
+  // faded, or they could never be unhidden)
+  const summaryMarkers = useMemo(
     () => (viewport ? tierMarkers.filter((m) => inViewport(m.coords.lat, m.coords.lng)) : tierMarkers),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tierMarkers, viewport],
+  )
+  const visibleMarkers = useMemo(
+    () => (viewport ? effectiveMarkers.filter((m) => inViewport(m.coords.lat, m.coords.lng)) : effectiveMarkers),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [effectiveMarkers, viewport],
   )
   const zoomedWide = !viewport || viewport.east - viewport.west > 45
   // Double ups fully inside the view (player scope wins when active —
   // "wherever they play" beats "where I'm looking")
   const viewDoubleUps = useMemo(
-    () => scopedDoubleUps.filter((du) => du.games.every((g) => inViewport(g.venue.coords.lat, g.venue.coords.lng))),
+    () => chipDoubleUps.filter((du) => du.games.every((g) => inViewport(g.venue.coords.lat, g.venue.coords.lng))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scopedDoubleUps, viewport],
+    [chipDoubleUps, viewport],
   )
 
   // Filtering to specific players re-scopes the question: "when/where can I
@@ -165,8 +210,8 @@ export default function MapView() {
   // The VIEWPORT scopes suggestions (radius no longer does — the star keeps
   // distances and trip generation, the view says where you're interested).
   // Player filter still wins: those players wherever they play.
-  const suggestionMarkers = playerScoped ? tierMarkers : visibleMarkers
-  const suggestionDoubleUps = playerScoped ? scopedDoubleUps : viewDoubleUps
+  const suggestionMarkers = playerScoped ? effectiveMarkers : visibleMarkers
+  const suggestionDoubleUps = playerScoped ? chipDoubleUps : viewDoubleUps
   const bestWindows = useBestWindows(suggestionMarkers, homeBase, maxDriveMinutes, filterStart, filterEnd, windowDays, 5, bestWindowStrategy, suggestionDoubleUps, true)
 
   // Destination picks — the best areas within what you're looking at (the
@@ -194,9 +239,9 @@ export default function MapView() {
   // viewport-scoped list — panning away must never drop or re-zoom it
   // (Tom 2026-08-18). Cleared by the card toggle or the connector's ✕.
   const drawnDoubleUp = useMemo(
-    () => (selectedDuKey ? scopedDoubleUps.find((du) => duKey(du) === selectedDuKey) ?? null : null),
+    () => (selectedDuKey ? chipDoubleUps.find((du) => duKey(du) === selectedDuKey) ?? null : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scopedDoubleUps, selectedDuKey],
+    [chipDoubleUps, selectedDuKey],
   )
   // Player filter changes re-scope the Double Ups list — clear selection.
   const selectedPlayersKey = filterState.selectedPlayers.join('|')
@@ -376,7 +421,7 @@ export default function MapView() {
         <MapFilters
           state={filterState}
           setState={setFilterState}
-          markerCount={tierMarkers.length}
+          markerCount={effectiveMarkers.length}
           totalCount={allTierMarkers.length}
           daysByPlayerKey={daysByPlayerKey}
           venueNames={[...new Set(allTierMarkers.map((m) => m.venueName))].sort()}
@@ -472,10 +517,28 @@ export default function MapView() {
               you pan/zoom. Always visible, never behind a tab. */}
           {(allTierMarkers.length > 0 || anyScheduleLoading) && (
             <InViewSummary
-              markers={visibleMarkers}
+              markers={summaryMarkers}
               filterStart={filterStart}
               filterEnd={filterEnd}
-              onPlayerClick={(n) => {
+              hiddenPlayers={hiddenPlayers}
+              soloPlayer={soloPlayer}
+              onToggleHide={(n) => {
+                if (soloPlayer) {
+                  // Clicking the solo name exits solo; clicking another
+                  // name exits solo AND hides them.
+                  setSoloPlayer(null)
+                  if (soloPlayer !== n) setHiddenPlayers((prev) => new Set(prev).add(n))
+                  return
+                }
+                setHiddenPlayers((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(n)) next.delete(n)
+                  else next.add(n)
+                  return next
+                })
+              }}
+              onSolo={(n) => setSoloPlayer((cur) => (cur === n ? null : n))}
+              onOpenSchedule={(n) => {
                 // Locate before detail (Tom 2026-08-18): pulse the player's
                 // visible venues for ~1.5s, THEN open their schedule.
                 const visible = visibleMarkers.some((m) => m.players.some((p) => p.name === n))
@@ -486,6 +549,7 @@ export default function MapView() {
                   setSchedulePanelPlayer(n)
                 }
               }}
+              onResetChips={() => { setHiddenPlayers(new Set()); setSoloPlayer(null) }}
               zoomedWide={zoomedWide}
             />
           )}
@@ -551,7 +615,7 @@ export default function MapView() {
                 telling MapContainer to zoom to wherever that player's venues are.
                 ("Find Jake Munroe for me.") */}
             <MapContainer
-              tierMarkers={tierMarkers}
+              tierMarkers={effectiveMarkers}
               colorBy={filterState.colorBy}
               showAirports={filterState.showAirports}
               duLabelByGameId={duLabelByGameId}
