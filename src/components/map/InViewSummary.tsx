@@ -2,12 +2,12 @@
 // colleague, 2026-08-18): as you pan and zoom, the left rail names the
 // players you're looking at. Always visible, never behind a tab.
 //
-// Chip interactions (Tom 2026-08-19), IN ADDITION to the Filters:
-//   - click a name    → hide that player's events (name fades; click again
-//                       to bring them back — no ✕, it's a toggle)
-//   - double-click    → SOLO: show only that player's events (double-click
-//                       again, or click the name, to exit)
-//   - click the count → pulse their venues + open their schedule
+// Chip interactions (Tom 2026-08-19, v2 — name-click keeps the beloved
+// pulse + player card), IN ADDITION to the Filters:
+//   - click the DOT   → hide that player's events (dot hollows, name
+//                       fades; click again to bring them back — a toggle)
+//   - click the name  → pulse their venues + open their player card
+//   - double-click name → SOLO: show only their events (again to exit)
 // The full list scrolls when there are too many players for the card.
 
 import { useMemo, useRef } from 'react'
@@ -75,11 +75,13 @@ export default function InViewSummary({
   const chipsActive = soloPlayer != null || hiddenPlayers.size > 0
   const isFaded = (name: string) => (soloPlayer ? name !== soloPlayer : hiddenPlayers.has(name))
 
+  // Single-click waits briefly so a double-click (solo) can win; the wait
+  // is invisible inside the 1.5s locate pulse that follows.
   function handleNameClick(name: string) {
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current)
     clickTimerRef.current = setTimeout(() => {
       clickTimerRef.current = null
-      onToggleHide(name)
+      onOpenSchedule(name)
     }, 230)
   }
   function handleNameDoubleClick(name: string) {
@@ -129,31 +131,35 @@ export default function InViewSummary({
                         : 'bg-gray-900/50 text-text'
                   }`}
                 >
-                  <span
-                    className={`inline-block h-2 w-2 rounded-full ${faded ? 'opacity-40' : ''}`}
-                    style={{ background: TIER_COLORS[p.tier] ?? TIER_COLORS[4]! }}
-                  />
+                  <button
+                    onClick={() => onToggleHide(p.name)}
+                    className="-m-1 cursor-pointer p-1"
+                    title={faded && !soloPlayer ? `Show ${p.name}'s events again` : `Hide ${p.name}'s events from the map (click again to restore)`}
+                  >
+                    <span
+                      className="block h-2.5 w-2.5 rounded-full transition-all"
+                      style={
+                        faded
+                          ? { background: 'transparent', border: `1.5px solid ${TIER_COLORS[p.tier] ?? TIER_COLORS[4]!}`, opacity: 0.5 }
+                          : { background: TIER_COLORS[p.tier] ?? TIER_COLORS[4]! }
+                      }
+                    />
+                  </button>
                   <button
                     onClick={() => handleNameClick(p.name)}
                     onDoubleClick={() => handleNameDoubleClick(p.name)}
                     className="cursor-pointer select-none"
-                    title={`${p.name}: T${p.tier} · ${p.level}. Click to ${soloPlayer === p.name ? 'exit solo' : faded ? 'show again' : 'hide their events'}; double-click to show ONLY them.`}
+                    title={`${p.name}: T${p.tier} · ${p.level} · ${p.gamesInView} game${p.gamesInView !== 1 ? 's' : ''} at ${p.venuesInView} venue${p.venuesInView !== 1 ? 's' : ''} in view. Click to flash their venues and open their card; double-click to show ONLY them${soloPlayer === p.name ? ' (double-click again to exit solo)' : ''}.`}
                   >
                     {p.name}
                   </button>
-                  <button
-                    onClick={() => onOpenSchedule(p.name)}
-                    className={`cursor-pointer ${faded ? 'text-text-dim/30' : 'text-text-dim/60 hover:text-accent-blue'}`}
-                    title={`${p.gamesInView} game${p.gamesInView !== 1 ? 's' : ''} at ${p.venuesInView} venue${p.venuesInView !== 1 ? 's' : ''} in view. Click to flash their venues and open the full schedule.`}
-                  >
-                    {p.gamesInView}g
-                  </button>
+                  <span className={faded ? 'text-text-dim/30' : 'text-text-dim/60'}>{p.gamesInView}g</span>
                 </span>
               )
             })}
           </div>
           <p className="mt-1.5 text-[10px] text-text-dim/40">
-            Click a name to hide their events (click again to restore) · double-click to show only them · click the game count for their schedule.
+            Click a name for their venues + card · double-click to show only them · click the colored dot to hide them (again to restore).
           </p>
         </>
       )}
