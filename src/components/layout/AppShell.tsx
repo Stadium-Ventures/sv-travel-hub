@@ -57,25 +57,28 @@ export default function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="mx-auto min-h-screen max-w-7xl px-4 py-6 sm:px-6">
-      <header className="mb-6 flex items-center justify-between gap-3">
+      {/* flex-wrap: on a phone the controls drop to their own full-width
+          row instead of squeezing the title into a vertical column and
+          pushing the status pill off-screen (Tom 2026-08-19). */}
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-text">SV Travel Hub</h1>
+          <h1 className="whitespace-nowrap text-xl font-bold tracking-tight text-text">SV Travel Hub</h1>
           <p className="text-xs text-text-dim">Road trip planner for client visits</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center gap-2 sm:w-auto">
           <HeaderPlayerSearch />
           <TimeToggle />
           <StatusPill />
         </div>
       </header>
 
-      <div className="mb-6 flex items-center gap-3">
+      <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2">
         <nav className="flex flex-1 gap-1 rounded-xl border border-border/50 bg-surface p-1">
           {PRIMARY_TABS.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              className={`flex-1 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors sm:px-4 ${
                 activeTab === tab.id
                   ? 'bg-accent-blue/20 text-accent-blue'
                   : 'text-text-dim hover:text-text'

@@ -58,7 +58,10 @@ export default function HeaderPlayerSearch() {
   }
 
   return (
-    <div ref={wrapRef} className="relative">
+    // flex-1 on phones: the search shares a full-width header row with the
+    // time toggle + status pill, so it soaks up the leftover space instead
+    // of holding a fixed width that overflows.
+    <div ref={wrapRef} className="relative min-w-0 flex-1 sm:flex-none">
       <input
         ref={inputRef}
         type="text"
@@ -67,7 +70,7 @@ export default function HeaderPlayerSearch() {
         onFocus={() => query.length >= 2 && setOpen(true)}
         onKeyDown={onKeyDown}
         placeholder="Find player…"
-        className="w-48 rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text placeholder:text-text-dim/50 focus:border-accent-blue focus:outline-none"
+        className="w-full rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text placeholder:text-text-dim/50 focus:border-accent-blue focus:outline-none sm:w-48"
       />
       {open && matches.length > 0 && (
         <div className="absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-lg border border-border bg-surface shadow-xl">

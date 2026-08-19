@@ -17,11 +17,10 @@ import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../..
 import { groupAndNumberTrips, itemHasPriorityPlayer, itemPlayerNames, type UnifiedTripItem } from './groupAndNumberTrips'
 import { estimateDriveMinutes } from '../../lib/tripEngine'
 import CityPicker from '../ui/CityPicker'
+import DateRangeCalendar from '../ui/DateRangeCalendar'
 import NearbyGamesFacts from './NearbyGamesFacts'
 import PriorityFacts from './PriorityFacts'
 import { STARTING_LOCATIONS } from '../../data/cityPresets'
-
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
 // 5 priority slots per Kent's interview ("if I select five players...").
 // Shared by the picker AND the Not Covered click-to-add flow so they agree.
@@ -152,10 +151,6 @@ function PlayerSearchPicker({
       )}
     </div>
   )
-}
-
-function getDayName(dateStr: string): string {
-  return DAY_NAMES[new Date(dateStr + 'T12:00:00Z').getUTCDay()]!
 }
 
 function addDaysISO(date: string, delta: number): string {
@@ -622,47 +617,20 @@ export default function TripPlanner() {
         {/* Top row — dates + starting city + Generate, always visible.
             These are shared with the Map tab via the trip store. */}
         <div className="flex flex-wrap items-end gap-3">
+          {/* Same calendar popover as the Map's Filters (Tom 2026-08-19:
+              the native date inputs fought the store's past-date clamp —
+              every mid-edit keystroke snapped back to today, so the date
+              couldn't be changed at all). The calendar only ever commits a
+              complete, ordered range, so the clamp never bites mid-edit. */}
           <div>
-            <label className="mb-1 block text-xs text-text-dim">Start Date</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  const val = e.target.value
-                  if (!val) return
-                  if (val > endDate) {
-                    const end = new Date(val + 'T12:00:00')
-                    end.setDate(end.getDate() + 7)
-                    setDateRange(val, end.toISOString().split('T')[0]!)
-                  } else {
-                    setDateRange(val, endDate)
-                  }
-                }}
-                className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
-              />
-              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
-                {getDayName(startDate)}
-              </span>
-            </div>
+            <label className="mb-1 block text-xs text-text-dim">Dates</label>
+            <DateRangeCalendar
+              start={startDate}
+              end={endDate}
+              onChange={setDateRange}
+              buttonClass="py-1.5 text-sm"
+            />
           </div>
-          <div>
-            <label className="mb-1 block text-xs text-text-dim">End Date</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => { if (e.target.value) setDateRange(startDate, e.target.value) }}
-                className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
-              />
-              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
-                {getDayName(endDate)}
-              </span>
-            </div>
-          </div>
-          {startDate > endDate && (
-            <p className="self-center text-xs text-accent-red">End date is before start date</p>
-          )}
           {/* Trip origin lives HERE too (Kent 2026-08-17: "where am I +
               what dates am I there" is the whole input). Same shared store
               value as the Map's Trip Origin — change either, both update. */}

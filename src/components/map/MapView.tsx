@@ -610,7 +610,11 @@ export default function MapView() {
             viewport height and pins in place on desktop so it stays visible
             while the left rail scrolls. ── */}
         <div className="order-1 lg:order-none min-w-0 flex-1">
-          <div className="h-[calc(100vh-180px)] min-h-[500px] lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]">
+          {/* `isolate` traps Leaflet's internal z-indexes (panes 400+,
+              controls 1000) inside this box — without it they paint over
+              the toolbar's Filters/calendar popovers (z-40/z-50), which on
+              mobile sit directly above the map (Tom 2026-08-19). */}
+          <div className="isolate h-[calc(100vh-180px)] min-h-[500px] lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]">
             {/* Map — when a specific player is selected, fitToMarkersKey changes,
                 telling MapContainer to zoom to wherever that player's venues are.
                 ("Find Jake Munroe for me.") */}
