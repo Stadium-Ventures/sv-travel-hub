@@ -492,40 +492,60 @@ function checkHsSheetSeason(scheduleCsv: string, now: Date): Finding[] {
 
 interface ProbeResult { ok: boolean; reason?: string; skipped?: boolean; text?: string }
 
+/** Google's published-CSV endpoint (and any remote API) intermittently stalls
+ *  or drops a single request while perfectly healthy — a one-shot probe turns
+ *  every such blip into a false alert. Only report a source down after it
+ *  fails every attempt. Per-attempt timeout is 10s so the worst case
+ *  (3 × 10s + pauses) still fits the function's 60s budget with probes
+ *  running in parallel. */
+async function withRetry(probe: () => Promise<ProbeResult>, attempts = 3): Promise<ProbeResult> {
+  let last: ProbeResult = { ok: false, reason: 'not probed' }
+  for (let i = 0; i < attempts; i++) {
+    last = await probe()
+    if (last.ok) return last
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500))
+  }
+  return { ...last, reason: `${last.reason} on ${attempts} attempts` }
+}
+
 /** A source is "ok" only if it responds 2xx AND returns a non-trivial body —
  *  a published sheet that got unshared often 200s with an HTML error page or an
  *  empty CSV, which is exactly the silent failure we're hunting. */
-async function probeCsv(url: string): Promise<ProbeResult> {
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
-      signal: AbortSignal.timeout(12_000),
-    })
-    if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` }
-    const text = await res.text()
-    // A real published sheet CSV has a header row + at least one data row.
-    const dataRows = text.split('\n').filter((l) => l.trim() !== '')
-    if (dataRows.length < 2) return { ok: false, reason: 'an empty response' }
-    // Google serves an HTML page (not CSV) when a sheet is unpublished/private.
-    if (/^\s*<(!doctype|html)/i.test(text)) return { ok: false, reason: 'HTML instead of CSV (sheet may be unpublished)' }
-    return { ok: true, text }
-  } catch (e) {
-    return { ok: false, reason: describeErr(e) }
-  }
+function probeCsv(url: string): Promise<ProbeResult> {
+  return withRetry(async () => {
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` }
+      const text = await res.text()
+      // A real published sheet CSV has a header row + at least one data row.
+      const dataRows = text.split('\n').filter((l) => l.trim() !== '')
+      if (dataRows.length < 2) return { ok: false, reason: 'an empty response' }
+      // Google serves an HTML page (not CSV) when a sheet is unpublished/private.
+      if (/^\s*<(!doctype|html)/i.test(text)) return { ok: false, reason: 'HTML instead of CSV (sheet may be unpublished)' }
+      return { ok: true, text }
+    } catch (e) {
+      return { ok: false, reason: describeErr(e) }
+    }
+  })
 }
 
-async function probeJson(url: string): Promise<ProbeResult> {
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
-      signal: AbortSignal.timeout(12_000),
-    })
-    if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` }
-    await res.json()
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, reason: describeErr(e) }
-  }
+function probeJson(url: string): Promise<ProbeResult> {
+  return withRetry(async () => {
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` }
+      await res.json()
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, reason: describeErr(e) }
+    }
+  })
 }
 
 /** Verify the recap's Slack credentials actually WORK: auth.test proves the

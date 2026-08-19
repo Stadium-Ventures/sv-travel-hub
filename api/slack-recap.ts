@@ -1080,12 +1080,23 @@ function buildBlocks(text: string): Array<{ type: 'section'; text: { type: 'mrkd
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
 async function fetchText(url: string): Promise<string> {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'SVTravelHub/Slack-Recap' },
-    signal: AbortSignal.timeout(12_000),
-  })
-  if (!res.ok) throw new Error(`fetchText ${url}: HTTP ${res.status}`)
-  return res.text()
+  // Google's published-CSV endpoint intermittently stalls a single request
+  // while healthy — retry so one blip doesn't drop a recap section.
+  let lastErr: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 500))
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'SVTravelHub/Slack-Recap' },
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) throw new Error(`fetchText ${url}: HTTP ${res.status}`)
+      return res.text()
+    } catch (e) {
+      lastErr = e
+    }
+  }
+  throw lastErr
 }
 
 /** Tiny RFC-4180-ish CSV parser. Handles quoted fields with commas and
