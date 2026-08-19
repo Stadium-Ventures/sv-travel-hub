@@ -5,6 +5,14 @@ export function formatDate(dateStr: string): string {
   return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${d.getUTCDate()}`
 }
 
+/** "Aug 23" — for tables that render their own (accented) weekday column,
+ *  where formatDate's built-in weekday would double it ("Sun Sun Aug 23"). */
+export function formatMonthDay(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00Z')
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`
+}
+
 export function formatDriveTime(minutes: number): string {
   const h = Math.floor(minutes / 60)
   const m = minutes % 60

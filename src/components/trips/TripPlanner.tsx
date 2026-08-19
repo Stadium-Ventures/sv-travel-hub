@@ -1015,7 +1015,7 @@ export default function TripPlanner() {
                     explainer below (Tom 2026-08-11 — the old "N without
                     your priority players hidden" fragment read as noise). */}
                 <h3 className="text-sm font-semibold text-text">
-                  Your Trips
+                  Suggested Trips
                   <span className="ml-2 text-xs font-normal text-text-dim">
                     {relevantToFilters.length} option{relevantToFilters.length !== 1 ? 's' : ''}
                   </span>
@@ -1397,8 +1397,8 @@ function WelcomeHint() {
         <div className="border-t border-border/30 px-5 py-3 text-xs text-text-dim leading-relaxed">
           <ol className="space-y-1 list-decimal list-inside">
             <li>Pick your <span className="text-text">date range</span> and adjust the max drive if needed.</li>
-            <li>Hit <span className="font-medium text-accent-blue">Generate Trips</span> to build trip options.</li>
-            <li>Review your trips — expand any card for the full day-by-day itinerary.</li>
+            <li>Hit <span className="font-medium text-accent-blue">Generate Trips</span> to get Suggested Trips.</li>
+            <li>Review the Suggested Trips — each card lists its games with dates, times, and drives.</li>
           </ol>
           <p className="mt-2 text-[10px] text-text-dim/50">Use Priority Players to build trips around specific guys first.</p>
         </div>

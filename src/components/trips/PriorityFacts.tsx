@@ -11,7 +11,7 @@ import { useScheduleStore } from '../../store/scheduleStore'
 import { useSummerStore } from '../../store/summerStore'
 import { useTimeStore } from '../../store/timeStore'
 import { estimateDriveMinutes } from '../../lib/tripEngine'
-import { formatDate, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
+import { formatDate, formatMonthDay, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
 import type { RosterPlayer } from '../../types/roster'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -125,7 +125,7 @@ export default function PriorityFacts({
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border/40 px-4 py-2.5">
         <h3 className="text-sm font-semibold text-text">The facts first</h3>
         <span className="text-[11px] text-text-dim">
-          where {priorityPlayers.length === 1 ? 'this player is' : `these ${priorityPlayers.length} are`} each day, {formatDate(startDate)} to {formatDate(endDate)}. Build the trip yourself from this, or Generate Trips below for suggestions.
+          where {priorityPlayers.length === 1 ? 'this player is' : `these ${priorityPlayers.length} are`} each day, {formatDate(startDate)} to {formatDate(endDate)}
         </span>
       </div>
 
@@ -163,7 +163,7 @@ export default function PriorityFacts({
                 return (
                   <tr key={d} className="align-top hover:bg-gray-900/40 transition-colors">
                     <td className="whitespace-nowrap px-4 py-2 font-medium text-text-dim">
-                      <span className={day === 'Tue' ? 'font-bold text-accent-blue' : ''}>{day}</span> {formatDate(d)}
+                      <span className={day === 'Tue' ? 'font-bold text-accent-blue' : ''}>{day}</span> {formatMonthDay(d)}
                     </td>
                     {priorityPlayers.map((name) => {
                       const cells = perPlayer.get(name)
