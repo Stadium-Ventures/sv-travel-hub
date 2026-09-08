@@ -89,20 +89,49 @@ jobs:
         if: steps.check.outputs.stale == 'true' || github.event.inputs.test == 'true'
         env:
           WEBHOOK: ${{ secrets.SV_AUTOMATION_WEBHOOK_URL }}
+          SV_AUTOMATION_WEBHOOK_URL: ${{ secrets.SV_AUTOMATION_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SV_REGISTRY_PAT: ${{ secrets.SV_REGISTRY_PAT }}
           REPO: ${{ github.repository }}
           BODY: ${{ steps.check.outputs.output }}
           IS_TEST: ${{ github.event.inputs.test }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          # D130 fan-out (2026-09-08): this repo posted its own copy of this
+          # finding on 2026-09-07, one of six sibling repos each running their
+          # own copy of the same repo-agnostic checker straight to the
+          # webhook — the exact duplicate-detector pattern D130 was ruled to
+          # fix. Now calls the shared poster (scripts/lib/automation-post.cjs,
+          # vendored from Stadium-Ventures/sv-registry — self-contained, only
+          # depends on Node's builtin https), which claims a row keyed
+          # (detector, UTC date) in sv-registry's ledger via the Contents API
+          # BEFORE sending, so the first sibling to find drift posts the
+          # digest and the rest record their finding on that row and stay
+          # quiet. Needs SV_REGISTRY_PAT (contents:write on sv-registry) to
+          # claim; without it the poster fails closed and posts unclaimed —
+          # correct behaviour, but this repo's finding gets no dedup until
+          # the secret is added.
           if [ -z "$WEBHOOK" ]; then
             echo "No SV_AUTOMATION_WEBHOOK_URL secret set — cannot post, but the check result is above in the log."
             exit 0
           fi
           NAME=$(echo "$REPO" | cut -d/ -f2)
           if [ "$IS_TEST" = "true" ]; then
-            TEXT="🛠️ ${NAME} (${NAME}) — TEST post: sv-way.config.json staleness check\n\nWhat broke: nothing — this is a manual test post.\nHow we know: workflow_dispatch was run with test=true.\nWhat to do: nothing; this confirms the webhook wiring works."
+            node scripts/lib/automation-post.cjs post \
+              --detector sv-way-config-staleness-test \
+              --acute-key "sv-way-config-staleness-test:${NAME}:${GITHUB_RUN_ID}" \
+              --repo "$REPO" --run-url "$RUN_URL" --tag "🛠️" \
+              --title "TEST post: sv-way.config.json staleness check" \
+              --finding "nothing — this is a manual test post." \
+              --how-we-know "workflow_dispatch was run with test=true." \
+              --what-to-do "nothing; this confirms the webhook wiring works."
           else
-            TEXT="🛠️ ${NAME} (${NAME}) — sv-way.config.json may be stale\n\nWhat broke: this repo's sv-way.config.json declares roles/facts that may no longer match the repo's current state.\nHow we know:\n${BODY}\nWhat to do: have a Claude Code session (or the repo owner) re-read the repo and refresh sv-way.config.json — same method as the original hand-authoring pass. This check only detects drift; it never rewrites the file. (The doctrine pointer block in CLAUDE.md is a separate, fully-automated sync — see the sync-doctrine-block job in this same workflow.)"
+            printf '%s' "$BODY" \
+              | node scripts/lib/automation-post.cjs post \
+                  --detector sv-way-config-staleness \
+                  --repo "$REPO" --run-url "$RUN_URL" --bulleted \
+                  --title "sv-way.config.json may be stale" \
+                  --findings-file - \
+                  --how-we-know "the daily staleness check diffed this repo's sv-way.config.json against every commit since the config's own date stamp." \
+                  --what-to-do "have a Claude Code session (or the repo owner) re-read the repo and refresh sv-way.config.json — same method as the original hand-authoring pass. This check only detects drift; it never rewrites the file. (The doctrine pointer block in CLAUDE.md is a separate, fully-automated sync — see the sync-doctrine-block job in this same workflow.)"
           fi
-          curl -sS -X POST -H 'Content-type: application/json' \
-            --data "$(node -e 'console.log(JSON.stringify({text: process.argv[1]}))' "$(printf '%b' "$TEXT")")" \
-            "$WEBHOOK"
