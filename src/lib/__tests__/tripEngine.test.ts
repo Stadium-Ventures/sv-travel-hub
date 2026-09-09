@@ -208,18 +208,29 @@ describe('generateTrips — overlapping start times never disqualify a same-day 
   // partner game, so a Sep 1-only search built two solo trips and no card
   // carried the double up. Tom's rule: times never disqualify (split
   // innings, or game + meal).
+  //
+  // The fixture date is relative to today: generateTrips clamps the search
+  // start to today and drops past games, so a fixed 2026-09-01 went red the
+  // day after Sep 1. Skip Sunday (blackout day) so the games stay eligible.
+  const DAY_OFFSET = [7, 8].find(
+    (n) => new Date(`${daysFromToday(n)}T12:00:00Z`).getUTCDay() !== 0,
+  )!
+  const DAY = daysFromToday(DAY_OFFSET)
+  const DAY_OF_WEEK = new Date(`${DAY}T12:00:00Z`).getUTCDay()
+  // 9:05 PM / 9:35 PM Pacific = 01:05Z / 01:35Z the next UTC day
+  const NEXT_UTC_DAY = daysFromToday(DAY_OFFSET + 1)
   const VENUE_A = { lat: 33.65, lng: -117.35 }
   const VENUE_B = { lat: 34.05, lng: -117.60 } // ~35-40 min drive north
 
   const games: GameEvent[] = [
     {
-      id: 'du-a', date: '2026-09-01', dayOfWeek: 2, time: '2026-09-02T01:05:00Z',
+      id: 'du-a', date: DAY, dayOfWeek: DAY_OF_WEEK, time: `${NEXT_UTC_DAY}T01:05:00Z`,
       homeTeam: 'Home A', awayTeam: 'Away A', isHome: true,
       venue: { name: 'Diamond Test Park', coords: VENUE_A },
       source: 'mlb-api', playerNames: ['Pair One'],
     },
     {
-      id: 'du-b', date: '2026-09-01', dayOfWeek: 2, time: '2026-09-02T01:35:00Z',
+      id: 'du-b', date: DAY, dayOfWeek: DAY_OF_WEEK, time: `${NEXT_UTC_DAY}T01:35:00Z`,
       homeTeam: 'Home B', awayTeam: 'Away B', isHome: true,
       venue: { name: 'ONT Test Field', coords: VENUE_B },
       source: 'mlb-api', playerNames: ['Pair Two'],
@@ -228,7 +239,7 @@ describe('generateTrips — overlapping start times never disqualify a same-day 
   const players = ['Pair One', 'Pair Two'].map((playerName) => makePlayer({ playerName }))
 
   it('a single-day search puts both overlapping games in one trip', async () => {
-    const plan = await generateTrips(games, players, '2026-09-01', '2026-09-01', undefined,
+    const plan = await generateTrips(games, players, DAY, DAY, undefined,
       480, ['Pair One', 'Pair Two'], undefined, 4, undefined, VENUE_A)
 
     const covering = plan.trips.find((t) => {
