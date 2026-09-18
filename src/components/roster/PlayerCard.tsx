@@ -15,7 +15,7 @@ const TIER_COLORS: Record<number, string> = {
   4: 'bg-gray-500/20 text-gray-400',
 }
 
-const SPORT_LABELS: Record<number, string> = { 1: 'MLB', 11: 'AAA', 12: 'AA', 13: 'High-A', 14: 'A' }
+const SPORT_LABELS: Record<number, string> = { 1: 'MLB', 11: 'AAA', 12: 'AA', 13: 'High-A', 14: 'A', 17: 'AFL' }
 
 interface AffiliateOption {
   teamId: number
@@ -52,6 +52,10 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
   const plannedAgent = visitCount?.nextPlannedAgent ?? null
 
   const summerAssignment = useSummerStore((s) => s.byPlayer[player.playerName])
+  // Arizona Fall League club, matched from the six AFL rosters each fall.
+  // Sits alongside the regular affiliate: the MiLB season is over but the
+  // player is still that org's, and the fall games are the ones to visit.
+  const aflAssignment = useScheduleStore((s) => s.aflAssignments[player.playerName])
 
   // Filter affiliate options to this player's org
   const orgAffiliates = useMemo(() => {
@@ -98,6 +102,14 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
               title={`Summer (${summerAssignment.league}): ${summerAssignment.summerTeam}${summerAssignment.status ? ` — ${summerAssignment.status}` : ''}`}
             >
               {summerAssignment.active ? `Summer · ${summerAssignment.league}` : `Summer ${summerAssignment.status}`}
+            </span>
+          )}
+          {aflAssignment && (
+            <span
+              className="ml-1.5 rounded bg-accent-orange/15 px-1.5 py-0.5 text-[9px] font-medium text-accent-orange"
+              title={`On the ${aflAssignment.teamName} roster for the Arizona Fall League (Oct to mid-Nov). Fall games are pulled into the schedule alongside the regular affiliate.`}
+            >
+              Fall · {aflAssignment.teamName}
             </span>
           )}
           {plannedDate && (

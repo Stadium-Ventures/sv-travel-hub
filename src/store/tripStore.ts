@@ -14,21 +14,21 @@ import { useVenueStore } from './venueStore'
 import { useHeartbeatStore } from './heartbeatStore'
 import { useSummerStore } from './summerStore'
 import { isInSummerWindow } from '../data/summerLeagues'
+import { restOfSeasonEnd } from '../lib/season'
 
 function toISO(d: Date): string {
   return d.toISOString().split('T')[0]!
 }
 // Default window: today → end of the season (Tom 2026-08-19: every fresh
 // load or refresh starts from the FULL rest-of-season picture; narrowing is
-// a per-session choice, never remembered). Sep 30 matches the pro-schedule
-// fetch window; after Sep 30 "rest of season" rolls to next year's.
+// a per-session choice, never remembered). The end matches the Pro schedule
+// fetch window in lib/season.ts (through the AFL, mid-Nov); after it "rest of
+// season" rolls to next year's.
 function defaultStart(): string {
   return toISO(new Date())
 }
 function defaultEnd(): string {
-  const now = new Date()
-  const seasonEnd = `${now.getFullYear()}-09-30`
-  return toISO(now) <= seasonEnd ? seasonEnd : `${now.getFullYear() + 1}-09-30`
+  return restOfSeasonEnd()
 }
 
 export type TripStatus = 'planned' | 'completed'

@@ -22,6 +22,7 @@ import DateRangeCalendar from '../ui/DateRangeCalendar'
 import NearbyGamesFacts from './NearbyGamesFacts'
 import PriorityFacts from './PriorityFacts'
 import { STARTING_LOCATIONS } from '../../data/cityPresets'
+import { proSeasonWindow, restOfSeasonEnd } from '../../lib/season'
 
 // 5 priority slots per Kent's interview ("if I select five players...").
 // Shared by the picker AND the Not Covered click-to-add flow so they agree.
@@ -354,7 +355,7 @@ export default function TripPlanner() {
     let outOfWindow: ReturnType<typeof findConvergenceWindows>[number] | null = null
     if (missing.length === 0 && (windows.length === 0 || !windows[0]!.feasible)) {
       const today = new Date().toISOString().split('T')[0]!
-      const seasonEnd = `${new Date().getFullYear()}-09-30`
+      const seasonEnd = proSeasonWindow().end
       outOfWindow = findConvergenceWindows(all, priorityPlayers, today, seasonEnd, opts)
         .find((w) => w.feasible && !(w.startDate >= startDate && w.endDate <= endDate)) ?? null
     }
@@ -488,9 +489,10 @@ export default function TripPlanner() {
     if (Object.keys(schedStore.playerTeamAssignments).length === 0) {
       await schedStore.autoAssignPlayers()
     }
-    if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length > 0) {
-      const y = new Date().getFullYear()
-      schedStore.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+    await schedStore.assignAflPlayers()
+    if (useScheduleStore.getState().hasProAssignments()) {
+      const { start, end } = proSeasonWindow()
+      schedStore.fetchProSchedules(start, end)
     }
 
     // 2. NCAA — bundled data loads instantly
@@ -669,8 +671,7 @@ export default function TripPlanner() {
               onClick={() => {
                 const today = new Date().toISOString().split('T')[0]!
                 if (days === 0) {
-                  const y = new Date().getFullYear()
-                  setDateRange(today, `${y}-09-30`)
+                  setDateRange(today, restOfSeasonEnd())
                 } else {
                   const end = new Date()
                   end.setDate(end.getDate() + days)

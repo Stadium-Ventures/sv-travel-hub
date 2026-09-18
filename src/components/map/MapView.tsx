@@ -27,6 +27,7 @@ import { formatDate } from '../../lib/formatters'
 import type { DoubleUp } from '../../types/schedule'
 import type { RosterPlayer } from '../../types/roster'
 import { useMemo } from 'react'
+import { proSeasonWindow } from '../../lib/season'
 
 export default function MapView() {
   const [schedulePanelPlayer, setSchedulePanelPlayer] = useState<string | null>(null)
@@ -392,9 +393,10 @@ export default function MapView() {
                     await useRosterStore.getState().fetchRoster()
                     const sched = useScheduleStore.getState()
                     await sched.autoAssignPlayers()
-                    if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length > 0) {
-                      const y = new Date().getFullYear()
-                      sched.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+                    await sched.assignAflPlayers()
+                    if (useScheduleStore.getState().hasProAssignments()) {
+                      const { start, end } = proSeasonWindow()
+                      sched.fetchProSchedules(start, end)
                     }
                     const roster = useRosterStore.getState().players // fresh — fetched above
                     const ncaaOrgs = roster.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))

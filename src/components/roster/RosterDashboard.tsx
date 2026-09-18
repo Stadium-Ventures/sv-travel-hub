@@ -8,6 +8,7 @@ import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '..
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
 import CoveragePanel from './CoveragePanel'
+import { proSeasonWindow } from '../../lib/season'
 
 export default function RosterDashboard() {
   const players = useRosterStore((s) => s.players)
@@ -464,8 +465,9 @@ export default function RosterDashboard() {
                     <button
                       onClick={async () => {
                         const store = useScheduleStore.getState()
-                        const y = new Date().getFullYear()
-                        await store.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+                        await store.assignAflPlayers()
+                        const { start, end } = proSeasonWindow()
+                        await store.fetchProSchedules(start, end)
                       }}
                       disabled={schedulesLoading}
                       className="ml-4 shrink-0 rounded-lg bg-accent-orange px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-orange/80 disabled:opacity-50"

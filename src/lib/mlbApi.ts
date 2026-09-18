@@ -1,5 +1,6 @@
 import type { Coordinates } from '../types/roster'
 import { fetchWithTimeout } from './fetchWithTimeout'
+import { AFL_SPORT_ID } from './season'
 
 const MLB_BASE = 'https://statsapi.mlb.com/api/v1'
 
@@ -89,6 +90,26 @@ export async function fetchAffiliates(parentTeamId: number): Promise<MLBAffiliat
     sportName: (t.sport as Record<string, unknown>).name as string,
     parentOrgId: parentTeamId,
   }))
+}
+
+// The six Arizona Fall League clubs for a season. They live under sportId 17
+// alongside every winter league (LMP, LIDOM, ABL...), so filter by league
+// name. AFL clubs are shared by several orgs, so parentOrgId is 0 and they
+// are tracked separately from the org affiliate tree.
+export async function fetchAflTeams(season: number): Promise<MLBAffiliate[]> {
+  const url = `${MLB_BASE}/teams?sportId=${AFL_SPORT_ID}&season=${season}`
+  const res = await fetchWithRetry(url)
+  if (!res.ok) throw new Error(`AFL teams fetch failed: ${res.status}`)
+  const data = await res.json()
+  return (data.teams ?? [])
+    .filter((t: Record<string, unknown>) => /arizona fall league/i.test(((t.league as Record<string, unknown> | undefined)?.name as string) ?? ''))
+    .map((t: Record<string, unknown>) => ({
+      teamId: t.id as number,
+      teamName: t.name as string,
+      sportId: AFL_SPORT_ID,
+      sportName: 'Arizona Fall League',
+      parentOrgId: 0,
+    }))
 }
 
 // Fetch schedule for a specific team within a date range

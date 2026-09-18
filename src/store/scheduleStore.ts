@@ -3,7 +3,8 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { idbStorage } from '../lib/idbStorage'
 import { debugLog } from '../lib/debugLog'
 import type { MLBAffiliate, MLBGameRaw, MLBTransaction } from '../lib/mlbApi'
-import { fetchAllAffiliates, fetchAllSchedules, fetchAllTransactions, fetchAllRosters } from '../lib/mlbApi'
+import { fetchAllAffiliates, fetchAllSchedules, fetchAllTransactions, fetchAllRosters, fetchAflTeams } from '../lib/mlbApi'
+import { AFL_SPORT_ID, isAflSeason } from '../lib/season'
 import { MLB_PARENT_IDS, resolveNcaaName, resolveMLBTeamId } from '../data/aliases'
 import type { GameEvent } from '../types/schedule'
 import { extractVenueCoords } from '../lib/mlbApi'
@@ -23,7 +24,7 @@ export interface PlayerTeamAssignment {
   sportId: number
   teamName: string
   /** How this assignment was determined */
-  source?: 'milb-roster' | 'mlb-roster' | 'mlb-il' | 'estimated' | 'manual'
+  source?: 'milb-roster' | 'mlb-roster' | 'mlb-il' | 'estimated' | 'manual' | 'afl-roster'
 }
 
 // Activity log entry — tracks visible changes for transparency
@@ -50,6 +51,14 @@ interface ScheduleState {
 
   // Assignment activity log (persisted) — shows what auto-assign did
   assignmentLog: AssignmentChange[]
+
+  // Arizona Fall League (persisted). A second, concurrent assignment: the
+  // player keeps their org affiliate above, and Sep-Nov may ALSO sit on one
+  // of the six AFL clubs, which are shared across orgs and so live outside
+  // the affiliate tree. Empty outside the fall.
+  aflTeams: MLBAffiliate[]
+  aflAssignments: Record<string, PlayerTeamAssignment>
+  aflAssignedAt: number | null
 
   // Pro schedules
   proSchedules: Record<number, MLBGameRaw[]> // teamId → games
@@ -102,6 +111,10 @@ interface ScheduleState {
   removePlayerAssignment: (playerName: string) => void
   setCustomAlias: (type: 'mlb' | 'ncaa', raw: string, canonical: string) => void
   autoAssignPlayers: () => Promise<void>
+  /** Match Pro clients against the six AFL rosters (Sep-Nov); clears them otherwise. */
+  assignAflPlayers: () => Promise<void>
+  /** True when anything Pro (org affiliate or AFL club) is assigned. */
+  hasProAssignments: () => boolean
   fetchProSchedules: (startDate: string, endDate: string) => Promise<void>
   regenerateProGames: () => void
   pruneRemovedPlayers: () => void
@@ -110,7 +123,7 @@ interface ScheduleState {
   fetchHsSchedules: (playerOrgs: Array<{ playerName: string; org: string; state: string }>, opts?: { merge?: boolean; forceRefresh?: boolean }) => Promise<void>
 }
 
-function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[]): GameEvent | null {
+function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[], sportId?: number): GameEvent | null {
   const coords = extractVenueCoords(game)
   if (!coords) return null
 
@@ -157,7 +170,7 @@ function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[])
     // Field" bug, 2026-07-22).
     playerNames: [...playerNames],
     playerSides,
-    sportId: undefined,
+    sportId,
     sourceUrl: `https://www.mlb.com/gameday/${game.gamePk}`,
     gameStatus: game.status?.detailedState,
     probablePitcherNames: pitcherNames.length > 0 ? pitcherNames : undefined,
@@ -188,6 +201,10 @@ export const useScheduleStore = create<ScheduleState>()(
       customMlbAliases: {},
       customNcaaAliases: {},
       assignmentLog: [],
+
+      aflTeams: [],
+      aflAssignments: {},
+      aflAssignedAt: null,
 
       proSchedules: {},
       proGames: [],
@@ -706,16 +723,20 @@ export const useScheduleStore = create<ScheduleState>()(
         const prunedMoves = oldMoves.filter((m) => rosterNames.has(m.player.fullName))
         const oldLog = get().assignmentLog ?? []
         const prunedLog = oldLog.filter((e) => rosterNames.has(e.playerName))
-        if (removed.length === 0 && prunedMoves.length === oldMoves.length && prunedLog.length === oldLog.length) return
+        const aflRemoved = Object.keys(get().aflAssignments).filter((n) => !rosterNames.has(n))
+        if (removed.length === 0 && aflRemoved.length === 0 && prunedMoves.length === oldMoves.length && prunedLog.length === oldLog.length) return
         const pruned = { ...assignments }
         for (const n of removed) delete pruned[n]
+        const prunedAfl = { ...get().aflAssignments }
+        for (const n of Object.keys(prunedAfl)) if (!rosterNames.has(n)) delete prunedAfl[n]
         set({
           playerTeamAssignments: pruned,
+          aflAssignments: prunedAfl,
           rosterMoves: prunedMoves,
           assignmentLog: prunedLog,
         })
         debugLog(`[roster-prune] dropped ${removed.length} ex-roster assignment(s), ${oldMoves.length - prunedMoves.length} roster move(s), ${oldLog.length - prunedLog.length} log entrie(s)`)
-        if (removed.length > 0) get().regenerateProGames()
+        if (removed.length > 0 || aflRemoved.length > 0) get().regenerateProGames()
       },
 
       regenerateProGames: () => {
@@ -723,12 +744,21 @@ export const useScheduleStore = create<ScheduleState>()(
         const assignments = state.playerTeamAssignments
         const rawSchedules = state.proSchedules
 
-        // Build player-to-teamId mapping directly from assignments
+        // Build player-to-teamId mapping directly from assignments. AFL
+        // clubs are a second key per player; a fall game is stamped with the
+        // AFL players only, never the org affiliate's.
         const playersByTeamId = new Map<number, string[]>()
         for (const [playerName, assignment] of Object.entries(assignments)) {
           const existing = playersByTeamId.get(assignment.teamId)
           if (existing) existing.push(playerName)
           else playersByTeamId.set(assignment.teamId, [playerName])
+        }
+        const aflTeamIds = new Set<number>()
+        for (const [playerName, a] of Object.entries(state.aflAssignments)) {
+          aflTeamIds.add(a.teamId)
+          const existing = playersByTeamId.get(a.teamId)
+          if (existing) existing.push(playerName)
+          else playersByTeamId.set(a.teamId, [playerName])
         }
 
         // Pull rehab windows. The static import above is a cycle with
@@ -740,7 +770,8 @@ export const useScheduleStore = create<ScheduleState>()(
         // assignment. Optioned/demoted players (no rehab record) and genuine
         // MiLB players (no warning entry) keep their full schedules — they
         // could legitimately be at the MiLB affiliate for months.
-        function clipPlayersForGame(_teamId: number, gameDate: string, players: string[]): string[] {
+        function clipPlayersForGame(teamId: number, gameDate: string, players: string[]): string[] {
+          if (aflTeamIds.has(teamId)) return players // fall club: rehab windows don't apply
           return players.filter((name) => {
             const assignment = assignments[name]
             if (!assignment) return true
@@ -762,7 +793,7 @@ export const useScheduleStore = create<ScheduleState>()(
             const gameDate = game.gameDate.split('T')[0]!
             const clipped = clipPlayersForGame(teamId, gameDate, teamPlayers)
             if (clipped.length === 0) continue
-            const event = mlbGameToEvent(game, teamId, clipped)
+            const event = mlbGameToEvent(game, teamId, clipped, aflTeamIds.has(teamId) ? AFL_SPORT_ID : undefined)
             if (!event) continue
             const existing = eventsById.get(event.id)
             if (existing) mergeEventPlayers(existing, event)
@@ -773,6 +804,105 @@ export const useScheduleStore = create<ScheduleState>()(
         const allGames = [...eventsById.values()]
         allGames.sort((a, b) => a.date.localeCompare(b.date))
         set({ proGames: allGames })
+      },
+
+      hasProAssignments: () => {
+        const s = get()
+        return Object.keys(s.playerTeamAssignments).length > 0 || Object.keys(s.aflAssignments).length > 0
+      },
+
+      assignAflPlayers: async () => {
+        // Outside Sep-Nov there is nothing to match, and last fall's clubs
+        // must not follow a player into spring.
+        if (!isAflSeason()) {
+          if (Object.keys(get().aflAssignments).length > 0) {
+            set({ aflAssignments: {}, aflAssignedAt: Date.now() })
+            get().regenerateProGames()
+          } else if (!get().aflAssignedAt) {
+            set({ aflAssignedAt: Date.now() })
+          }
+          return
+        }
+        const rosterPlayers = useRosterStore.getState().players
+        const proPlayers = rosterPlayers.filter((p) => p.level === 'Pro')
+        if (proPlayers.length === 0) return
+
+        const season = new Date().getFullYear()
+        try {
+          const teams = await fetchAflTeams(season)
+          if (teams.length === 0) throw new Error('MLB API returned no Arizona Fall League clubs')
+          const { entries, failedTeams } = await fetchAllRosters(
+            teams.map((t) => ({ teamId: t.teamId, sportId: t.sportId, teamName: t.teamName })),
+            undefined,
+            season,
+            'fullRoster',
+          )
+
+          // Match by MLB player id first (exact), then by normalized name for
+          // roster rows that don't carry an id yet.
+          const byId = new Map<number, string>()
+          const byName = new Map<string, string>()
+          for (const p of proPlayers) {
+            if (p.mlbPlayerId) byId.set(Number(p.mlbPlayerId), p.playerName)
+            byName.set(p.playerName.trim().toLowerCase(), p.playerName)
+          }
+          const next: Record<string, PlayerTeamAssignment> = {}
+          for (const e of entries) {
+            const name = byId.get(e.playerId) ?? byName.get(e.fullName.trim().toLowerCase())
+            if (!name) continue
+            next[name] = { teamId: e.teamId, sportId: AFL_SPORT_ID, teamName: e.teamName, source: 'afl-roster' }
+          }
+
+          // A failed roster fetch keeps that club's previous assignments
+          // rather than silently dropping players off the fall map.
+          const prev = get().aflAssignments
+          for (const t of failedTeams) {
+            for (const [name, a] of Object.entries(prev)) {
+              if (a.teamId === t.teamId && !next[name]) next[name] = a
+            }
+          }
+
+          const log: AssignmentChange[] = []
+          const ts = Date.now()
+          for (const [name, a] of Object.entries(next)) {
+            const old = prev[name]
+            if (!old) log.push({ playerName: name, action: 'assigned', to: `${a.teamName} (AFL)`, timestamp: ts })
+            else if (old.teamId !== a.teamId) log.push({ playerName: name, action: 'reassigned', from: `${old.teamName} (AFL)`, to: `${a.teamName} (AFL)`, timestamp: ts })
+          }
+          for (const [name, old] of Object.entries(prev)) {
+            if (!next[name] && !failedTeams.some((t) => t.teamId === old.teamId)) {
+              log.push({ playerName: name, action: 'removed', from: `${old.teamName} (AFL)`, timestamp: ts })
+            }
+          }
+
+          const changed = JSON.stringify(prev) !== JSON.stringify(next)
+          set({
+            aflTeams: teams,
+            aflAssignments: next,
+            aflAssignedAt: ts,
+            assignmentLog: log.length > 0 ? [...(get().assignmentLog ?? []), ...log] : get().assignmentLog,
+          })
+          debugLog(`[afl] ${Object.keys(next).length} client(s) on AFL rosters${failedTeams.length > 0 ? `, ${failedTeams.length} roster fetch(es) failed` : ''}`)
+          if (changed) get().regenerateProGames()
+
+          const diag = useDiagnosticsStore.getState()
+          diag.clearSource('afl')
+          if (failedTeams.length > 0) {
+            diag.addIssue({
+              level: 'warning',
+              source: 'afl',
+              message: `${failedTeams.length} Arizona Fall League roster fetch(es) failed — kept previous fall assignments`,
+              details: failedTeams.map((t) => t.teamName).join(', '),
+            })
+          }
+        } catch (e) {
+          console.warn('[afl] roster match failed:', e)
+          useDiagnosticsStore.getState().addIssue({
+            level: 'warning',
+            source: 'afl',
+            message: `Arizona Fall League lookup failed — ${e instanceof Error ? e.message : 'unknown error'}`,
+          })
+        }
       },
 
       fetchProSchedules: async (startDate, endDate) => {
@@ -793,6 +923,15 @@ export const useScheduleStore = create<ScheduleState>()(
           if (aff?.parentOrgId) parentOrgIds.add(aff.parentOrgId)
         }
 
+        // AFL clubs: fetched only when a client is on one, on top of the org.
+        const aflTeamIds = new Set<number>()
+        for (const [playerName, a] of Object.entries(state.aflAssignments)) {
+          aflTeamIds.add(a.teamId)
+          const existing = playersByTeamId.get(a.teamId)
+          if (existing) existing.push(playerName)
+          else playersByTeamId.set(a.teamId, [playerName])
+        }
+
         if (playersByTeamId.size === 0) {
           set({ proGames: [], schedulesError: 'No players assigned to teams yet' })
           return
@@ -807,6 +946,9 @@ export const useScheduleStore = create<ScheduleState>()(
               teamsToFetch.push({ teamId: aff.teamId, sportId: aff.sportId })
             }
           }
+        }
+        for (const teamId of aflTeamIds) {
+          if (!teamsToFetch.some((t) => t.teamId === teamId)) teamsToFetch.push({ teamId, sportId: AFL_SPORT_ID })
         }
 
         set({ schedulesLoading: true, schedulesError: null, schedulesProgress: { completed: 0, total: teamsToFetch.length } })
@@ -840,7 +982,7 @@ export const useScheduleStore = create<ScheduleState>()(
             if (teamPlayers.length === 0) continue
 
             for (const game of games) {
-              const event = mlbGameToEvent(game, teamId, teamPlayers)
+              const event = mlbGameToEvent(game, teamId, teamPlayers, aflTeamIds.has(teamId) ? AFL_SPORT_ID : undefined)
               if (!event) {
                 droppedIds.add(`mlb-${game.gamePk}`)
                 continue
@@ -873,7 +1015,9 @@ export const useScheduleStore = create<ScheduleState>()(
             // Map failed teamIds to affected player names for an actionable message
             const affectedPlayers = failedTeamIds.flatMap((id) => playersByTeamId.get(id) ?? [])
             const failedTeamNames = failedTeamIds.map((id) =>
-              allAffiliates.find((a) => a.teamId === id)?.teamName ?? `Team ${id}`,
+              allAffiliates.find((a) => a.teamId === id)?.teamName
+                ?? state.aflTeams.find((a) => a.teamId === id)?.teamName
+                ?? `Team ${id}`,
             )
             diag.addIssue({
               level: 'warning',
@@ -1644,6 +1788,9 @@ export const useScheduleStore = create<ScheduleState>()(
       },
       partialize: (state) => ({
         playerTeamAssignments: state.playerTeamAssignments,
+        aflTeams: state.aflTeams,
+        aflAssignments: state.aflAssignments,
+        aflAssignedAt: state.aflAssignedAt,
         affiliates: state.affiliates,
         customMlbAliases: state.customMlbAliases,
         customNcaaAliases: state.customNcaaAliases,
@@ -1667,6 +1814,9 @@ export const useScheduleStore = create<ScheduleState>()(
           ...(p ?? {}),
           affiliates: p?.affiliates ?? [],
           playerTeamAssignments: p?.playerTeamAssignments ?? {},
+          aflTeams: p?.aflTeams ?? [],
+          aflAssignments: p?.aflAssignments ?? {},
+          aflAssignedAt: p?.aflAssignedAt ?? null,
           customMlbAliases: p?.customMlbAliases ?? {},
           customNcaaAliases: p?.customNcaaAliases ?? {},
           assignmentLog: p?.assignmentLog ?? [],

@@ -9,6 +9,7 @@ import { useRosterStore } from './store/rosterStore'
 import { useHeartbeatStore } from './store/heartbeatStore'
 import { useScheduleStore } from './store/scheduleStore'
 import { useRehabStore } from './store/rehabStore'
+import { proSeasonWindow } from './lib/season'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null }
@@ -175,13 +176,23 @@ function AutoFetchData() {
       const ncaaOrgs = players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))
       if (ncaaOrgs.length > 0) sched.fetchNcaaSchedules(ncaaOrgs)
       // Pick up any Pro teams that became assigned since the cache was built.
-      const assigned = new Set(Object.values(sched.playerTeamAssignments).map((a) => a.teamId))
-      const cachedSet = new Set(cachedProTeamIds)
-      const missingProTeams = [...assigned].filter((id) => !cachedSet.has(id))
-      if (missingProTeams.length > 0) {
-        const y = new Date().getFullYear()
-        sched.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
-      }
+      // AFL rosters are re-matched first (daily) so a client who just landed
+      // on a fall club gets that club's schedule pulled in the same pass.
+      void (async () => {
+        const aflStale = !sched.aflAssignedAt || Date.now() - sched.aflAssignedAt > TWENTY_FOUR_H
+        if (aflStale) await sched.assignAflPlayers()
+        const fresh = useScheduleStore.getState()
+        const assigned = new Set([
+          ...Object.values(fresh.playerTeamAssignments).map((a) => a.teamId),
+          ...Object.values(fresh.aflAssignments).map((a) => a.teamId),
+        ])
+        const cachedSet = new Set(cachedProTeamIds)
+        const missingProTeams = [...assigned].filter((id) => !cachedSet.has(id))
+        if (missingProTeams.length > 0) {
+          const { start, end } = proSeasonWindow()
+          fresh.fetchProSchedules(start, end)
+        }
+      })()
       return
     }
 
@@ -194,9 +205,10 @@ function AutoFetchData() {
       if (Object.keys(sched.playerTeamAssignments).length === 0) {
         await sched.autoAssignPlayers()
       }
-      if (Object.keys(useScheduleStore.getState().playerTeamAssignments).length > 0) {
-        const y = new Date().getFullYear()
-        sched.fetchProSchedules(`${y}-03-01`, `${y}-09-30`)
+      await sched.assignAflPlayers()
+      if (useScheduleStore.getState().hasProAssignments()) {
+        const { start, end } = proSeasonWindow()
+        sched.fetchProSchedules(start, end)
       }
       // NCAA — bundled instant
       const ncaaOrgs = players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))

@@ -3,6 +3,7 @@ import { useDiagnosticsStore, type DiagnosticIssue } from '../../store/diagnosti
 
 const SOURCE_LABELS: Record<DiagnosticIssue['source'], string> = {
   pro: 'Pro',
+  afl: 'Fall League',
   ncaa: 'NCAA',
   hs: 'HS',
   roster: 'Roster',
