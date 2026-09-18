@@ -747,7 +747,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         // Drive-from-origin line only exists once an origin does
         origin: homeBase ? { name: homeBaseName || 'trip origin', driveMinutes: estimateDriveMinutes(homeBase, tm.coords) } : undefined,
       }), {
-        maxWidth: 320,
+        maxWidth: Math.min(320, window.innerWidth - 60),
         className: 'sv-dark-popup',
       })
 
@@ -917,11 +917,11 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
         }).addTo(layer)
         duPill.on('click', () => onClearDoubleUpRef.current?.())
       } else {
-        // Shared venue (head-to-head / tournament) — ×2 badge
+        // Shared venue (head-to-head / tripleheader): badge = games at this park
         const v = du.games[0]!.venue
         const badge = L.divIcon({
           className: '',
-          html: `<div style="display:flex;align-items:center;justify-content:center;width:${isSelected ? 30 : 24}px;height:${isSelected ? 30 : 24}px;border-radius:50%;background:#a855f7;color:#fff;font-weight:800;font-size:11px;box-shadow:0 0 0 2px rgba(168,85,247,0.5),0 0 12px rgba(168,85,247,0.8)">×2</div>`,
+          html: `<div style="display:flex;align-items:center;justify-content:center;width:${isSelected ? 30 : 24}px;height:${isSelected ? 30 : 24}px;border-radius:50%;background:#a855f7;color:#fff;font-weight:800;font-size:11px;box-shadow:0 0 0 2px rgba(168,85,247,0.5),0 0 12px rgba(168,85,247,0.8)">×${du.games.length}</div>`,
           iconSize: [24, 24],
           iconAnchor: [12, 12],
         })

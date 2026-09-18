@@ -76,11 +76,11 @@ function strategyImplication(strategy: BestWindowStrategy, windows: WindowResult
 
 // Plain gray type labels — color is reserved for the drive tier (green/yellow)
 const DU_TYPE_LABELS: Record<string, { label: string; hint: string }> = {
-  'nearby-venues': { label: 'Drivable Double Up', hint: 'Two different venues a drive apart on the same day: see one client, drive to the other' },
-  'same-venue-matchup': { label: 'Same-Venue Double Up', hint: 'Head-to-head: clients on opposing teams, one game and one seat covers both visits' },
-  'tournament-cluster': { label: 'Same-Venue Tournament', hint: '3+ games at one complex on the same day: camp out, no driving between clients' },
-  'stay-over': { label: 'Drivable Stay-Over', hint: 'Different venues on back-to-back days, a short drive apart: one hotel covers both' },
-  'triple-up': { label: 'Drivable Triple Up', hint: '3+ clients reachable in one day, driving stop to stop within your drive radius' },
+  'nearby-venues': { label: 'Drivable Double Up', hint: 'Two parks a drive apart on the same day. See one client, drive to the other.' },
+  'same-venue-matchup': { label: 'Same-Venue Double Up', hint: 'Head to head. Clients on opposing teams, so one game and one seat covers both visits.' },
+  'tournament-cluster': { label: 'Same-Venue Tripleheader', hint: 'Three or more games at one park on the same day. Stay put and see every client.' },
+  'stay-over': { label: 'Drivable Stay-Over', hint: 'Different parks on back to back days, a short drive apart. One hotel covers both.' },
+  'triple-up': { label: 'Drivable Triple Up', hint: 'Three or more clients reachable in one day, driving stop to stop within your drive radius.' },
 }
 
 interface Props {
@@ -577,7 +577,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
                   · {formatDriveTime(du.driveMinutesBetween)} apart
                 </span>
               )}
-              <span title={travel.hint}>· fly into {travel.label}</span>
+              <span title={travel.hint}>· nearest airport {travel.label}</span>
             </p>
             {/* Venues — one line per game, earliest first pitch first */}
             <div className="mt-0.5 space-y-0.5">
@@ -585,7 +585,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
                 const names = g.playerNames.filter((n) => du.playerNames.includes(n))
                 return (
                   <p key={g.id} className="truncate text-[10px] text-text-dim/60">
-                    {gi > 0 && <span className="text-text-dim/40">→ </span>}
+                    {gi > 0 && du.driveMinutesBetween > 0 && <span className="text-text-dim/40">→ </span>}
                     {du.type === 'stay-over' && <span className="text-text-dim">{formatDate(g.date)}: </span>}
                     <span className="text-text-dim">{g.venue.name}</span>
                     {names.length > 0 && <span> · sees {names.join(', ')}</span>}
@@ -624,7 +624,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
       {sameVenueAll.length > 0 && (
         <>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-text-dim/50">
-            Double ups — one park covers everyone ({sameVenueAll.length})
+            Double ups. One park covers everyone ({sameVenueAll.length})
           </p>
           {sameVenueVisible.map(renderCard)}
         </>
@@ -632,7 +632,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
       {drivableAll.length > 0 && (
         <>
           <p className={`text-[10px] font-semibold uppercase tracking-wider text-text-dim/50 ${sameVenueAll.length > 0 ? 'pt-1.5' : ''}`}>
-            Drivable double ups — drive between parks ({drivableAll.length})
+            Drivable double ups. Drive between parks ({drivableAll.length})
           </p>
           {drivableVisible.map(renderCard)}
         </>
@@ -646,7 +646,7 @@ function DoubleUpsTab({ doubleUps, playerMap, selectedDoubleUp, setSelectedDoubl
         </button>
       )}
       <p className="text-[10px] text-text-dim/40">
-        Click <span className="text-text-dim">Show on map</span> to draw a pair — <span className="text-accent-green">green ≤45 min</span> · <span className="text-yellow-400">yellow 46–90 min</span> · <span className="text-accent-orange">orange 91 min–2h</span> · dashed = overnight · ×2 = one game covers both.
+        Click <span className="text-text-dim">Show on map</span> to draw a pair. <span className="text-accent-green">Green under 45 min</span> · <span className="text-yellow-400">yellow 46 to 90 min</span> · <span className="text-accent-orange">orange 91 min to 2h</span> · dashed = overnight · the purple number = games at one park.
       </p>
     </div>
   )

@@ -321,7 +321,7 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
           </div>
 
           {/* Quick toggles */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-text-dim/60">Show</span>
             <button
               onClick={() => setState({ ...state, overdueOnly: !state.overdueOnly })}

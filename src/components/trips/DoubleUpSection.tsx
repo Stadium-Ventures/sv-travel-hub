@@ -95,11 +95,11 @@ interface Props {
 // double, stay-over, triple up). Plain gray labels (2026-07-21 polish
 // pass) — color is reserved for the drive tier.
 const TYPE_LABELS: Record<string, { label: string; hint: string }> = {
-  'nearby-venues': { label: 'Drivable Double Up', hint: 'Two different venues a drive apart on the same day: even with overlapping times, double with a game + a meal' },
-  'same-venue-matchup': { label: 'Same-Venue Double Up', hint: 'Head-to-head: clients on opposing teams, one game and one seat covers both visits' },
-  'tournament-cluster': { label: 'Same-Venue Tournament', hint: '3+ games at one complex on the same day: camp out, no driving between clients' },
-  'stay-over': { label: 'Drivable Stay-Over', hint: 'Different venues on back-to-back days, a short drive apart: one hotel covers both visits' },
-  'triple-up': { label: 'Drivable Triple Up', hint: '3+ clients reachable in one day, driving stop to stop within your drive radius' },
+  'nearby-venues': { label: 'Drivable Double Up', hint: 'Two parks a drive apart on the same day. Even with overlapping times, pair a game with a meal.' },
+  'same-venue-matchup': { label: 'Same-Venue Double Up', hint: 'Head to head. Clients on opposing teams, so one game and one seat covers both visits.' },
+  'tournament-cluster': { label: 'Same-Venue Tripleheader', hint: 'Three or more games at one park on the same day. Stay put and see every client.' },
+  'stay-over': { label: 'Drivable Stay-Over', hint: 'Different parks on back to back days, a short drive apart. One hotel covers both visits.' },
+  'triple-up': { label: 'Drivable Triple Up', hint: 'Three or more clients reachable in one day, driving stop to stop within your drive radius.' },
 }
 
 /** Kent's proximity tiers (2026-07-21): green within 45 min, yellow 46–90,
@@ -279,7 +279,7 @@ function DoubleUpCard({
           <button
             onClick={() => onPlanTrip(du)}
             className="ml-auto shrink-0 rounded-lg bg-accent-blue/15 px-2.5 py-1 text-[11px] font-medium text-accent-blue hover:bg-accent-blue/25 transition-colors"
-            title="Fills the planner above with these players and dates, then generates the full itinerary (routes, drive times, hotels-vs-fly)"
+            title="Fills the planner above with these players and dates, then generates the full drive itinerary (stops, drive times, overnights)"
           >
             Generate this trip →
           </button>
@@ -299,7 +299,7 @@ function DoubleUpCard({
             · {formatDriveTime(du.driveMinutesBetween)} apart
           </span>
         )}
-        <span title={travel.hint}>· fly into {travel.label}</span>
+        <span title={travel.hint}>· nearest airport {travel.label}</span>
       </p>
 
       {/* Venues — one line per game, earliest first pitch first, so it's
@@ -309,7 +309,7 @@ function DoubleUpCard({
           const names = g.playerNames.filter((n) => du.playerNames.includes(n))
           return (
             <p key={g.id} className="truncate text-[11px] text-text-dim/60">
-              {gi > 0 && <span className="text-text-dim/40">→ </span>}
+              {gi > 0 && du.driveMinutesBetween > 0 && <span className="text-text-dim/40">→ </span>}
               {du.type === 'stay-over' && <span className="text-text-dim">{formatDate(g.date)}: </span>}
               <span className="text-text-dim">{g.venue.name}</span>
               <span className="text-text-dim/40"> · {g.homeTeam} vs {g.awayTeam}</span>
@@ -349,7 +349,7 @@ export function DatesAndTimes({ du, compact = false }: { du: DoubleUp; compact?:
                 const t = g.source === 'mlb-api' ? formatGameTimeDisplay(g.time, timeMode, g.venue) : ''
                 return (
                   <span key={g.id} className="whitespace-nowrap">
-                    {gi > 0 && <span className="text-text-dim/40">→ </span>}
+                    {gi > 0 && du.driveMinutesBetween > 0 && <span className="text-text-dim/40">→ </span>}
                     {g.venue.name}
                     <span className="text-text-dim/60">{t ? ` ${t}` : ' time TBD'}</span>
                   </span>

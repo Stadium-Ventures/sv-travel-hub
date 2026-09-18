@@ -17,6 +17,7 @@ import { useTimeStore } from '../../store/timeStore'
 import type { GameEvent } from '../../types/schedule'
 import type { PlayerLevel } from '../../types/roster'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
+import { teamFor, isHomeFor } from '../../lib/gameSide'
 
 interface Row {
   key: string
@@ -86,13 +87,6 @@ export default function DataTab() {
       const p = playerMap.get(playerName)
       return p?.level ?? 'Pro'
     }
-    function teamFor(g: GameEvent): string {
-      // Display the team the player is ON for this game (home vs away)
-      return g.isHome ? g.homeTeam : g.awayTeam
-    }
-    function opponentFor(g: GameEvent): string {
-      return g.isHome ? `vs ${g.awayTeam}` : `@ ${g.homeTeam}`
-    }
     function cityFor(): string {
       // We don't store city on GameEvent.venue today — the venue name is
       // usually the stadium. Leaving as a column placeholder for now.
@@ -112,15 +106,15 @@ export default function DataTab() {
           playerName: name,
           level: levelFor(g, name),
           tier: p?.tier ?? 4,
-          team: teamFor(g),
+          team: teamFor(g, name),
           date: g.date,
           time: g.time,
           venueName: g.venue.name,
           venueCoords: g.venue.coords,
           venueTz: g.venue.tz,
           city: cityFor(),
-          opponent: opponentFor(g),
-          isHome: g.isHome,
+          opponent: isHomeFor(g, name) ? `vs ${g.awayTeam}` : `@ ${g.homeTeam}`,
+          isHome: isHomeFor(g, name),
           source: g.source,
           confidence: g.confidence,
           sourceUrl: g.sourceUrl,

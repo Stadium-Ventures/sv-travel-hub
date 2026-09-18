@@ -69,7 +69,7 @@ export default function HeaderPlayerSearch() {
         onChange={(e) => { setQuery(e.target.value); setOpen(true); setActiveIndex(0) }}
         onFocus={() => query.length >= 2 && setOpen(true)}
         onKeyDown={onKeyDown}
-        placeholder="Find player…"
+        placeholder="Find player"
         className="w-full rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text placeholder:text-text-dim/50 focus:border-accent-blue focus:outline-none sm:w-48"
       />
       {open && matches.length > 0 && (

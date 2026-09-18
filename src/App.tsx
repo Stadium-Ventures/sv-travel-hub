@@ -9,7 +9,7 @@ import { useRosterStore } from './store/rosterStore'
 import { useHeartbeatStore } from './store/heartbeatStore'
 import { useScheduleStore } from './store/scheduleStore'
 import { useRehabStore } from './store/rehabStore'
-import { proSeasonWindow } from './lib/season'
+import { proSeasonWindow, isAflSeason } from './lib/season'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null }
@@ -179,8 +179,11 @@ function AutoFetchData() {
       // AFL rosters are re-matched first (daily) so a client who just landed
       // on a fall club gets that club's schedule pulled in the same pass.
       void (async () => {
+        // In season: re-match daily. Out of season: run once if anything is
+        // still assigned so last fall's clubs get cleared on Dec 1.
         const aflStale = !sched.aflAssignedAt || Date.now() - sched.aflAssignedAt > TWENTY_FOUR_H
-        if (aflStale) await sched.assignAflPlayers()
+        const aflDue = isAflSeason() ? aflStale : Object.keys(sched.aflAssignments).length > 0
+        if (aflDue) await sched.assignAflPlayers()
         const fresh = useScheduleStore.getState()
         const assigned = new Set([
           ...Object.values(fresh.playerTeamAssignments).map((a) => a.teamId),
@@ -188,7 +191,11 @@ function AutoFetchData() {
         ])
         const cachedSet = new Set(cachedProTeamIds)
         const missingProTeams = [...assigned].filter((id) => !cachedSet.has(id))
-        if (missingProTeams.length > 0) {
+        // cachedProTeamIds used to hold array indices, so every load refetched
+        // by accident. Now that it holds team ids, refresh on age too (6h,
+        // the same threshold the header pill reports).
+        const proStale = !fresh.proFetchedAt || Date.now() - fresh.proFetchedAt > SIX_H
+        if (missingProTeams.length > 0 || proStale) {
           const { start, end } = proSeasonWindow()
           fresh.fetchProSchedules(start, end)
         }
@@ -201,7 +208,19 @@ function AutoFetchData() {
     schedulesInitialized.current = true
     void (async () => {
       const sched = useScheduleStore.getState()
-      // Pro: auto-assign players → MLB teams, then fetch schedules
+      // NCAA and HS first: bundled data and one CSV, so their dots land in
+      // well under a second. The Pro chain below waits on statsapi.mlb.com
+      // (rosters, AFL clubs, then ~150 schedules) and must not block them.
+      const ncaaOrgs = players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))
+      if (ncaaOrgs.length > 0) sched.fetchNcaaSchedules(ncaaOrgs)
+      // HS: CSV only, no bundled fallback. Same `p.state` filter as the warm
+      // path above; players without a state can't be matched to a school.
+      if (hasHs) {
+        const hsOrgs = players.filter((p) => p.level === 'HS' && p.state).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
+        if (hsOrgs.length > 0) sched.fetchHsSchedules(hsOrgs)
+      }
+      // Pro: auto-assign players to MLB org affiliates, match AFL clubs,
+      // then fetch schedules
       if (Object.keys(sched.playerTeamAssignments).length === 0) {
         await sched.autoAssignPlayers()
       }
@@ -209,16 +228,6 @@ function AutoFetchData() {
       if (useScheduleStore.getState().hasProAssignments()) {
         const { start, end } = proSeasonWindow()
         sched.fetchProSchedules(start, end)
-      }
-      // NCAA — bundled instant
-      const ncaaOrgs = players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))
-      if (ncaaOrgs.length > 0) sched.fetchNcaaSchedules(ncaaOrgs)
-      // HS — CSV (per yesterday's change, no bundled fallback).
-      // Same `p.state` filter as the warm path above — players without a
-      // state can't be matched to a school schedule.
-      if (hasHs) {
-        const hsOrgs = players.filter((p) => p.level === 'HS' && p.state).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
-        if (hsOrgs.length > 0) sched.fetchHsSchedules(hsOrgs)
       }
       // Summer — live partner leagues (CCBL, MLBD, Appalachian)
       const summer = useSummerStore.getState()

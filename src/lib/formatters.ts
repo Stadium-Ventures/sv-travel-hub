@@ -34,7 +34,10 @@ export type TimeDisplayMode = 'et' | 'local'
 /** Coarse US timezone from longitude — the fallback when an event has no
  *  IANA zone (non-MLB sources, pre-2026-07-24 caches). Boundaries are
  *  approximate; fresh MLB fetches carry the exact venue zone. */
-export function approxTzFromLng(lng: number): string {
+export function approxTzFromLng(lng: number, lat?: number): string {
+  // Arizona keeps MST all year; the Denver bucket below would be an hour off
+  // from March to early November for the six Fall League parks.
+  if (lat !== undefined && lat >= 31 && lat <= 37 && lng >= -115 && lng <= -109) return 'America/Phoenix'
   if (lng >= -85) return 'America/New_York'
   if (lng >= -97.5) return 'America/Chicago'
   if (lng >= -114) return 'America/Denver'
@@ -53,7 +56,7 @@ export function formatGameTimeDisplay(
   if (!iso) return ''
   const d = new Date(iso)
   if (isNaN(d.getTime())) return ''
-  const tz = venue.tz ?? approxTzFromLng(venue.coords.lng)
+  const tz = venue.tz ?? approxTzFromLng(venue.coords.lng, venue.coords.lat)
   try {
     return d.toLocaleTimeString('en-US', {
       hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz, timeZoneName: 'short',
@@ -84,6 +87,6 @@ export const TIER_LABELS: Record<number, string> = {
 export const TIER_DOT_COLORS: Record<number, string> = {
   1: 'bg-accent-red',
   2: 'bg-accent-orange',
-  3: 'bg-yellow-400',
-  4: 'bg-gray-500',
+  3: 'bg-gray-500',
+  4: 'bg-gray-600',
 }

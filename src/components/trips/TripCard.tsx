@@ -4,7 +4,8 @@ import { useHeartbeatStore } from '../../store/heartbeatStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource, ScoreBreakdown } from '../../types/schedule'
 // import { generateTripIcs, downloadIcs } from '../../lib/icsExport'
 import { haversineKm, HOME_BASE } from '../../lib/tripEngine'
-import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
+import { formatDate, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS, TIER_LABELS, type TimeDisplayMode } from '../../lib/formatters'
+import { useTimeStore } from '../../store/timeStore'
 import type { RosterPlayer } from '../../types/roster'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 
@@ -38,11 +39,15 @@ function TapBadge({ label, detail, className }: { label: string; detail: string;
   )
 }
 
-function formatGameTime(timeStr?: string, source?: ScheduleSource): string {
+// Honors the header ET / Local toggle like every other surface. Venue-local
+// falls back to a coordinate-based zone (Arizona-aware) because trip stops
+// don't carry the MLB API zone id.
+function formatGameTime(timeStr: string | undefined, source: ScheduleSource | undefined, mode: TimeDisplayMode, coords?: { lat: number; lng: number }): string {
   if (!timeStr) return ''
   if (source && source !== 'mlb-api') return 'Unconfirmed'
   const d = new Date(timeStr)
   if (isNaN(d.getTime())) return ''
+  if (mode === 'local' && coords) return formatGameTimeDisplay(timeStr, mode, { coords })
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }) + ' ET'
 }
 
@@ -195,6 +200,7 @@ export function clusterDayStopsByOverlap(dayStops: VenueStop[]): VenueStop[][] {
 interface VenueStop {
   venueName: string
   venueKey: string
+  coords: { lat: number; lng: number }
   players: string[]
   driveFromAnchor: number
   driveFromPrev: number
@@ -222,6 +228,7 @@ export function buildVenueStops(trip: TripCandidate, playerMap: Map<string, Rost
   )
   venueMap.set(anchorKey, {
     venueName: trip.anchorGame.venue.name,
+    coords: trip.anchorGame.venue.coords,
     venueKey: anchorKey,
     players: [...trip.anchorGame.playerNames],
     driveFromAnchor: 0,
@@ -253,6 +260,7 @@ export function buildVenueStops(trip: TripCandidate, playerMap: Map<string, Rost
       venueMap.set(key, {
         venueName: game.venue.name,
         venueKey: key,
+        coords: game.venue.coords,
         players: [...game.playerNames],
         driveFromAnchor: game.driveMinutes,
         driveFromPrev: 0,
@@ -415,6 +423,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
   const planBaseName = useTripStore((s) => s.tripPlan?.baseName)
   const originLabel = planBaseName || homeBaseName || 'trip start'
   const [selectedAltIndex, setSelectedAltIndex] = useState(-1) // -1 = primary trip
+  const timeMode = useTimeStore((s) => s.mode)
   const allVariants = useMemo(() => [trip, ...(alternativeTrips ?? [])], [trip, alternativeTrips])
   const activeTrip = selectedAltIndex === -1 ? trip : (allVariants[selectedAltIndex + 1] ?? trip)
   const stops = useMemo(() => buildVenueStops(activeTrip, playerMap), [activeTrip, playerMap])
@@ -599,7 +608,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             // Check for TBD times on multi-stop days
             for (const [day, dayStops] of dayAssignments) {
               if (dayStops.length >= 2) {
-                const tbdStops = dayStops.filter(s => !formatGameTime(s.gameTime, s.source) || formatGameTime(s.gameTime, s.source) === 'Unconfirmed')
+                const tbdStops = dayStops.filter(s => !formatGameTime(s.gameTime, s.source, timeMode, s.coords) || formatGameTime(s.gameTime, s.source, timeMode, s.coords) === 'Unconfirmed')
                 if (tbdStops.length >= 2) {
                   const names = tbdStops.flatMap(s => s.players).join(', ')
                   items.push({
@@ -614,7 +623,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
             for (const [day, dayStops] of dayAssignments) {
               if (dayStops.length >= 2) {
                 const withTimes = dayStops
-                  .map((s) => ({ stop: s, time: formatGameTime(s.gameTime, s.source) }))
+                  .map((s) => ({ stop: s, time: formatGameTime(s.gameTime, s.source, timeMode, s.coords) }))
                   .filter((s) => s.time && s.time !== 'Unconfirmed')
                 // Group by time
                 const byTime = new Map<string, typeof withTimes>()
@@ -742,7 +751,7 @@ function TripCard({ trip, index, playerMap, defaultExpanded = false, onPlayerCli
                       <div className="space-y-2">
                     {cluster.map((stop, stopIdx) => {
                       const ctx = getVisitContext(stop.source, stop.isHome, stop.awayTeam, stop.confidence)
-                      const gameTime = formatGameTime(stop.gameTime, stop.source)
+                      const gameTime = formatGameTime(stop.gameTime, stop.source, timeMode, stop.coords)
                       // Drive time between clusters (not within) — within a
                       // cluster the user picks ONE, so cross-cluster drive
                       // applies only on the first stop of each non-first

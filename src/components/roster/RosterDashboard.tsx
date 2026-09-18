@@ -8,6 +8,7 @@ import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '..
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
 import CoveragePanel from './CoveragePanel'
+import DiagnosticsPanel from '../diagnostics/DiagnosticsPanel'
 import { proSeasonWindow } from '../../lib/season'
 
 export default function RosterDashboard() {
@@ -202,9 +203,12 @@ export default function RosterDashboard() {
 
   // Most recent assignment log entries (from last verify)
   const recentLog = useMemo(() => {
-    if (assignmentLog.length === 0) return []
-    const lastTimestamp = assignmentLog[assignmentLog.length - 1]?.timestamp ?? 0
-    return assignmentLog.filter((e) => e.timestamp === lastTimestamp)
+    // Fall-club rows are written by a separate pass with its own timestamp
+    // and would otherwise hide the verify run's not-found / reassigned rows.
+    const verifyLog = assignmentLog.filter((e) => !/\(AFL\)$/.test(e.to ?? e.from ?? ''))
+    if (verifyLog.length === 0) return []
+    const lastTimestamp = verifyLog[verifyLog.length - 1]?.timestamp ?? 0
+    return verifyLog.filter((e) => e.timestamp === lastTimestamp)
   }, [assignmentLog])
 
   if (loading && players.length === 0) {
@@ -302,6 +306,11 @@ export default function RosterDashboard() {
           Heartbeat-flagged overdue T1/T2 players with their next game inline
           and a one-click "Plan trip" CTA. Hidden when no one is overdue. */}
       <CoveragePanel />
+
+      {/* Fetch problems by source (Pro, Fall League, NCAA, HS...). The
+          stores have pushed here since day one but nothing rendered it, so a
+          failed roster or schedule pull was invisible (audit 2026-09-18). */}
+      <DiagnosticsPanel />
 
       {/* Action Items — merged "needs attention" buckets (visit freshness)
           and roster moves (trades/promotions) into one section so the user
@@ -415,7 +424,7 @@ export default function RosterDashboard() {
               {grouped.Pro.length}
             </span>
             <button
-              onClick={autoAssignPlayers}
+              onClick={async () => { await autoAssignPlayers(); await useScheduleStore.getState().assignAflPlayers() }}
               disabled={autoAssignLoading}
               className="ml-auto flex items-center gap-1.5 rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
               title="Look up where each player is currently assigned using live MLB/MiLB rosters"

@@ -10,6 +10,7 @@ import CityPicker from '../ui/CityPicker'
 import { STARTING_LOCATIONS } from '../../data/cityPresets'
 import type { GameEvent } from '../../types/schedule'
 import type { Coordinates } from '../../types/roster'
+import { isHomeFor, opponentFor } from '../../lib/gameSide'
 
 const TIER_COLORS: Record<number, string> = {
   1: 'bg-accent-red/20 text-accent-red',
@@ -561,8 +562,10 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                   const today = new Date().toISOString().split('T')[0]!
                   const isPast = g.date < today
 
-                  // Determine opponent relative to the player's team
-                  const opponent = g.isHome ? g.awayTeam : g.homeTeam
+                  // Opponent and side for THIS player (head-to-head games
+                  // carry both clubs' players; g.isHome is one club's view)
+                  const home = isHomeFor(g, playerName)
+                  const opponent = opponentFor(g, playerName)
 
                   return (
                     <div
@@ -590,8 +593,8 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                       </span>
 
                       {/* Home/Away */}
-                      <span className={g.isHome ? 'text-accent-green font-medium' : 'text-text-dim'}>
-                        {g.isHome ? 'H' : 'A'}
+                      <span className={home ? 'text-accent-green font-medium' : 'text-text-dim'}>
+                        {home ? 'H' : 'A'}
                       </span>
 
                       {/* Opponent */}
@@ -650,7 +653,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
                 return (km / 800 + 3) <= maxFlightHours
               }).length
               const remoteCount = driveOrigin ? allGames.length - driveCount - flyInCount : 0
-              const homeCount = allGames.filter((g) => g.isHome).length
+              const homeCount = allGames.filter((g) => isHomeFor(g, playerName)).length
               return (
                 <div className="mt-3 rounded-lg bg-gray-950/50 px-3 py-2 text-xs">
                   <div className="flex justify-between">

@@ -23,6 +23,7 @@ interface TrackerLeg {
 }
 import { formatDate, formatMonthDay, formatDriveTime, formatGameTimeDisplay, TIER_DOT_COLORS } from '../../lib/formatters'
 import type { RosterPlayer } from '../../types/roster'
+import { matchupLabel } from '../../lib/gameSide'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -83,9 +84,7 @@ export default function PriorityFacts({
           time: g.time,
           tz: g.venue.tz,
           isRealTime: g.source === 'mlb-api' && !!g.time,
-          opponent: g.isHome
-            ? (g.awayTeam ? `vs ${g.awayTeam}` : undefined)
-            : (g.homeTeam ? `@ ${g.homeTeam}` : undefined),
+          opponent: matchupLabel(g),
         }
         const perPlayer = byDatePlayer.get(g.date) ?? new Map<string, CellGame[]>()
         for (const n of names) {

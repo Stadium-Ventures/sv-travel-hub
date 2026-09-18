@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useVenueStore } from '../../../store/venueStore'
 import { useScheduleStore } from '../../../store/scheduleStore'
 import type { VenuePlayer } from './useVenuePlayerMap'
+import { matchupLabel } from '../../../lib/gameSide'
 
 /** One game at a marker's venue, for the popup's drill-in list — the
  *  Maptive-style "click the count, see the underlying games" view Mike D
@@ -74,9 +75,7 @@ export function useTierMarkers(
             id: game.id,
             date: game.date,
             time: game.source === 'mlb-api' && game.time ? game.time : undefined,
-            opponent: game.isHome
-              ? (game.awayTeam ? `vs ${game.awayTeam}` : undefined)
-              : (game.homeTeam ? `@ ${game.homeTeam}` : undefined),
+            opponent: matchupLabel(game),
             players: [...game.playerNames],
             tz: game.venue.tz,
           })

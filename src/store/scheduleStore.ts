@@ -59,6 +59,7 @@ interface ScheduleState {
   aflTeams: MLBAffiliate[]
   aflAssignments: Record<string, PlayerTeamAssignment>
   aflAssignedAt: number | null
+  aflLoading: boolean
 
   // Pro schedules
   proSchedules: Record<number, MLBGameRaw[]> // teamId → games
@@ -205,6 +206,7 @@ export const useScheduleStore = create<ScheduleState>()(
       aflTeams: [],
       aflAssignments: {},
       aflAssignedAt: null,
+      aflLoading: false,
 
       proSchedules: {},
       proGames: [],
@@ -743,6 +745,10 @@ export const useScheduleStore = create<ScheduleState>()(
         const state = get()
         const assignments = state.playerTeamAssignments
         const rawSchedules = state.proSchedules
+        // proSchedules is not persisted; on a warm load it is {} until the
+        // next fetch. Rebuilding from nothing would replace the persisted
+        // proGames with [] and blank the Pro layer (audit 2026-09-18).
+        if (Object.keys(rawSchedules).length === 0) return
 
         // Build player-to-teamId mapping directly from assignments. AFL
         // clubs are a second key per player; a fall game is stamped with the
@@ -812,6 +818,7 @@ export const useScheduleStore = create<ScheduleState>()(
       },
 
       assignAflPlayers: async () => {
+        if (get().aflLoading) return
         // Outside Sep-Nov there is nothing to match, and last fall's clubs
         // must not follow a player into spring.
         if (!isAflSeason()) {
@@ -827,6 +834,7 @@ export const useScheduleStore = create<ScheduleState>()(
         const proPlayers = rosterPlayers.filter((p) => p.level === 'Pro')
         if (proPlayers.length === 0) return
 
+        set({ aflLoading: true })
         const season = new Date().getFullYear()
         try {
           const teams = await fetchAflTeams(season)
@@ -844,7 +852,7 @@ export const useScheduleStore = create<ScheduleState>()(
           const byName = new Map<string, string>()
           for (const p of proPlayers) {
             if (p.mlbPlayerId) byId.set(Number(p.mlbPlayerId), p.playerName)
-            byName.set(p.playerName.trim().toLowerCase(), p.playerName)
+            else byName.set(p.playerName.trim().toLowerCase(), p.playerName)
           }
           const next: Record<string, PlayerTeamAssignment> = {}
           for (const e of entries) {
@@ -875,7 +883,7 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
-          const changed = JSON.stringify(prev) !== JSON.stringify(next)
+          const changed = log.length > 0
           set({
             aflTeams: teams,
             aflAssignments: next,
@@ -891,17 +899,20 @@ export const useScheduleStore = create<ScheduleState>()(
             diag.addIssue({
               level: 'warning',
               source: 'afl',
-              message: `${failedTeams.length} Arizona Fall League roster fetch(es) failed — kept previous fall assignments`,
+              message: `Arizona Fall League roster fetch failed for ${failedTeams.length} club${failedTeams.length === 1 ? '' : 's'}. Kept the previous fall assignments.`,
               details: failedTeams.map((t) => t.teamName).join(', '),
             })
           }
         } catch (e) {
           console.warn('[afl] roster match failed:', e)
+          useDiagnosticsStore.getState().clearSource('afl')
           useDiagnosticsStore.getState().addIssue({
             level: 'warning',
             source: 'afl',
-            message: `Arizona Fall League lookup failed — ${e instanceof Error ? e.message : 'unknown error'}`,
+            message: `Arizona Fall League lookup failed. ${e instanceof Error ? e.message : 'Unknown error'}`,
           })
+        } finally {
+          set({ aflLoading: false })
         }
       },
 
@@ -1005,7 +1016,7 @@ export const useScheduleStore = create<ScheduleState>()(
             schedulesLoading: false,
             schedulesProgress: null,
             proFetchedAt: Date.now(),
-            cachedProTeamIds: [...teamsToFetch.keys()],
+            cachedProTeamIds: teamsToFetch.map((t) => t.teamId),
           })
 
           // Diagnostics
@@ -1022,7 +1033,7 @@ export const useScheduleStore = create<ScheduleState>()(
             diag.addIssue({
               level: 'warning',
               source: 'pro',
-              message: `${failedTeamIds.length} team schedule fetch(es) failed — ${affectedPlayers.length > 0 ? `affects ${affectedPlayers.join(', ')}` : 'no assigned players affected'}${failedTeamIds.some((id) => (state.proSchedules[id]?.length ?? 0) > 0) ? ' (kept previously cached games)' : ''}`,
+              message: `${failedTeamIds.length} team schedule fetch${failedTeamIds.length === 1 ? '' : 'es'} failed. ${affectedPlayers.length > 0 ? `Affects ${affectedPlayers.join(', ')}` : 'No assigned players affected'}${failedTeamIds.some((id) => (state.proSchedules[id]?.length ?? 0) > 0) ? ' (kept previously cached games)' : ''}`,
               details: failedTeamNames.join(', '),
             })
           }
@@ -1030,7 +1041,7 @@ export const useScheduleStore = create<ScheduleState>()(
             diag.addIssue({
               level: 'warning',
               source: 'pro',
-              message: `${droppedGames} Pro games dropped — missing venue coordinates`,
+              message: `${droppedGames} Pro games dropped. The MLB API had no venue coordinates for them.`,
             })
           }
         } catch (e) {

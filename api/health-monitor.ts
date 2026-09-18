@@ -285,8 +285,11 @@ async function runChecks(force = false): Promise<Finding[]> {
     // Zero games across ALL sources during the baseball season almost always
     // means a data source broke, not a genuinely empty calendar. Gate on the
     // active months so the offseason doesn't nag. (UTC month is fine here.)
+    // Ends in September: by October MiLB is over, MLB postseason games only
+    // exist on the API once a series is set, and the recap does not read
+    // the Arizona Fall League, so a zero count in October is normal here.
     const month = new Date().getUTCMonth() // 0=Jan
-    const inSeason = month >= 2 && month <= 9 // Mar–Oct
+    const inSeason = month >= 2 && month <= 8 // Mar to Sep
     if (gameCount === 0 && rosterSize !== 0 && !rosterCritical && inSeason) {
       findings.push({
         severity: 'warning',

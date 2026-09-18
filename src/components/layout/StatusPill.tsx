@@ -35,14 +35,21 @@ export default function StatusPill() {
   const TWELVE_H = 12 * 3600_000
   const TWENTY_FOUR_H = 24 * 3600_000
 
+  // Sources that have nothing to refresh right now. NCAA and HS are bundled
+  // snapshots that cannot be "fresh" between seasons, and the orange "1 to
+  // refresh" they produced all fall was noise (audit 2026-09-18).
+  const month = new Date().getMonth() + 1
+  const collegeOff = month >= 7 || month <= 1 // Jul to Jan
+  const summerOff = month >= 9 || month <= 5 // Sep to May
+
   const sources = [
-    { name: 'Roster', loading: rosterLoading, fetched: rosterFetched, staleMs: TWENTY_FOUR_H },
-    { name: 'Heartbeat', loading: heartbeatLoading, fetched: heartbeatFetched, staleMs: SIX_H },
-    { name: 'Pro games', loading: proLoading, fetched: proFetched, staleMs: SIX_H },
-    { name: 'NCAA games', loading: ncaaLoading, fetched: ncaaFetched, staleMs: SIX_H },
-    { name: 'HS games', loading: hsLoading, fetched: hsFetched, staleMs: SIX_H },
-    { name: 'Summer ball', loading: summerLoading, fetched: summerFetched, staleMs: SIX_H },
-    { name: 'Rehab windows', loading: rehabLoading, fetched: rehabFetched, staleMs: TWELVE_H },
+    { name: 'Roster', loading: rosterLoading, fetched: rosterFetched, staleMs: TWENTY_FOUR_H, offSeason: false },
+    { name: 'Heartbeat', loading: heartbeatLoading, fetched: heartbeatFetched, staleMs: SIX_H, offSeason: false },
+    { name: 'Pro games', loading: proLoading, fetched: proFetched, staleMs: SIX_H, offSeason: false },
+    { name: 'NCAA games', loading: ncaaLoading, fetched: ncaaFetched, staleMs: SIX_H, offSeason: collegeOff },
+    { name: 'HS games', loading: hsLoading, fetched: hsFetched, staleMs: SIX_H, offSeason: collegeOff },
+    { name: 'Summer ball', loading: summerLoading, fetched: summerFetched, staleMs: SIX_H, offSeason: summerOff },
+    { name: 'Rehab windows', loading: rehabLoading, fetched: rehabFetched, staleMs: TWELVE_H, offSeason: false },
   ]
 
   const anyLoading = sources.some((s) => s.loading)
@@ -54,12 +61,12 @@ export default function StatusPill() {
     const t = typeof fetched === 'string' ? new Date(fetched).getTime() : fetched
     return now - t > threshold
   }
-  const staleCount = sources.filter((s) => !s.loading && isStale(s.fetched, s.staleMs)).length
+  const staleCount = sources.filter((s) => !s.loading && !s.offSeason && isStale(s.fetched, s.staleMs)).length
 
   // "Stale" was alarming for what's usually a benign cache miss. Wording is
   // now neutral: "X to refresh" reads as routine rather than urgent.
   const summary = anyLoading
-    ? `Refreshing ${loadingCount}…`
+    ? `Refreshing ${loadingCount}`
     : staleCount > 0
       ? `${staleCount} to refresh`
       : 'All current'
@@ -88,12 +95,12 @@ export default function StatusPill() {
           </div>
           <div className="divide-y divide-border/30">
             {sources.map((s) => {
-              const stale = !s.loading && isStale(s.fetched, s.staleMs)
+              const stale = !s.loading && !s.offSeason && isStale(s.fetched, s.staleMs)
               return (
                 <div key={s.name} className="flex items-center justify-between px-3 py-1.5 text-xs">
                   <span className="text-text">{s.name}</span>
                   <span className={`text-[10px] ${s.loading ? 'text-accent-blue' : stale ? 'text-accent-orange' : 'text-text-dim/60'}`}>
-                    {s.loading ? 'refreshing…' : formatAgo(s.fetched)}
+                    {s.loading ? 'refreshing' : s.offSeason ? 'off season' : formatAgo(s.fetched)}
                   </span>
                 </div>
               )
@@ -123,7 +130,7 @@ function isRecapAdmin(): boolean {
  *  pastes it into a small prompt the first time (cached in localStorage) so
  *  Kent doesn't see this surface unless someone hands him the secret. */
 function SlackRecapAdminSection() {
-  const [status, setStatus] = useState<'idle' | 'sending' | 'ok' | 'err'>('idle')
+  const [status, setStatus] = useState<'idle' | 'sending' | 'ok' | 'paused' | 'err'>('idle')
   const [errMsg, setErrMsg] = useState<string | null>(null)
   async function send(mode: 'live' | 'dry') {
     const stored = (() => { try { return localStorage.getItem('sv-cron-secret') ?? '' } catch { return '' } })()
@@ -146,7 +153,9 @@ function SlackRecapAdminSection() {
         if (res.status === 401) try { localStorage.removeItem('sv-cron-secret') } catch {}
         return
       }
-      setStatus('ok')
+      // api/slack-recap.ts is hard-paused per Kent (2026-08-25) and answers
+      // 200 { skipped: true } for a live post. Don't call that "done".
+      setStatus(body?.skipped ? 'paused' : 'ok')
       if (mode === 'dry') console.log('[slack-recap dry run]', body)
     } catch (e) {
       setStatus('err'); setErrMsg(e instanceof Error ? e.message : 'unknown')
@@ -154,7 +163,7 @@ function SlackRecapAdminSection() {
   }
   return (
     <div className="border-b border-border/40">
-      <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-text-dim/60">Slack recap</div>
+      <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-text-dim/60">Slack recap (paused)</div>
       <div className="flex items-center gap-2 px-3 pb-2">
         <button
           onClick={() => send('live')}
@@ -162,7 +171,7 @@ function SlackRecapAdminSection() {
           className="rounded-md bg-accent-blue/15 px-2 py-1 text-[10px] font-semibold text-accent-blue hover:bg-accent-blue/25 disabled:opacity-50"
           title="Post the weekly recap to #travel-schedule now"
         >
-          {status === 'sending' ? 'Sending…' : 'Post now'}
+          {status === 'sending' ? 'Sending' : 'Post now'}
         </button>
         <button
           onClick={() => send('dry')}
@@ -172,11 +181,12 @@ function SlackRecapAdminSection() {
         >
           Dry run
         </button>
-        {status === 'ok' && <span className="text-[10px] text-accent-green">✓ done</span>}
-        {status === 'err' && <span className="text-[10px] text-accent-red" title={errMsg ?? ''}>error — see console</span>}
+        {status === 'ok' && <span className="text-[10px] text-accent-green">Done</span>}
+        {status === 'paused' && <span className="text-[10px] text-accent-orange">Paused per Kent. Nothing sent.</span>}
+        {status === 'err' && <span className="text-[10px] text-accent-red" title={errMsg ?? ''}>Error, see console</span>}
       </div>
       <p className="px-3 pb-2 text-[10px] text-text-dim/50 leading-relaxed">
-        Cron runs Monday 6 AM ET automatically. These buttons are for testing or off-schedule recaps.
+        The Monday recap is paused indefinitely per Kent. Post now is a no-op until it is unpaused in the API. Dry run still computes the message.
       </p>
     </div>
   )
@@ -230,9 +240,7 @@ function RecentActivitySection() {
         {items.map((it, i) => (
           <div key={`${it.kind}-${i}`} className="px-3 py-1.5 text-xs">
             <div className="flex items-start gap-1.5">
-              <span className="text-[10px] mt-0.5">
-                {it.kind === 'move' ? '🔄' : it.kind === 'star' ? '★' : '📋'}
-              </span>
+              <span className={`mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${it.kind === 'move' ? 'bg-accent-blue' : it.kind === 'star' ? 'bg-yellow-400' : 'bg-accent-green'}`} />
               <div className="min-w-0 flex-1">
                 <div className="text-text">{it.label}</div>
                 {it.sub && <div className="text-[10px] text-text-dim/60">{it.sub}</div>}

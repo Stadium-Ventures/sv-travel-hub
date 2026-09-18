@@ -7,6 +7,7 @@ import { useSummerStore } from '../../store/summerStore'
 import { useRehabStore } from '../../store/rehabStore'
 import { describeRehabWindow } from '../../lib/rehab'
 import { resolveMLBTeamId } from '../../data/aliases'
+import { isHomeFor } from '../../lib/gameSide'
 
 const TIER_COLORS: Record<number, string> = {
   1: 'bg-accent-blue/20 text-accent-blue',
@@ -51,7 +52,10 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
   const plannedDate = visitCount?.nextPlannedDate ?? null
   const plannedAgent = visitCount?.nextPlannedAgent ?? null
 
-  const summerAssignment = useSummerStore((s) => s.byPlayer[player.playerName])
+  // Summer chip only during summer ball (Jun to Aug). The sheet keeps last
+  // summer's placement all year, and in the fall it sat next to the Fall chip.
+  const summerMonth = new Date().getMonth() + 1
+  const summerAssignment = useSummerStore((s) => (summerMonth >= 6 && summerMonth <= 8 ? s.byPlayer[player.playerName] : undefined))
   // Arizona Fall League club, matched from the six AFL rosters each fall.
   // Sits alongside the regular affiliate: the MiLB season is over but the
   // player is still that org's, and the fall games are the ones to visit.
@@ -99,14 +103,14 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
                   ? 'bg-accent-green/15 text-accent-green'
                   : 'bg-accent-red/15 text-accent-red'
               }`}
-              title={`Summer (${summerAssignment.league}): ${summerAssignment.summerTeam}${summerAssignment.status ? ` — ${summerAssignment.status}` : ''}`}
+              title={`Summer ball, ${summerAssignment.league}: ${summerAssignment.summerTeam}${summerAssignment.status ? `. ${summerAssignment.status}` : ''}`}
             >
               {summerAssignment.active ? `Summer · ${summerAssignment.league}` : `Summer ${summerAssignment.status}`}
             </span>
           )}
           {aflAssignment && (
             <span
-              className="ml-1.5 rounded bg-accent-orange/15 px-1.5 py-0.5 text-[9px] font-medium text-accent-orange"
+              className="ml-1.5 whitespace-nowrap rounded bg-accent-orange/15 px-1.5 py-0.5 text-[9px] font-medium text-accent-orange"
               title={`On the ${aflAssignment.teamName} roster for the Arizona Fall League (Oct to mid-Nov). Fall games are pulled into the schedule alongside the regular affiliate.`}
             >
               Fall · {aflAssignment.teamName}
@@ -284,7 +288,7 @@ function ScheduleStatus({ playerName, level, affiliate }: {
     return allGames.filter((g) => g.playerNames.includes(playerName))
   }, [proGames, ncaaGames, hsGames, playerName])
 
-  const homeGames = games.filter((g) => g.isHome)
+  const homeGames = games.filter((g) => isHomeFor(g, playerName))
   const awayGames = games.filter((g) => !g.isHome)
   const highConfidence = games.filter((g) => g.confidence === 'high')
   const estimated = games.filter((g) => g.confidence !== 'high')
