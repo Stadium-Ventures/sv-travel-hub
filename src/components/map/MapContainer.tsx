@@ -25,6 +25,10 @@ import { formatDriveTime } from '../../lib/formatters'
 import type { EventMarker } from './hooks/useEventMarkers'
 import { MAJOR_AIRPORTS } from '../../data/airports'
 
+// CARTO basemap key, set in Vercel env (docs/SECRETS.md). Keyless tiles
+// still render, but CARTO watermarks them "API KEY REQUIRED".
+const CARTO_BASEMAP_KEY = (import.meta.env.VITE_CARTO_BASEMAP_KEY as string | undefined) ?? ''
+
 // Last viewport (center + zoom), survives tab switches: the Map unmounts
 // whenever another tab is active, and re-initializing at the default US
 // view threw away where the user was working (Tom 2026-08-18: "click back
@@ -273,7 +277,9 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       })
       emitBounds()
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      // CARTO started watermarking keyless basemap tiles ("API KEY REQUIRED")
+      // in late Aug 2026. Free key (5M tiles/mo), see docs/SECRETS.md.
+      L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png${CARTO_BASEMAP_KEY ? `?key=${CARTO_BASEMAP_KEY}` : ''}`, {
         attribution: '&copy; OpenStreetMap &copy; CARTO',
         maxZoom: 19,
       }).addTo(map)
