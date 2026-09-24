@@ -125,7 +125,9 @@ export async function fetchRoster(): Promise<RosterParseResult> {
       // NOT read: roster metadata and client contact data are different
       // grants (D4). Nothing downstream may depend on them.
 
+      const slug = findColumn(r, ['slug'])
       return {
+        ...(slug ? { slug } : {}),
         playerName,
         normalizedName: normalizeName(playerName),
         org: findColumn(r, ['Org', 'Organization', 'Team', 'School']),

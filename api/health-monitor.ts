@@ -6,6 +6,13 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 // The .js extension is required: Vercel runs functions as strict node ESM,
 // which never resolves extensionless specifiers (ERR_MODULE_NOT_FOUND).
 import { resolveNcaaName, D1_BASEBALL_SLUGS } from './_data/ncaaSchools.js'
+import {
+  HEARTBEAT_SUMMARY_URL,
+  heartbeatAccessFinding,
+  heartbeatReadHeaders,
+  heartbeatTokenConfigured,
+} from './_lib/heartbeatAuth.js'
+import { rosterCsvRequest, checkRowFloor, explainRegistryStatus, RosterConfigError, type RosterCsvRequest } from './_lib/rosterSource.js'
 
 // SV Travel Hub — self health check.
 //
@@ -32,10 +39,14 @@ import { resolveNcaaName, D1_BASEBALL_SLUGS } from './_data/ncaaSchools.js'
 // Env (all in Vercel):
 //   CRON_SECRET                    — guards this endpoint (shared with the recap)
 //   SV_AUTOMATION_WEBHOOK_URL      — incoming webhook for #sv-automation
-//   VITE_ROSTER_CSV_URL            — roster sheet (recap has no players without it)
+//   VITE_ROSTER_SOURCE             — sheet (default) | registry: which roster the recap reads
+//   VITE_ROSTER_CSV_URL            — roster sheet (sheet source; recap has no players without it)
+//   SV_REGISTRY_ROSTER_TOKEN       — svt_ token, read:roster-projection (registry source; server-only)
 //   VITE_SCHEDULE_CSV_URL          — HS/JUCO schedule sheet
 //   VITE_EVENTS_CSV_URL            — events sheet (has a code default if unset)
 //   SLACK_BOT_TOKEN + SLACK_CHANNEL_TRAVEL_SCHEDULE — what the Monday recap posts with
+//   HEARTBEAT_READ_TOKEN           — optional, server-only: Bearer for sv-heartbeat's
+//                                    gated API (api/_lib/heartbeatAuth.ts)
 //   SELF_BASE_URL                  — override for the recap dry-run self-call
 //                                    (defaults to the prod domain)
 //
@@ -177,36 +188,55 @@ async function runChecks(force = false): Promise<Finding[]> {
 
   // 2. Data sources, probed in parallel. Each attributes a specific failure so
   //    the finding points at the exact broken sheet/API, not "recap is off."
-  const rosterUrl = process.env.VITE_ROSTER_CSV_URL
+  // Roster follows the ROSTER_SOURCE switch (sheet CSV, or the registry's
+  // sheet-shaped CSV door with the server-only service token).
+  let rosterReq: RosterCsvRequest | null = null
+  let rosterConfigError: RosterConfigError | null = null
+  try {
+    rosterReq = rosterCsvRequest()
+  } catch (e) {
+    rosterConfigError = e instanceof RosterConfigError ? e : new RosterConfigError(String(e), null, 'Check the roster env vars in Vercel.')
+  }
   const scheduleUrl = process.env.VITE_SCHEDULE_CSV_URL
   const eventsUrl = process.env.VITE_EVENTS_CSV_URL || EVENTS_CSV_DEFAULT
 
   const [roster, schedule, events, heartbeat, mlb] = await Promise.all([
-    rosterUrl ? probeCsv(rosterUrl) : Promise.resolve<ProbeResult>({ ok: false, reason: 'no URL configured' }),
+    rosterReq ? probeCsv(rosterReq.url, rosterReq.headers) : Promise.resolve<ProbeResult>({ ok: false, reason: 'no roster source configured' }),
     scheduleUrl ? probeCsv(scheduleUrl) : Promise.resolve<ProbeResult>({ ok: true, skipped: true }),
     probeCsv(eventsUrl),
-    probeJson('https://sv-heartbeat.vercel.app/api/heartbeat/summary'),
+    probeJson(HEARTBEAT_SUMMARY_URL, heartbeatReadHeaders()),
     probeJson(MLB_PROBE_URL),
   ])
 
+  // Registry source: a short roster is a failure (fail closed), not "ok".
+  if (rosterReq && roster.ok && roster.text) {
+    const dataRows = roster.text.split('\n').filter((l) => l.trim() !== '').length - 1
+    const floorError = checkRowFloor(rosterReq.source, dataRows)
+    if (floorError) Object.assign(roster, { ok: false, reason: floorError, text: undefined })
+  }
+
   let rosterCritical = false
-  if (!rosterUrl) {
+  if (!rosterReq) {
     rosterCritical = true
     findings.push({
       severity: 'critical',
       code: false,
       what: 'The recap has no roster — its player list source is not configured.',
-      how: 'VITE_ROSTER_CSV_URL is not set on the deployment.',
-      todo: `Set VITE_ROSTER_CSV_URL to the published roster sheet CSV in Vercel: ${VERCEL_ENV_URL}`,
+      how: rosterConfigError?.message ?? 'No roster source configured.',
+      todo: `${rosterConfigError?.todo ?? 'Configure the roster source.'} Vercel env: ${VERCEL_ENV_URL}`,
     })
   } else if (!roster.ok) {
     rosterCritical = true
+    const isRegistry = rosterReq.source === 'registry'
+    const status = /HTTP (\d{3})/.exec(roster.reason ?? '')?.[1]
     findings.push({
       severity: 'critical',
       code: false,
       what: 'The recap can’t read the roster — every trip and overdue check depends on it.',
-      how: `The roster Google Sheet CSV returned ${roster.reason}.`,
-      todo: 'Confirm the roster sheet is still published-to-web and the CSV link is valid.',
+      how: `${rosterReq.label} returned ${roster.reason}.`,
+      todo: isRegistry
+        ? `${status ? explainRegistryStatus(Number(status)) : 'Check sv-registry /api/roster-projection.'} The recap does not fall back to the sheet; to roll back set VITE_ROSTER_SOURCE=sheet in Vercel and redeploy.`
+        : 'Confirm the roster sheet is still published-to-web and the CSV link is valid.',
     })
   }
 
@@ -230,7 +260,16 @@ async function runChecks(force = false): Promise<Finding[]> {
     })
   }
 
-  if (!heartbeat.ok) {
+  // Heartbeat access (its auth gate): a 401/403 is a lockout with a specific
+  // env fix, not "is heartbeat up?". An observe-mode "would-401" is a weekly
+  // heads-up before heartbeat enforces.
+  const heartbeatAccess = heartbeatAccessFinding(
+    { status: heartbeat.status ?? null, svAuth: heartbeat.svAuth ?? null },
+    { tokenSet: heartbeatTokenConfigured(), weekly: force || new Date().getUTCDay() === 1, envUrl: VERCEL_ENV_URL },
+  )
+  if (heartbeatAccess) {
+    findings.push(heartbeatAccess)
+  } else if (!heartbeat.ok) {
     findings.push({
       severity: 'warning',
       code: false,
@@ -493,7 +532,16 @@ function checkHsSheetSeason(scheduleCsv: string, now: Date): Finding[] {
 
 // ─── Probes ──────────────────────────────────────────────────────────────────
 
-interface ProbeResult { ok: boolean; reason?: string; skipped?: boolean; text?: string }
+interface ProbeResult {
+  ok: boolean
+  reason?: string
+  skipped?: boolean
+  text?: string
+  /** HTTP status of the last attempt (JSON probes). */
+  status?: number
+  /** `x-sv-auth` verdict header, when the source has an SV auth gate. */
+  svAuth?: string | null
+}
 
 /** Google's published-CSV endpoint (and any remote API) intermittently stalls
  *  or drops a single request while perfectly healthy — a one-shot probe turns
@@ -506,19 +554,22 @@ async function withRetry(probe: () => Promise<ProbeResult>, attempts = 3): Promi
   for (let i = 0; i < attempts; i++) {
     last = await probe()
     if (last.ok) return last
+    // An auth answer is not a blip; retrying only repeats it.
+    if (last.status === 401 || last.status === 403) break
     if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500))
   }
+  if (last.status === 401 || last.status === 403) return last
   return { ...last, reason: `${last.reason} on ${attempts} attempts` }
 }
 
 /** A source is "ok" only if it responds 2xx AND returns a non-trivial body —
  *  a published sheet that got unshared often 200s with an HTML error page or an
  *  empty CSV, which is exactly the silent failure we're hunting. */
-function probeCsv(url: string): Promise<ProbeResult> {
+function probeCsv(url: string, extraHeaders: Record<string, string> = {}): Promise<ProbeResult> {
   return withRetry(async () => {
     try {
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
+        headers: { 'User-Agent': 'SVTravelHub/HealthMonitor', ...extraHeaders },
         signal: AbortSignal.timeout(10_000),
       })
       if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` }
@@ -535,16 +586,17 @@ function probeCsv(url: string): Promise<ProbeResult> {
   })
 }
 
-function probeJson(url: string): Promise<ProbeResult> {
+function probeJson(url: string, extraHeaders: Record<string, string> = {}): Promise<ProbeResult> {
   return withRetry(async () => {
     try {
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
+        headers: { 'User-Agent': 'SVTravelHub/HealthMonitor', ...extraHeaders },
         signal: AbortSignal.timeout(10_000),
       })
-      if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` }
+      const svAuth = res.headers.get('x-sv-auth')
+      if (!res.ok) return { ok: false, reason: `HTTP ${res.status}`, status: res.status, svAuth }
       await res.json()
-      return { ok: true }
+      return { ok: true, status: res.status, svAuth }
     } catch (e) {
       return { ok: false, reason: describeErr(e) }
     }

@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { fetchWithTimeout } from '../lib/fetchWithTimeout'
+import { peekIdToken } from '../lib/googleAuth'
+import { classifyHeartbeatAuth, heartbeatAuthMessage, heartbeatRequestInit, type HeartbeatAuthState } from '../lib/heartbeatAuth'
 
 const HEARTBEAT_BASE = 'https://sv-heartbeat.vercel.app/api/heartbeat'
 
@@ -93,6 +95,10 @@ interface HeartbeatState {
   loading: boolean
   error: string | null
   lastFetchedAt: string | null
+  /** Not persisted. 'signed-out' / 'denied' mean Heartbeat answered 401/403. */
+  authState: HeartbeatAuthState
+  /** Whether the last fetch carried a Google ID token (not persisted). */
+  lastFetchSentToken: boolean
 
   fetchHeartbeat: () => Promise<void>
   getPlayerData: (playerName: string) => HeartbeatPlayer | undefined
@@ -150,16 +156,34 @@ export const useHeartbeatStore = create<HeartbeatState>()(
       loading: false,
       error: null,
       lastFetchedAt: null,
+      authState: 'ok',
+      lastFetchSentToken: false,
 
       fetchHeartbeat: async () => {
         if (get().loading) return
         set({ loading: true, error: null })
+        // Viewer's Google ID token when signed in; otherwise the same
+        // credential-less request as before (heartbeat's observe window).
+        // peekIdToken never loads Google sign-in on its own.
+        const token = peekIdToken()
+        const init = heartbeatRequestInit(token)
+        set({ lastFetchSentToken: !!token })
         try {
           const [priorityRes, summaryRes, visitCountsRes] = await Promise.all([
-            fetchWithRetry(`${HEARTBEAT_BASE}/visit-priority`),
-            fetchWithRetry(`${HEARTBEAT_BASE}/summary`),
-            fetchWithRetry(`${HEARTBEAT_BASE}/visit-counts`),
+            fetchWithRetry(`${HEARTBEAT_BASE}/visit-priority`, init),
+            fetchWithRetry(`${HEARTBEAT_BASE}/summary`, init),
+            fetchWithRetry(`${HEARTBEAT_BASE}/visit-counts`, init),
           ])
+
+          // 401/403: show it as a sign-in or access problem. Deliberately do
+          // NOT drop the token or re-prompt here (One Tap would re-sign and
+          // refetch in a loop when the cause is configuration).
+          const authRes = [priorityRes, summaryRes, visitCountsRes].find((r) => classifyHeartbeatAuth(r.status, !!token))
+          if (authRes) {
+            const authState = classifyHeartbeatAuth(authRes.status, !!token) ?? 'denied'
+            set({ loading: false, authState, error: heartbeatAuthMessage(authState, authRes.status) })
+            return
+          }
 
           if (!priorityRes.ok) throw new Error(`Visit priority API: ${priorityRes.status}`)
           if (!summaryRes.ok) throw new Error(`Summary API: ${summaryRes.status}`)
@@ -186,6 +210,7 @@ export const useHeartbeatStore = create<HeartbeatState>()(
             urgencyLookup,
             visitCountLookup,
             loading: false,
+            authState: 'ok',
             lastFetchedAt: new Date().toISOString(),
           })
 
