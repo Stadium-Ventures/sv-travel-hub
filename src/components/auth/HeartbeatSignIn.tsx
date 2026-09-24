@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { initGoogleAuth, onAuthChange, peekIdToken, renderSignInButton } from '../../lib/googleAuth'
 import { proactiveSignInEnabled } from '../../lib/heartbeatAuth'
 import { useHeartbeatStore } from '../../store/heartbeatStore'
+import { useRosterStore } from '../../store/rosterStore'
+import { getRosterSourceOrNull } from '../../lib/rosterSource'
 
 /** Heartbeat access bar. Renders nothing while Heartbeat answers normally
  *  (today, and through heartbeat's observe window). When Heartbeat answers
@@ -10,6 +12,9 @@ import { useHeartbeatStore } from '../../store/heartbeatStore'
  *  refetch only if the last fetch went out without one. */
 export default function HeartbeatSignIn() {
   const authState = useHeartbeatStore((s) => s.authState)
+  // On the registry roster source the roster's own sign-in bar is showing
+  // while it needs a token; one sign-in serves both, so don't show two.
+  const rosterBarShowing = useRosterStore((s) => s.needsSignIn) && getRosterSourceOrNull() === 'registry'
   const error = useHeartbeatStore((s) => s.error)
   const [buttonFailed, setButtonFailed] = useState(false)
   const buttonRef = useRef<HTMLDivElement>(null)
@@ -31,7 +36,7 @@ export default function HeartbeatSignIn() {
     return () => { cancelled = true }
   }, [authState])
 
-  if (authState === 'ok') return null
+  if (authState === 'ok' || (authState === 'signed-out' && rosterBarShowing)) return null
   return (
     <div className="flex flex-wrap items-center gap-3 border-b border-border bg-surface px-5 py-3 text-sm" role="alert">
       <span className={authState === 'denied' ? 'text-accent-orange' : 'text-text'}>{error}</span>

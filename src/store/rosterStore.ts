@@ -9,7 +9,7 @@ import {
   DEFAULT_MIN_ROWS,
   DEFAULT_REGISTRY_ROSTER_URL,
 } from '../lib/registryRoster'
-import { getIdToken, invalidateIdToken } from '../lib/googleAuth'
+import { getIdToken } from '../lib/googleAuth'
 import { applyOverrides, pruneOverrides, overrideKeyForName, playerKey, type VisitOverride } from './rosterOverrides'
 import { useDiagnosticsStore } from './diagnosticsStore'
 import { ROSTER_PERSIST_VERSION, migrateRosterPersist, scrubPlayer } from './rosterPersist'
@@ -46,6 +46,10 @@ interface RosterState {
   setSortColumn: (column: SortField) => void
   setSortDirection: (dir: SortDir) => void
 }
+
+/** Shown when the registry answers 401 to a fresh token. Plain text for Kent. */
+export const REGISTRY_REJECTED_MESSAGE =
+  'The registry turned down this sign-in (HTTP 401), so the roster could not load. Signing in again will not fix it. Tell Tom in #sv-automation. The app does not fall back to the sheet.'
 
 function registryUrl(): string {
   return (import.meta.env.VITE_REGISTRY_ROSTER_URL as string | undefined) || DEFAULT_REGISTRY_ROSTER_URL
@@ -131,8 +135,18 @@ export const useRosterStore = create<RosterState>()(
           }
         } catch (e) {
           if (e instanceof RosterAuthError) {
-            // 401 = the registry rejected a token we thought was fresh.
-            if (e.status === 401) invalidateIdToken()
+            if (e.status === 401) {
+              // The registry rejected a token we thought was fresh. That is a
+              // configuration problem (OAuth origin, audience, consumer entry),
+              // not a stale sign-in, so do NOT drop the token or re-prompt:
+              // with One Tap auto-select that re-signed and refetched in a
+              // loop. Show the error and stop; the sheet is not a fallback.
+              const message = REGISTRY_REJECTED_MESSAGE
+              set({ loading: false, needsSignIn: false, error: message })
+              useDiagnosticsStore.getState().addIssue({ level: 'error', source: 'roster', message })
+              return
+            }
+            // No usable token yet: show the sign-in bar.
             set({ loading: false, needsSignIn: true, error: e.message })
             return
           }
