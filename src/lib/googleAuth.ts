@@ -143,7 +143,10 @@ export function peekIdToken(): string | null {
   return idToken
 }
 
-/** The registry said 401: drop the token and ask GIS for a new one. */
+/** Drop the token and ask GIS for a new one. Do NOT call this on a 401 from
+ *  the registry or Heartbeat: with One Tap auto-select a persistent 401
+ *  (misconfigured origin or scope) re-signs and refetches in a loop. The
+ *  roster and Heartbeat stores show the error instead. */
 export function invalidateIdToken(): void {
   idToken = null
   notify()
