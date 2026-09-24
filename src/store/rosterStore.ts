@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { RosterPlayer } from '../types/roster'
 import { fetchRoster } from '../lib/csv'
 import { useDiagnosticsStore } from './diagnosticsStore'
+import { ROSTER_PERSIST_VERSION, migrateRosterPersist, scrubPlayer } from './rosterPersist'
 // Cycles with the stores below (they import us) — safe under ESM because
 // both sides only ACCESS the binding at runtime, never at module init (same
 // pattern as the scheduleStore ↔ rehabStore cycle).
@@ -128,8 +129,12 @@ export const useRosterStore = create<RosterState>()(
     }),
     {
       name: 'sv-travel-roster',
+      version: ROSTER_PERSIST_VERSION,
+      migrate: (persisted, version) => migrateRosterPersist(persisted, version) as RosterState,
       partialize: (state) => ({
-        players: state.players,
+        // Defence in depth: RosterPlayer no longer carries contact fields, but
+        // scrub anyway so a future field can't quietly land in localStorage.
+        players: state.players.map(scrubPlayer),
         lastFetchedAt: state.lastFetchedAt,
         visitOverrides: state.visitOverrides,
         sortColumn: state.sortColumn,

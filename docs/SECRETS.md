@@ -19,6 +19,7 @@ visible in the shipped bundle — treat them as public.
 | `VITE_CARTO_BASEMAP_KEY` | CARTO basemap tiles (the dark map under the dots). Keyless tiles are watermarked "API KEY REQUIRED" since late Aug 2026. | https://carto.com/basemaps/apikey/ → Sign in with ttrudeau@stadium-ventures.com (registered 2026-09-18, free 5M tiles/mo, no CARTO account). Ends up in the client bundle (every tile URL carries it); protect it with a Referer restriction on the CARTO dashboard rather than by hiding it. Set in Vercel env for Production + Preview, then redeploy. |
 | `VITE_ORS_API_KEY` | openrouteservice routing (drive times) | https://openrouteservice.org → dashboard → API keys. Ends up in the client bundle; use a free-tier key. |
 | `VITE_EVENTS_CSV_URL`, `VITE_ROSTER_CSV_URL`, `VITE_SCHEDULE_CSV_URL`, `VITE_SUMMER_CSV_URL`, `VITE_SUMMER_MANUAL_CSV_URL` | Published-CSV URLs of source Google Sheets | Google Sheets → File → Share → Publish to web → CSV. Unlisted but not truly secret. |
+| `VITE_CONTACT_CARD` | Feature flag (config, not secret). Leave unset. Shows the roster contact card only if a future gated contact door populates it (decision D4). | n/a |
 
 GitHub Actions secrets (repo → Settings → Secrets and variables → Actions),
 used by `.github/workflows/health-deadman.yml`:

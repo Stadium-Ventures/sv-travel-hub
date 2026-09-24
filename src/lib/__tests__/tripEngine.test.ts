@@ -20,12 +20,6 @@ function makePlayer(overrides: Partial<RosterPlayer> & { playerName: string }): 
     visitsCompleted: 0,
     lastVisitDate: null,
     visitsRemaining: 5,
-    dob: '',
-    age: null,
-    phone: '',
-    email: '',
-    father: '',
-    mother: '',
     status: '',
     ...overrides,
   }

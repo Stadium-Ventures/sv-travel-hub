@@ -121,8 +121,9 @@ export async function fetchRoster(): Promise<RosterParseResult> {
       const visitTargetRaw = parseNumber(findColumn(r, ['2026 Visit Target', 'Visit Target', 'Visits Target']))
       const visitsCompleted = parseNumber(findColumn(r, ['Visits Completed', 'Visits', 'In-Person Visits'])) ?? 0
       const lastVisit = findColumn(r, ['Last Visit Date', 'Last Visit', 'Last In-Person'])
-      const ageRaw = findColumn(r, ['Age'])
-      const dobRaw = findColumn(r, ['DOB', 'Date of Birth', 'Birthday'])
+      // Contact columns (DOB/Age/Phone/Email/Father/Mother) are deliberately
+      // NOT read: roster metadata and client contact data are different
+      // grants (D4). Nothing downstream may depend on them.
 
       return {
         playerName,
@@ -141,12 +142,6 @@ export async function fetchRoster(): Promise<RosterParseResult> {
         visitsCompleted,
         lastVisitDate: lastVisit || null,
         visitsRemaining: Math.max(0, (visitTargetRaw ?? visitTarget) - visitsCompleted),
-        dob: dobRaw,
-        age: parseNumber(ageRaw),
-        phone: findColumn(r, ['Phone', 'Cell', 'Phone Number']),
-        email: findColumn(r, ['Email', 'Email Address']),
-        father: findColumn(r, ['Father', "Father's Name", 'Dad']),
-        mother: findColumn(r, ['Mother', "Mother's Name", 'Mom']),
         status: findColumn(r, ['Status', 'Player Status', 'Availability', 'Notes']),
       }
     })
