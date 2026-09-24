@@ -1,4 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+// .js extension required: Vercel runs functions as strict node ESM.
+import { HEARTBEAT_SUMMARY_URL, heartbeatReadHeaders } from './_lib/heartbeatAuth.js'
 
 // SV Travel Hub — Weekly Slack recap.
 //
@@ -335,11 +337,17 @@ async function loadRoster(): Promise<RosterPlayer[]> {
 async function loadHeartbeat(): Promise<Map<string, HeartbeatPlayer>> {
   const map = new Map<string, HeartbeatPlayer>()
   try {
-    const res = await fetch('https://sv-heartbeat.vercel.app/api/heartbeat/summary', {
-      headers: { 'User-Agent': 'SVTravelHub/Slack-Recap' },
+    // HEARTBEAT_READ_TOKEN (server-only) as Bearer once heartbeat gates its
+    // API; unset sends the same request as before.
+    const res = await fetch(HEARTBEAT_SUMMARY_URL, {
+      headers: { 'User-Agent': 'SVTravelHub/Slack-Recap', ...heartbeatReadHeaders() },
       signal: AbortSignal.timeout(12_000),
     })
-    if (!res.ok) return map
+    if (!res.ok) {
+      // The daily health monitor turns a 401/403 into a #sv-automation finding.
+      console.warn(`[slack-recap] heartbeat summary HTTP ${res.status}; overdue section will be empty`)
+      return map
+    }
     const data = await res.json() as { players?: HeartbeatPlayer[] }
     for (const p of data.players ?? []) {
       map.set(p.name.trim().toLowerCase(), p)

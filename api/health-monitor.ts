@@ -8,6 +8,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { resolveNcaaName, D1_BASEBALL_SLUGS } from './_data/ncaaSchools.js'
 import { SUMMER_LEAGUES, parseSummerPlacementRows } from './_data/summerLeagues.js'
 import type { SummerLeagueCode, SummerPlacementRow } from './_data/summerLeagues.js'
+import {
+  HEARTBEAT_SUMMARY_URL,
+  heartbeatAccessFinding,
+  heartbeatReadHeaders,
+  heartbeatTokenConfigured,
+} from './_lib/heartbeatAuth.js'
 
 // SV Travel Hub — self health check.
 //
@@ -40,6 +46,8 @@ import type { SummerLeagueCode, SummerPlacementRow } from './_data/summerLeagues
 //   VITE_SUMMER_CSV_URL            — Summer Ball Placement sheet (summer checks)
 //   VITE_SUMMER_MANUAL_CSV_URL     — hand-entered summer games (Northwoods etc.)
 //   SLACK_BOT_TOKEN + SLACK_CHANNEL_TRAVEL_SCHEDULE — what the Monday recap posts with
+//   HEARTBEAT_READ_TOKEN           — optional, server-only: Bearer for sv-heartbeat's
+//                                    gated API (api/_lib/heartbeatAuth.ts)
 //   SELF_BASE_URL                  — override for the recap dry-run self-call
 //                                    (defaults to the prod domain)
 //
@@ -190,7 +198,7 @@ async function runChecks(force = false): Promise<Finding[]> {
     rosterUrl ? probeCsv(rosterUrl) : Promise.resolve<ProbeResult>({ ok: false, reason: 'no URL configured' }),
     scheduleUrl ? probeCsv(scheduleUrl) : Promise.resolve<ProbeResult>({ ok: true, skipped: true }),
     probeCsv(eventsUrl),
-    probeJson('https://sv-heartbeat.vercel.app/api/heartbeat/summary'),
+    probeJson(HEARTBEAT_SUMMARY_URL, heartbeatReadHeaders()),
     probeJson(MLB_PROBE_URL),
   ])
 
@@ -235,7 +243,16 @@ async function runChecks(force = false): Promise<Finding[]> {
     })
   }
 
-  if (!heartbeat.ok) {
+  // Heartbeat access (its auth gate): a 401/403 is a lockout with a specific
+  // env fix, not "is heartbeat up?". An observe-mode "would-401" is a weekly
+  // heads-up before heartbeat enforces.
+  const heartbeatAccess = heartbeatAccessFinding(
+    { status: heartbeat.status ?? null, svAuth: heartbeat.svAuth ?? null },
+    { tokenSet: heartbeatTokenConfigured(), weekly: force || new Date().getUTCDay() === 1, envUrl: VERCEL_ENV_URL },
+  )
+  if (heartbeatAccess) {
+    findings.push(heartbeatAccess)
+  } else if (!heartbeat.ok) {
     findings.push({
       severity: 'warning',
       code: false,
@@ -826,7 +843,16 @@ async function checkAflRosters(now: Date, force: boolean): Promise<Finding[]> {
 
 // ─── Probes ──────────────────────────────────────────────────────────────────
 
-interface ProbeResult { ok: boolean; reason?: string; skipped?: boolean; text?: string }
+interface ProbeResult {
+  ok: boolean
+  reason?: string
+  skipped?: boolean
+  text?: string
+  /** HTTP status of the last attempt (JSON probes). */
+  status?: number
+  /** `x-sv-auth` verdict header, when the source has an SV auth gate. */
+  svAuth?: string | null
+}
 
 /** Google's published-CSV endpoint (and any remote API) intermittently stalls
  *  or drops a single request while perfectly healthy — a one-shot probe turns
@@ -839,8 +865,11 @@ async function withRetry(probe: () => Promise<ProbeResult>, attempts = 3): Promi
   for (let i = 0; i < attempts; i++) {
     last = await probe()
     if (last.ok) return last
+    // An auth answer is not a blip; retrying only repeats it.
+    if (last.status === 401 || last.status === 403) break
     if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500))
   }
+  if (last.status === 401 || last.status === 403) return last
   return { ...last, reason: `${last.reason} on ${attempts} attempts` }
 }
 
@@ -868,16 +897,17 @@ function probeCsv(url: string): Promise<ProbeResult> {
   })
 }
 
-function probeJson(url: string): Promise<ProbeResult> {
+function probeJson(url: string, extraHeaders: Record<string, string> = {}): Promise<ProbeResult> {
   return withRetry(async () => {
     try {
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
+        headers: { 'User-Agent': 'SVTravelHub/HealthMonitor', ...extraHeaders },
         signal: AbortSignal.timeout(10_000),
       })
-      if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` }
+      const svAuth = res.headers.get('x-sv-auth')
+      if (!res.ok) return { ok: false, reason: `HTTP ${res.status}`, status: res.status, svAuth }
       await res.json()
-      return { ok: true }
+      return { ok: true, status: res.status, svAuth }
     } catch (e) {
       return { ok: false, reason: describeErr(e) }
     }
