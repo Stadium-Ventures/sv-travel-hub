@@ -10,7 +10,10 @@
  *
  * The audience must be sv-registry's OAuth client (it verifies `aud`), so the
  * default client id is the registry's (sv-registry api/_lib/auth.js CLIENT_ID).
- * This page's origin must be an Authorized JavaScript origin on that client. */
+ * This page's origin must be an Authorized JavaScript origin on that client.
+ *
+ * sv-heartbeat verifies the same token (same client id, same domain rule), so
+ * the Heartbeat store sends it too (src/lib/heartbeatAuth.ts). */
 
 export const DEFAULT_GOOGLE_CLIENT_ID = '970904391216-emekreu9hdntj6k76qhkr0fjvrvd9fcm.apps.googleusercontent.com'
 export const ALLOWED_HD = 'stadium-ventures.com'
@@ -128,6 +131,15 @@ export function getIdToken(): string | null {
     idToken = null
     void initGoogleAuth().then((gis) => gis?.prompt())
   }
+  return idToken
+}
+
+/** The current in-memory ID token if it is still fresh, else null, WITHOUT
+ *  loading Google Identity Services or prompting. Heartbeat calls use this so
+ *  a page that never needed sign-in never loads the GIS script (no-op until
+ *  Heartbeat starts asking for a credential). */
+export function peekIdToken(): string | null {
+  if (idToken && !isTokenFresh(idToken)) idToken = null
   return idToken
 }
 
