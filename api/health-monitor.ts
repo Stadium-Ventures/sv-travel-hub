@@ -6,6 +6,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 // The .js extension is required: Vercel runs functions as strict node ESM,
 // which never resolves extensionless specifiers (ERR_MODULE_NOT_FOUND).
 import { resolveNcaaName, D1_BASEBALL_SLUGS } from './_data/ncaaSchools.js'
+import { SUMMER_LEAGUES, parseSummerPlacementRows } from './_data/summerLeagues.js'
+import type { SummerLeagueCode, SummerPlacementRow } from './_data/summerLeagues.js'
 
 // SV Travel Hub — self health check.
 //
@@ -35,6 +37,8 @@ import { resolveNcaaName, D1_BASEBALL_SLUGS } from './_data/ncaaSchools.js'
 //   VITE_ROSTER_CSV_URL            — roster sheet (recap has no players without it)
 //   VITE_SCHEDULE_CSV_URL          — HS/JUCO schedule sheet
 //   VITE_EVENTS_CSV_URL            — events sheet (has a code default if unset)
+//   VITE_SUMMER_CSV_URL            — Summer Ball Placement sheet (summer checks)
+//   VITE_SUMMER_MANUAL_CSV_URL     — hand-entered summer games (Northwoods etc.)
 //   SLACK_BOT_TOKEN + SLACK_CHANNEL_TRAVEL_SCHEDULE — what the Monday recap posts with
 //   SELF_BASE_URL                  — override for the recap dry-run self-call
 //                                    (defaults to the prod domain)
@@ -45,7 +49,8 @@ import { resolveNcaaName, D1_BASEBALL_SLUGS } from './_data/ncaaSchools.js'
 //   GET /api/health-monitor            (daily cron / manual)
 //   GET /api/health-monitor?dryRun=1   (compute findings, do NOT post)
 //   GET /api/health-monitor?test=1     (post a harmless test finding — verifies wiring)
-//   GET /api/health-monitor?force=1    (run the Monday-only + seasonal checks now)
+//   GET /api/health-monitor?force=1    (run the Monday-only + seasonal checks now,
+//                                       ignoring their date windows)
 
 export const config = { maxDuration: 60 }
 
@@ -301,7 +306,15 @@ async function runChecks(force = false): Promise<Finding[]> {
     }
   }
 
-  // 4. Weekly data-hygiene + seasonal checks (Mondays, or ?force=1). These are
+  // 4. Weekly data-hygiene + seasonal checks (Mondays, or ?force=1).
+  //    Seasonal calendar (UTC):
+  //      Dec–Jan        NCAA: client schools with no upcoming-season schedule on D1Baseball
+  //      Dec–Feb        HS/JUCO: schedule sheet still only has last season's games
+  //      May 15–Aug 15  Summer: unplaced college clients (through Jun 30), placement
+  //                     names that don't match the roster, no-feed leagues with no
+  //                     manual games, MLB-API league team names that don't match
+  //      Sep 15–Nov 20  AFL: clubs missing from the MLB API; rosters empty from Oct 1
+  //    These are
   //    stateless, so they re-alert every Monday until fixed — deliberate: each
   //    one is a client whose games are invisible in the app. Daily would be
   //    noise; silence would recreate the exact gap they close.
@@ -325,6 +338,21 @@ async function runChecks(force = false): Promise<Finding[]> {
       if (schedule.ok && schedule.text) {
         findings.push(...checkHsSheetSeason(schedule.text, now))
       }
+    }
+
+    // Summer ball (mid-May to mid-Aug): placements are hand-entered on the
+    // Summer Ball Placement sheet, and five of the eight leagues have no feed
+    // at all, so those games exist only if someone types them in.
+    const md = monthDay(now)
+    if (force || (md >= 515 && md <= 815)) {
+      findings.push(...await checkSummerCoverage(roster.ok ? roster.text : undefined, now, force))
+    }
+
+    // Arizona Fall League (mid-Sep to late Nov): the app pulls AFL rosters from
+    // the MLB API by itself. This makes sure that pull still has something to
+    // read, so a silent API change doesn't hide every fall client.
+    if (force || (md >= 915 && md <= 1120)) {
+      findings.push(...await checkAflRosters(now, force))
     }
   }
 
@@ -488,6 +516,311 @@ function checkHsSheetSeason(scheduleCsv: string, now: Date): Finding[] {
     what: `The HS/JUCO schedule sheet has no ${seasonYear}-season games yet — HS clients show nothing in the Travel Hub.`,
     how: `Weekly Dec–Feb check: all ${hsRows} HS/JUCO rows in the Client Game Schedule sheet are from last season (newest game: ${latest || 'no parseable date'}).`,
     todo: `State associations release HS schedules Nov–Feb — enter the new season's HS/JUCO games into the Client Game Schedule sheet. Re-alerts every Monday until the sheet has ${seasonYear} rows.`,
+  }]
+}
+
+/** Month-day as a sortable number (Sep 15 → 915), UTC. */
+function monthDay(d: Date): number {
+  return (d.getUTCMonth() + 1) * 100 + d.getUTCDate()
+}
+
+function normName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ').trim()
+}
+
+/** Same key the app's summerStore uses to tie a placement to a roster row. */
+function nameKey(s: string): string {
+  return s.trim().toLowerCase()
+}
+
+/** Last name + first initial, to spot a placement typed under a nickname or
+ *  misspelling ("Sammy Mitchell" for roster "Sam Mitchell"). */
+function looseKey(s: string): string {
+  const parts = normName(s).split(' ').filter(Boolean)
+  if (parts.length < 2) return normName(s)
+  return `${parts[0]![0]} ${parts[parts.length - 1]}`
+}
+
+function parseRosterNames(rosterCsv: string): Set<string> {
+  const rows = parseCsv(rosterCsv)
+  const out = new Set<string>()
+  if (rows.length < 2) return out
+  const header = rows[0]!.map((h) => h.trim().toLowerCase())
+  const iName = ['name', 'player name', 'player'].map((n) => header.indexOf(n)).find((i) => i >= 0) ?? -1
+  if (iName < 0) return out
+  for (let r = 1; r < rows.length; r++) {
+    const n = nameKey(rows[r]![iName] ?? '')
+    if (n) out.add(n)
+  }
+  return out
+}
+
+function normTeam(s: string): string {
+  return s.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim()
+}
+
+/** Summer ball, mid-May to mid-Aug. Three gaps, each one a client with no
+ *  summer games on the map:
+ *   1. (through Jun 30) college clients with no row on the placement sheet;
+ *   2. placements in leagues with no feed (PrestoSports + manual leagues)
+ *      that have no games on the manual summer sheet;
+ *   3. placements in MLB-API leagues (Cape, Draft League, Appy) whose team
+ *      name doesn't match the league's team list, so no schedule is pulled. */
+async function checkSummerCoverage(rosterCsv: string | undefined, now: Date, force: boolean): Promise<Finding[]> {
+  const findings: Finding[] = []
+  const season = now.getUTCFullYear()
+  const sheetUrl = process.env.VITE_SUMMER_CSV_URL
+  if (!sheetUrl) {
+    return [{
+      severity: 'warning',
+      code: false,
+      what: 'Summer ball is invisible in the Travel Hub. The summer placement sheet is not connected.',
+      how: 'VITE_SUMMER_CSV_URL is not set on the deployment, so no client has a summer team.',
+      todo: `Publish the Summer Ball Placement sheet to the web as CSV and set VITE_SUMMER_CSV_URL in Vercel (${VERCEL_ENV_URL}), then redeploy.`,
+    }]
+  }
+  const sheet = await probeCsv(sheetUrl)
+  if (!sheet.ok || !sheet.text) {
+    return [{
+      severity: 'warning',
+      code: false,
+      what: 'Summer ball is invisible in the Travel Hub. The summer placement sheet can’t be read.',
+      how: `The Summer Ball Placement sheet CSV returned ${sheet.reason}.`,
+      todo: 'Confirm the placement sheet is still published to the web and the CSV link in VITE_SUMMER_CSV_URL is valid.',
+    }]
+  }
+  // The roster is the source of truth: the app ignores placements for names
+  // not on it (removed clients linger on the sheet), and so does this check.
+  // Without a roster there's nothing to check against, and the roster probe
+  // has already raised a critical.
+  if (!rosterCsv) return []
+  const rosterKeys = parseRosterNames(rosterCsv)
+  const sheetRows = parseCsv(sheet.text)
+  const { placements: allPlacements } = parseSummerPlacementRows(sheetRows)
+  const placements = allPlacements.filter((p) => rosterKeys.has(nameKey(p.playerName)))
+  const active = placements.filter((p) => p.active)
+
+  // 1. College clients with no placement, while placements are still landing.
+  if (force || monthDay(now) <= 630) {
+    // A row with a status but no team (e.g. "Shut Down") still means someone
+    // made the call, so it counts as handled. A bare name (the NEED PLACEMENT
+    // list) does not.
+    const handled = new Set<string>()
+    const looseToSheetName = new Map<string, string>()
+    for (const row of sheetRows) {
+      const name = (row[0] ?? '').trim()
+      if (!name || ![row[2], row[3], row[4]].some((c) => (c ?? '').trim())) continue
+      handled.add(nameKey(name))
+      looseToSheetName.set(looseKey(name), name)
+    }
+    const college = parseRosterNcaa(rosterCsv)
+    const unplaced: string[] = []
+    const misspelled: string[] = []
+    for (const p of college) {
+      if (handled.has(nameKey(p.name))) continue
+      const near = looseToSheetName.get(looseKey(p.name))
+      if (near && !rosterKeys.has(nameKey(near))) misspelled.push(`"${near}" (roster: ${p.name})`)
+      else unplaced.push(p.name)
+    }
+    unplaced.sort()
+    misspelled.sort()
+    if (misspelled.length > 0) {
+      findings.push({
+        severity: 'warning',
+        code: false,
+        what: `${misspelled.length} summer placement${misspelled.length === 1 ? ' is' : 's are'} spelled differently from the roster, so the Travel Hub drops ${misspelled.length === 1 ? 'it' : 'them'}: ${misspelled.join(', ')}.`,
+        how: 'The app only links a placement to a client when the name matches the roster exactly.',
+        todo: 'Change the name on the Summer Ball Placement sheet to match the roster.',
+      })
+    }
+    if (college.length > 0 && handled.size === 0) {
+      findings.push({
+        severity: 'warning',
+        code: false,
+        what: 'No summer placements are on the sheet yet. College clients show no summer games.',
+        how: `The Summer Ball Placement sheet has no player with a team, league or status filled in, and the roster has ${college.length} college clients.`,
+        todo: 'Enter each college client’s summer team and league on the Summer Ball Placement sheet. Re-alerts every Monday through June.',
+      })
+    } else if (unplaced.length > 0) {
+      findings.push({
+        severity: 'warning',
+        code: false,
+        what: `${unplaced.length} college client${unplaced.length === 1 ? ' has' : 's have'} no summer team on the placement sheet: ${unplaced.join(', ')}.`,
+        how: 'Weekly May–June check: these roster names don’t appear on the Summer Ball Placement sheet with a team, league or status.',
+        todo: 'Add them to the placement sheet with their team and league. If a player isn’t playing summer ball, give them a row with a status like "Shut Down" so this stops flagging them.',
+      })
+    }
+  }
+
+  // 2. Leagues with no feed: games only exist if they're on the manual sheet.
+  const noFeed = active.filter((p) => SUMMER_LEAGUES[p.league].source !== 'mlb-api')
+  if (noFeed.length > 0) {
+    const manualUrl = process.env.VITE_SUMMER_MANUAL_CSV_URL
+    let covered = new Set<string>()
+    let manualNote = ''
+    if (!manualUrl) {
+      manualNote = 'VITE_SUMMER_MANUAL_CSV_URL is not set, so there is nowhere to enter these games yet.'
+    } else {
+      const manual = await probeCsv(manualUrl)
+      if (!manual.ok || !manual.text) {
+        manualNote = `The manual summer games sheet returned ${manual.reason}.`
+      } else {
+        covered = manualSheetPlayers(manual.text, season)
+      }
+    }
+    const missing = noFeed.filter((p) => !covered.has(normName(p.playerName)))
+    if (missing.length > 0) {
+      const list = missing
+        .sort((a, b) => a.playerName.localeCompare(b.playerName))
+        .map((p) => `${p.playerName} (${p.summerTeam}, ${p.league})`)
+        .join(', ')
+      findings.push({
+        severity: 'warning',
+        code: false,
+        what: `${missing.length} summer client${missing.length === 1 ? '' : 's'} play${missing.length === 1 ? 's' : ''} in a league we can’t pull automatically and ${missing.length === 1 ? 'has' : 'have'} no games entered: ${list}.`,
+        how: manualNote || `The placement sheet puts them in PGCBL, NECBL, FCBL, Northwoods or Coastal Plain, and the manual summer games sheet has no ${season} rows for them.`,
+        todo: manualUrl
+          ? 'Copy their team schedules into the manual summer games sheet (Player, Team, League, Date, Time, Home/Away, Opponent, Venue, VenueLat, VenueLng). Re-alerts every Monday until entered.'
+          : `Create a manual summer games sheet (columns: Player, Team, League, Date, Time, Home/Away, Opponent, Venue, VenueLat, VenueLng), publish it as CSV, set VITE_SUMMER_MANUAL_CSV_URL in Vercel (${VERCEL_ENV_URL}), redeploy, then enter their games.`,
+      })
+    }
+  }
+
+  // 3. MLB-API leagues: the team name on the sheet has to match the league's
+  //    team list, or the app pulls nothing for that player.
+  const byLeague = new Map<SummerLeagueCode, SummerPlacementRow[]>()
+  for (const p of active) {
+    if (SUMMER_LEAGUES[p.league].source !== 'mlb-api') continue
+    const list = byLeague.get(p.league)
+    if (list) list.push(p)
+    else byLeague.set(p.league, [p])
+  }
+  const unmatched: string[] = []
+  const blind: string[] = []
+  await Promise.all([...byLeague.entries()].map(async ([code, list]) => {
+    const leagueId = SUMMER_LEAGUES[code].mlbApiLeagueId
+    const names = await fetchMlbTeamNames(`https://statsapi.mlb.com/api/v1/teams?leagueIds=${leagueId}&season=${season}`)
+    if (!names || names.length === 0) { blind.push(SUMMER_LEAGUES[code].name); return }
+    for (const p of list) {
+      const target = normTeam(p.summerTeam)
+      const hit = names.some((n) => { const t = normTeam(n); return t === target || t.includes(target) || target.includes(t) })
+      if (!hit) unmatched.push(`${p.playerName} → "${p.summerTeam}" (${code})`)
+    }
+  }))
+  if (unmatched.length > 0) {
+    unmatched.sort()
+    findings.push({
+      severity: 'warning',
+      code: false,
+      what: `${unmatched.length} summer placement${unmatched.length === 1 ? '' : 's'} can’t be matched to a team, so no games are pulled: ${unmatched.join('; ')}.`,
+      how: 'The team name on the Summer Ball Placement sheet doesn’t match any team the MLB Stats API lists for that league this season.',
+      todo: 'Fix the team name on the placement sheet to the official club name (e.g. "Hyannis Harbor Hawks").',
+    })
+  }
+  if (blind.length > 0) {
+    blind.sort()
+    findings.push({
+      severity: 'warning',
+      code: true,
+      what: `Summer schedules can’t be pulled for ${blind.join(', ')}. The MLB Stats API returned no teams.`,
+      how: `The ${season} team list for ${blind.length === 1 ? 'that league' : 'those leagues'} came back empty or failed, and SV clients are placed there.`,
+      todo: 'Check the league ids in api/_data/summerLeagues.ts against the MLB Stats API. The league may have moved or changed id.',
+    })
+  }
+  return findings
+}
+
+/** Players with at least one this-season game on the manual summer sheet. */
+function manualSheetPlayers(csv: string, season: number): Set<string> {
+  const rows = parseCsv(csv)
+  const out = new Set<string>()
+  if (rows.length < 2) return out
+  const header = rows[0]!.map((h) => h.trim().toLowerCase())
+  const col = (names: string[]) => names.map((n) => header.indexOf(n)).find((i) => i >= 0) ?? -1
+  const iPlayer = col(['player', 'player name', 'name'])
+  const iDate = col(['date'])
+  if (iPlayer < 0 || iDate < 0) return out
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r]!
+    const d = normalizeIsoDate((row[iDate] ?? '').trim())
+    if (!d.startsWith(`${season}-`)) continue
+    const n = normName(row[iPlayer] ?? '')
+    if (n) out.add(n)
+  }
+  return out
+}
+
+/** Team names from an MLB Stats API /teams call. null = request failed. */
+async function fetchMlbTeamNames(url: string): Promise<string[] | null> {
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' }, signal: AbortSignal.timeout(12_000) })
+    if (!res.ok) return null
+    const data = await res.json() as { teams?: Array<Record<string, unknown>> }
+    const names: string[] = []
+    for (const t of data.teams ?? []) {
+      for (const k of ['name', 'teamName', 'shortName', 'locationName', 'clubName', 'franchiseName']) {
+        const v = t[k]
+        if (typeof v === 'string' && v.trim()) names.push(v.trim())
+      }
+    }
+    return names
+  } catch {
+    return null
+  }
+}
+
+/** Arizona Fall League, mid-Sep to late Nov. The app finds fall clients on its
+ *  own by reading the six AFL club rosters from the MLB Stats API, so the only
+ *  thing to watch is that those rosters are actually there:
+ *   - from Sep 15: the six clubs exist for this season;
+ *   - from Oct 1 (games start early October): at least one roster has players.
+ *  Zero SV clients in the AFL is a normal year, not an alert. */
+async function checkAflRosters(now: Date, force: boolean): Promise<Finding[]> {
+  const season = now.getUTCFullYear()
+  let teams: Array<{ id: number; name: string }> = []
+  try {
+    const res = await fetch(`https://statsapi.mlb.com/api/v1/teams?sportId=17&season=${season}`, {
+      headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
+      signal: AbortSignal.timeout(12_000),
+    })
+    if (!res.ok) return [] // a flaky API response is covered by the daily MLB probe
+    const data = await res.json() as { teams?: Array<{ id: number; name: string; league?: { name?: string } }> }
+    teams = (data.teams ?? []).filter((t) => /arizona fall league/i.test(t.league?.name ?? ''))
+  } catch {
+    return []
+  }
+  if (teams.length === 0) {
+    return [{
+      severity: 'warning',
+      code: true,
+      what: 'Fall league clients won’t show in the Travel Hub. The MLB Stats API lists no Arizona Fall League clubs this year.',
+      how: `The ${season} team list for sportId 17 has no teams in a league named "Arizona Fall League", which is how the app finds the six clubs.`,
+      todo: 'Open `sv-travel-hub` in Claude Code and check fetchAflTeams in src/lib/mlbApi.ts. The league may have been renamed or moved to a new sport id. Until then, check the AFL rosters on mlb.com/arizona-fall-league for SV clients by hand.',
+    }]
+  }
+  if (!force && monthDay(now) < 1001) return []
+
+  const counts = await Promise.all(teams.map(async (t) => {
+    try {
+      const res = await fetch(`https://statsapi.mlb.com/api/v1/teams/${t.id}/roster?rosterType=fullRoster&season=${season}`, {
+        headers: { 'User-Agent': 'SVTravelHub/HealthMonitor' },
+        signal: AbortSignal.timeout(12_000),
+      })
+      if (!res.ok) return -1
+      const data = await res.json() as { roster?: unknown[] }
+      return (data.roster ?? []).length
+    } catch {
+      return -1
+    }
+  }))
+  if (counts.some((c) => c > 0)) return []
+  if (counts.every((c) => c < 0)) return [] // unreachable, not empty; the daily MLB probe owns outages
+  return [{
+    severity: 'warning',
+    code: false,
+    what: 'Fall league clients won’t show in the Travel Hub. The Arizona Fall League rosters are empty.',
+    how: `All ${teams.length} AFL club rosters on the MLB Stats API have no players, and fall league games are underway.`,
+    todo: 'MLB usually fills these by the first week of October. If it persists past mid-October, check the AFL rosters on mlb.com/arizona-fall-league for SV clients and let the team know who is playing where. If the rosters are there on mlb.com, it’s a code fix in assignAflPlayers (src/store/scheduleStore.ts).',
   }]
 }
 
@@ -686,13 +1019,15 @@ function parseCsv(text: string): string[][] {
 }
 
 function normalizeIsoDate(s: string): string {
-  // Accepts YYYY-MM-DD, M/D/YYYY, MM/DD/YYYY → YYYY-MM-DD
+  // Accepts YYYY-MM-DD, M/D/YYYY, MM/DD/YYYY, M/D/YY → YYYY-MM-DD. The Client
+  // Game Schedule sheet writes two-digit years ("5/5/26").
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})(?!\d)/)
   if (m) {
     const mm = m[1]!.padStart(2, '0')
     const dd = m[2]!.padStart(2, '0')
-    return `${m[3]}-${mm}-${dd}`
+    const yyyy = m[3]!.length === 2 ? `20${m[3]}` : m[3]
+    return `${yyyy}-${mm}-${dd}`
   }
   return s
 }
