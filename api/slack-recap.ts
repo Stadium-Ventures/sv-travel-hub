@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 // .js extension required: Vercel runs functions as strict node ESM.
 import { HEARTBEAT_SUMMARY_URL, heartbeatReadHeaders } from './_lib/heartbeatAuth.js'
+import { rosterCsvRequest, checkRowFloor } from './_lib/rosterSource.js'
 
 // SV Travel Hub — Weekly Slack recap.
 //
@@ -298,10 +299,13 @@ async function notifyAutomationOfRecapFailure(how: string, configIssue: boolean)
 // ─── Data loaders ────────────────────────────────────────────────────────────
 
 async function loadRoster(): Promise<RosterPlayer[]> {
-  const url = process.env.VITE_ROSTER_CSV_URL
-  if (!url) throw new Error('VITE_ROSTER_CSV_URL not configured')
-  const csv = await fetchText(url)
+  // ROSTER_SOURCE switch: sheet CSV, or sv-registry's sheet-shaped CSV door
+  // with the server-only service token. No fallback between them.
+  const req = rosterCsvRequest()
+  const csv = await fetchText(req.url, req.headers)
   const rows = parseCsv(csv)
+  const floorError = checkRowFloor(req.source, Math.max(0, rows.length - 1))
+  if (floorError) throw new Error(`Registry roster: ${floorError}`)
   if (rows.length < 2) return []
   const header = rows[0]!.map((h) => h.trim().toLowerCase())
   const col = (names: string[]) => names.map((n) => header.indexOf(n.toLowerCase())).find((i) => i >= 0) ?? -1
@@ -1088,7 +1092,7 @@ function buildBlocks(text: string): Array<{ type: 'section'; text: { type: 'mrkd
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
-async function fetchText(url: string): Promise<string> {
+async function fetchText(url: string, extraHeaders: Record<string, string> = {}): Promise<string> {
   // Google's published-CSV endpoint intermittently stalls a single request
   // while healthy — retry so one blip doesn't drop a recap section.
   let lastErr: unknown
@@ -1096,7 +1100,7 @@ async function fetchText(url: string): Promise<string> {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 500))
     try {
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'SVTravelHub/Slack-Recap' },
+        headers: { 'User-Agent': 'SVTravelHub/Slack-Recap', ...extraHeaders },
         signal: AbortSignal.timeout(10_000),
       })
       if (!res.ok) throw new Error(`fetchText ${url}: HTTP ${res.status}`)

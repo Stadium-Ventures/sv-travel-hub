@@ -5,6 +5,7 @@ import TripPlanner from './components/trips/TripPlanner'
 import MapView from './components/map/MapView'
 import DataTab from './components/data/DataTab'
 import HeartbeatSignIn from './components/auth/HeartbeatSignIn'
+import RegistrySignIn from './components/auth/RegistrySignIn'
 import { useSummerStore } from './store/summerStore'
 import { useRosterStore } from './store/rosterStore'
 import { useHeartbeatStore } from './store/heartbeatStore'
@@ -63,6 +64,7 @@ export default function App() {
     <ErrorBoundary>
       <AutoFetchData />
       <HeartbeatSignIn />
+      <RegistrySignIn />
       <AppShell>
         {{
           roster: <RosterDashboard />,
