@@ -9,6 +9,12 @@ import { describeRehabWindow } from '../../lib/rehab'
 import { resolveMLBTeamId } from '../../data/aliases'
 import { isHomeFor } from '../../lib/gameSide'
 
+// Contact card (DOB/Phone/Email/Father/Mother) is hidden until decision D4
+// lands: the roster load no longer carries contact data at all, and a future
+// gated contact door would populate player.contact on demand. Flip with
+// VITE_CONTACT_CARD=1 only once that door exists.
+const CONTACT_CARD_ENABLED = import.meta.env.VITE_CONTACT_CARD === '1'
+
 const TIER_COLORS: Record<number, string> = {
   1: 'bg-accent-blue/20 text-accent-blue',
   2: 'bg-accent-green/20 text-accent-green',
@@ -220,12 +226,15 @@ export default function PlayerCard({ player, showAffiliate, affiliate, affiliate
             <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm sm:grid-cols-3">
               <Detail label="State" value={player.state} />
               <Detail label="Draft Class" value={player.draftClass} />
-              <Detail label="DOB" value={player.dob} />
-              <Detail label="Age" value={player.age?.toString() ?? '-'} />
-              <Detail label="Phone" value={player.phone} />
-              <Detail label="Email" value={player.email} />
-              <Detail label="Father" value={player.father} />
-              <Detail label="Mother" value={player.mother} />
+              {CONTACT_CARD_ENABLED && player.contact && (
+                <>
+                  <Detail label="DOB" value={player.contact.dob ?? ''} />
+                  <Detail label="Phone" value={player.contact.phone ?? ''} />
+                  <Detail label="Email" value={player.contact.email ?? ''} />
+                  <Detail label="Father" value={player.contact.father ?? ''} />
+                  <Detail label="Mother" value={player.contact.mother ?? ''} />
+                </>
+              )}
             </div>
 
             {/* External profile links */}

@@ -27,14 +27,27 @@ export interface RosterPlayer {
   visitsCompleted: number
   lastVisitDate: string | null
   visitsRemaining: number // derived
-  dob: string
-  age: number | null
-  phone: string
-  email: string
-  father: string
-  mother: string
   status: string // e.g. 'Injured', 'Transferred', 'Drafted', or '' for active
+  /** Contact card. NEVER populated by the roster load (sheet or registry) and
+   *  never persisted: contact data is a separate grant from roster metadata
+   *  (decision D4, pending). Reserved for a future gated contact door that is
+   *  fetched on demand; the PlayerCard block that renders it is additionally
+   *  behind VITE_CONTACT_CARD=1. */
+  contact?: PlayerContact
 }
+
+export interface PlayerContact {
+  phone?: string
+  email?: string
+  father?: string
+  mother?: string
+  dob?: string
+}
+
+/** Fields that must never be written to browser storage. Used by the
+ *  sv-travel-roster persist migration to scrub snapshots written by builds
+ *  that still parsed the sheet's contact columns. */
+export const PII_PLAYER_KEYS = ['dob', 'age', 'phone', 'email', 'father', 'mother', 'contact'] as const
 
 // Statuses that exclude a player from trip generation
 export const INACTIVE_STATUSES = ['injured', 'transferred', 'drafted', 'out', 'inactive', 'released']
