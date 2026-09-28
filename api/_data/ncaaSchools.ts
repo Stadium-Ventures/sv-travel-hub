@@ -50,6 +50,7 @@ export const NCAA_ALIASES: Record<string, string[]> = {
   'Kentucky': ['University of Kentucky', 'Kentucky Wildcats'],
   'Miami': ['University of Miami', 'Miami (FL)', 'Miami Hurricanes'],
   'Portland': ['University of Portland', 'Portland Pilots'],
+  'South Alabama': ['University of South Alabama', 'USA', 'South Alabama Jaguars', 'Jaguars'],
 }
 
 // Reverse lookup: alias → canonical name
@@ -118,4 +119,5 @@ export const D1_BASEBALL_SLUGS: Record<string, string> = {
   'Kentucky': 'kentucky',
   'Miami': 'miamifl', // bare "miami" 404s on D1Baseball
   'Portland': 'portland',
+  'South Alabama': 'salabama',
 }
