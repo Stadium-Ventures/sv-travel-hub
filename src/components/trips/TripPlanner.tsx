@@ -268,6 +268,7 @@ export default function TripPlanner() {
   const setDateRange = useTripStore((s) => s.setDateRange)
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
+  const homeBase = useTripStore((s) => s.homeBase)
   const setHomeBase = useTripStore((s) => s.setHomeBase)
   const clearHomeBase = useTripStore((s) => s.clearHomeBase)
   const generateTrips = useTripStore((s) => s.generateTrips)
@@ -422,6 +423,10 @@ export default function TripPlanner() {
 
 
   const canGenerate = players.length > 0 && !computing
+  // Trips need a "from where": a Trip origin or a priority player to anchor
+  // around. Disable Generate and say so up front (Kent 2026-09-28 clicked it
+  // with no origin and got a red box telling him to load schedules).
+  const needsOrigin = !homeBase && priorityPlayers.length === 0
 
 
   function addPriorityPlayer(name: string) {
@@ -644,11 +649,15 @@ export default function TripPlanner() {
           </div>
           <button
             onClick={generateTrips}
-            disabled={!canGenerate || startDate > endDate}
+            disabled={!canGenerate || needsOrigin || startDate > endDate}
+            title={needsOrigin ? 'Pick a Trip origin first' : undefined}
             className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
           >
             {computing ? 'Computing...' : 'Generate Trips'}
           </button>
+          {needsOrigin && canGenerate && (
+            <span className="self-center text-xs text-accent-orange">Pick a Trip origin to generate trips</span>
+          )}
           {tripPlan && (
             <button
               onClick={clearTrips}
@@ -720,7 +729,7 @@ export default function TripPlanner() {
             (2026-07-21 apple-fy: five empty search boxes read as a form). */}
         <div className="mt-4 rounded-xl bg-gray-900/30 p-3">
           <label className="mb-2 block text-xs font-medium text-text-dim">
-            Priority players <span className="text-text-dim/50">(optional — guaranteed to appear in your trip results)</span>
+            Priority players <span className="text-text-dim/50">(optional, always included in your trip results)</span>
           </label>
           <div className="flex flex-wrap items-center gap-2">
             {priorityPlayers.map((name) => {
@@ -799,16 +808,22 @@ export default function TripPlanner() {
             {progressDetail && (
               <p className="mt-2 text-sm text-text-dim whitespace-pre-line">{progressDetail}</p>
             )}
-            <p className="mt-3 text-xs text-text-dim">
-              Trips need game schedules. Load them right here, or check the <strong>Schedule</strong> tab to see what's already loaded.
-            </p>
-            <button
-              onClick={handleLoadAllSchedules}
-              disabled={anyScheduleLoading}
-              className="mt-2 rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
-            >
-              {anyScheduleLoading ? 'Loading schedules...' : 'Load Schedules'}
-            </button>
+            {/* Schedule help only when schedules are the problem; an origin
+                block with "Load Schedules" under it sent Kent the wrong way. */}
+            {(progressStep === 'Error' || /schedule/i.test(progressDetail)) && (
+              <>
+                <p className="mt-3 text-xs text-text-dim">
+                  Trips need game schedules. Load them right here, or check the <strong>Schedule</strong> tab to see what's already loaded.
+                </p>
+                <button
+                  onClick={handleLoadAllSchedules}
+                  disabled={anyScheduleLoading}
+                  className="mt-2 rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
+                >
+                  {anyScheduleLoading ? 'Loading schedules...' : 'Load Schedules'}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

@@ -198,7 +198,11 @@ export const useTripStore = create<TripState>()(
     const kept = current.filter((n) => rosterNames.has(n))
     if (kept.length !== current.length) set({ priorityPlayers: kept })
   },
-  setHomeBase: (homeBase, homeBaseName) => set({ homeBase, homeBaseName }),
+  // Picking an origin clears a stale "Blocked" box from an earlier no-origin click.
+  setHomeBase: (homeBase, homeBaseName) => set((s) => ({
+    homeBase, homeBaseName,
+    ...(s.progressStep === 'Blocked' ? { progressStep: '', progressDetail: '' } : {}),
+  })),
   clearHomeBase: () => set({ homeBase: null, homeBaseName: '' }),
   setMaxNights: (maxNights: number) => set({ maxNights }),
   setPinnedGame: (pinnedGame) => set({ pinnedGame }),
@@ -283,10 +287,10 @@ export const useTripStore = create<TripState>()(
         const player = players.find((p) => p.playerName === pName)
         if (!player) continue
         if (player.level === 'Pro' && scheduleState.proGames.length === 0) {
-          missingSchedule.push(`${pName} (Pro) — click "Load Pro Schedules" first`)
+          missingSchedule.push(`${pName} (Pro): click "Load Pro Schedules" first`)
         }
         if (player.level === 'NCAA' && scheduleState.ncaaGames.length === 0) {
-          missingSchedule.push(`${pName} (NCAA) — click "Load College Schedules" first`)
+          missingSchedule.push(`${pName} (NCAA): click "Load College Schedules" first`)
         }
       }
       if (missingSchedule.length > 0) {
@@ -294,7 +298,7 @@ export const useTripStore = create<TripState>()(
           computing: false,
           tripPlan: null,
           progressStep: 'Blocked',
-          progressDetail: `Cannot generate trips — missing schedule data for priority player(s):\n${missingSchedule.join('\n')}`,
+          progressDetail: `Can't generate trips, missing schedule data for priority player(s):\n${missingSchedule.join('\n')}`,
         })
         return
       }
