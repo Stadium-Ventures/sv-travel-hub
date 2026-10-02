@@ -1,7 +1,16 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { RosterPlayer } from '../types/roster'
-import { fetchRoster } from '../lib/csv'
+import { fetchRoster as fetchSheetRoster } from '../lib/csv'
+import { getRosterSource, getRosterSourceOrNull, type RosterSource } from '../lib/rosterSource'
+import {
+  fetchRegistryRoster,
+  RosterAuthError,
+  DEFAULT_MIN_ROWS,
+  DEFAULT_REGISTRY_ROSTER_URL,
+} from '../lib/registryRoster'
+import { getIdToken } from '../lib/googleAuth'
+import { applyOverrides, pruneOverrides, overrideKeyForName, playerKey, type VisitOverride } from './rosterOverrides'
 import { useDiagnosticsStore } from './diagnosticsStore'
 import { ROSTER_PERSIST_VERSION, migrateRosterPersist, scrubPlayer } from './rosterPersist'
 // Cycles with the stores below (they import us) — safe under ESM because
@@ -12,11 +21,6 @@ import { useTripStore } from './tripStore'
 import { useRehabStore } from './rehabStore'
 import { useSummerStore } from './summerStore'
 
-interface VisitOverride {
-  visitsCompleted: number
-  lastVisitDate: string | null
-}
-
 export type SortField = 'playerName' | 'tier' | 'org' | 'daysSince'
 export type SortDir = 'asc' | 'desc'
 
@@ -25,8 +29,14 @@ interface RosterState {
   loading: boolean
   error: string | null
   lastFetchedAt: string | null
+  /** Which source produced `players` (null until the first successful load). */
+  source: RosterSource | null
+  /** Registry build time (_meta.generated_at). Null on the sheet source. */
+  generatedAt: string | null
+  /** Registry source only: no usable Google ID token, show the sign-in prompt. */
+  needsSignIn: boolean
   parseWarnings: string[]
-  visitOverrides: Record<string, VisitOverride> // playerName → override
+  visitOverrides: Record<string, VisitOverride> // playerKey (slug, else playerName) → override
   sortColumn: SortField
   sortDirection: SortDir
 
@@ -37,17 +47,17 @@ interface RosterState {
   setSortDirection: (dir: SortDir) => void
 }
 
-function applyOverrides(players: RosterPlayer[], overrides: Record<string, VisitOverride>): RosterPlayer[] {
-  return players.map((p) => {
-    const override = overrides[p.playerName]
-    if (!override) return p
-    return {
-      ...p,
-      visitsCompleted: override.visitsCompleted,
-      lastVisitDate: override.lastVisitDate,
-      visitsRemaining: Math.max(0, p.visitTarget2026 - override.visitsCompleted),
-    }
-  })
+/** Shown when the registry answers 401 to a fresh token. Plain text for Kent. */
+export const REGISTRY_REJECTED_MESSAGE =
+  'The registry turned down this sign-in (HTTP 401), so the roster could not load. Signing in again will not fix it. Tell Tom in #sv-automation. The app does not fall back to the sheet.'
+
+function registryUrl(): string {
+  return (import.meta.env.VITE_REGISTRY_ROSTER_URL as string | undefined) || DEFAULT_REGISTRY_ROSTER_URL
+}
+
+function minRows(): number {
+  const n = parseInt((import.meta.env.VITE_ROSTER_MIN_ROWS as string | undefined) ?? '', 10)
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MIN_ROWS
 }
 
 export const useRosterStore = create<RosterState>()(
@@ -57,6 +67,9 @@ export const useRosterStore = create<RosterState>()(
       loading: false,
       error: null,
       lastFetchedAt: null,
+      source: null,
+      generatedAt: null,
+      needsSignIn: false,
       parseWarnings: [],
       visitOverrides: {},
       sortColumn: 'tier',
@@ -65,24 +78,37 @@ export const useRosterStore = create<RosterState>()(
       fetchRoster: async () => {
         if (get().loading) return
         set({ loading: true, error: null, parseWarnings: [] })
+        let source: RosterSource | null = null
         try {
-          const result = await fetchRoster()
+          source = getRosterSource()
+          // ROSTER_SOURCE switch. The registry branch NEVER falls back to the
+          // sheet: a failure keeps the previous roster and shows the error.
+          const result = source === 'registry'
+            ? await fetchRegistryRoster({ url: registryUrl(), getToken: getIdToken, minRows: minRows() })
+            : { ...(await fetchSheetRoster()), generatedAt: null }
           // Zero players from a "successful" fetch is a failure in disguise
           // (wrong document, shifted columns). Keep whatever roster we had
           // and surface the problem instead of stamping a fresh timestamp.
           if (result.players.length === 0) {
-            set({ loading: false, error: 'Roster sheet parsed to 0 players — sheet unreachable or columns changed' })
+            set({ loading: false, error: source === 'registry'
+              ? 'Registry roster returned 0 players'
+              : 'Roster sheet parsed to 0 players — sheet unreachable or columns changed' })
             return
           }
           // Prune stale visitOverrides for players no longer on the roster
-          const currentNames = new Set(result.players.map((p) => p.playerName))
-          const existingOverrides = get().visitOverrides
-          const prunedOverrides: Record<string, VisitOverride> = {}
-          for (const [name, override] of Object.entries(existingOverrides)) {
-            if (currentNames.has(name)) prunedOverrides[name] = override
-          }
+          // (and move name-keyed ones onto the slug when the registry has one).
+          const prunedOverrides = pruneOverrides(get().visitOverrides, result.players)
           const players = applyOverrides(result.players, prunedOverrides)
-          set({ players, loading: false, lastFetchedAt: new Date().toISOString(), parseWarnings: result.warnings, visitOverrides: prunedOverrides })
+          set({
+            players,
+            loading: false,
+            lastFetchedAt: new Date().toISOString(),
+            source,
+            generatedAt: result.generatedAt,
+            needsSignIn: false,
+            parseWarnings: result.warnings,
+            visitOverrides: prunedOverrides,
+          })
 
           // Removed from the master sheet = removed from the app (Tom
           // 2026-08-17). Persisted names outlive the roster otherwise —
@@ -108,19 +134,45 @@ export const useRosterStore = create<RosterState>()(
             }
           }
         } catch (e) {
+          if (e instanceof RosterAuthError) {
+            if (e.status === 401) {
+              // The registry rejected a token we thought was fresh. That is a
+              // configuration problem (OAuth origin, audience, consumer entry),
+              // not a stale sign-in, so do NOT drop the token or re-prompt:
+              // with One Tap auto-select that re-signed and refetched in a
+              // loop. Show the error and stop; the sheet is not a fallback.
+              const message = REGISTRY_REJECTED_MESSAGE
+              set({ loading: false, needsSignIn: false, error: message })
+              useDiagnosticsStore.getState().addIssue({ level: 'error', source: 'roster', message })
+              return
+            }
+            // No usable token yet: show the sign-in bar.
+            set({ loading: false, needsSignIn: true, error: e.message })
+            return
+          }
           set({ loading: false, error: e instanceof Error ? e.message : 'Unknown error' })
+          if (source === 'registry') {
+            useDiagnosticsStore.getState().addIssue({
+              level: 'error',
+              source: 'roster',
+              message: `Registry roster load failed (no sheet fallback): ${e instanceof Error ? e.message : String(e)}`,
+            })
+          }
         }
       },
 
       setVisitOverride: (playerName, visitsCompleted, lastVisitDate) => {
-        const overrides = { ...get().visitOverrides, [playerName]: { visitsCompleted, lastVisitDate } }
+        const key = overrideKeyForName(get().players, playerName)
+        const overrides = { ...get().visitOverrides, [key]: { visitsCompleted, lastVisitDate } }
         const players = applyOverrides(get().players, overrides)
         set({ visitOverrides: overrides, players })
       },
 
       clearVisitOverride: (playerName) => {
         const overrides = { ...get().visitOverrides }
+        const p = get().players.find((x) => x.playerName === playerName)
         delete overrides[playerName]
+        if (p) delete overrides[playerKey(p)]
         set({ visitOverrides: overrides })
       },
 
@@ -134,7 +186,10 @@ export const useRosterStore = create<RosterState>()(
       partialize: (state) => ({
         // Defence in depth: RosterPlayer no longer carries contact fields, but
         // scrub anyway so a future field can't quietly land in localStorage.
-        players: state.players.map(scrubPlayer),
+        // Registry source: never persist the roster. The door answers
+        // `private, no-store` and the SOP says not to cache it beyond a few
+        // minutes, so a signed-out browser must not keep a copy.
+        players: getRosterSourceOrNull() === 'registry' ? [] : state.players.map(scrubPlayer),
         lastFetchedAt: state.lastFetchedAt,
         visitOverrides: state.visitOverrides,
         sortColumn: state.sortColumn,
@@ -145,7 +200,9 @@ export const useRosterStore = create<RosterState>()(
         return {
           ...current,
           ...(p ?? {}),
-          players: p?.players ?? [],
+          // Registry source starts empty: a snapshot left by the sheet build
+          // must not paint as if it came from the registry.
+          players: getRosterSourceOrNull() === 'registry' ? [] : (p?.players ?? []),
           visitOverrides: p?.visitOverrides ?? {},
           sortColumn: p?.sortColumn ?? 'tier',
           sortDirection: p?.sortDirection ?? 'asc',

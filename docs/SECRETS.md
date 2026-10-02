@@ -22,6 +22,11 @@ visible in the shipped bundle — treat them as public.
 | `VITE_HEARTBEAT_SIGN_IN` | Config, not secret. `1` loads Google sign-in on page load so the browser sends the viewer's Google ID token to Heartbeat before Heartbeat enforces. Unset: sign-in only appears once Heartbeat answers 401. | Set in Vercel env, then redeploy (build-time). Needs `https://sv-travel-hub.vercel.app` as an Authorized JavaScript origin on the sv-registry OAuth client. |
 | `VITE_EVENTS_CSV_URL`, `VITE_ROSTER_CSV_URL`, `VITE_SCHEDULE_CSV_URL`, `VITE_SUMMER_CSV_URL`, `VITE_SUMMER_MANUAL_CSV_URL` | Published-CSV URLs of source Google Sheets | Google Sheets → File → Share → Publish to web → CSV. Unlisted but not truly secret. |
 | `VITE_CONTACT_CARD` | Feature flag (config, not secret). Leave unset. Shows the roster contact card only if a future gated contact door populates it (decision D4). | n/a |
+| `VITE_ROSTER_SOURCE` | Roster switch (config, not secret): `sheet` (default) or `registry`. Read by the browser AND the crons. Build-time for the browser, so changing it needs a redeploy. | Set directly in Vercel env |
+| `VITE_REGISTRY_ROSTER_URL` | sv-registry roster projection door (config). Default `https://sv-registry.vercel.app/api/roster-projection`. | Set directly in Vercel env (optional) |
+| `VITE_ROSTER_MIN_ROWS` | Fail-closed floor for the registry roster (config). Default 50. | Set directly in Vercel env (optional) |
+| `VITE_GOOGLE_CLIENT_ID` | Google Identity Services client for sign-in (public id, not a secret). Defaults to sv-registry's client, which the registry's `aud` check requires. | sv-registry `api/_lib/auth.js` `CLIENT_ID` |
+| `SV_REGISTRY_ROSTER_TOKEN` | **Secret. Server-only.** Lets the crons (`/api/slack-recap`, `/api/health-monitor`) read the registry roster when `VITE_ROSTER_SOURCE=registry`. Never prefix with `VITE_` (that ships it to every browser) and never commit it: this repo is public. | sv-registry owner runs `node scripts/mint-service-token.cjs mint sv-travel-hub --scopes read:roster-projection` (plaintext shown once), then sets it in Vercel → Production (Sensitive). Rotate = revoke + mint. |
 
 GitHub Actions secrets (repo → Settings → Secrets and variables → Actions),
 used by `.github/workflows/health-deadman.yml`:

@@ -16,6 +16,8 @@ export default function RosterDashboard() {
   const loading = useRosterStore((s) => s.loading)
   const error = useRosterStore((s) => s.error)
   const lastFetchedAt = useRosterStore((s) => s.lastFetchedAt)
+  const rosterSource = useRosterStore((s) => s.source)
+  const generatedAt = useRosterStore((s) => s.generatedAt)
   const parseWarnings = useRosterStore((s) => s.parseWarnings)
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
 
@@ -244,6 +246,14 @@ export default function RosterDashboard() {
             <span className="text-text-dim">{playerCount} players</span>
           </div>
           <div className="flex items-center gap-2 ml-auto">
+            {rosterSource === 'registry' && (
+              <span
+                className={`text-xs ${generatedAt && Date.now() - new Date(generatedAt).getTime() > 48 * 3600_000 ? 'text-accent-orange' : 'text-text-dim/60'}`}
+                title="Roster comes from sv-registry's roster projection. This is when the registry last rebuilt it; a stale time is a registry problem to report in #sv-automation, not something to fix in the sheet."
+              >
+                Registry roster as of {generatedAt ? new Date(generatedAt).toLocaleString() : 'unknown'}
+              </span>
+            )}
             {lastFetchedAt && (
               <span className="text-xs text-text-dim/60">
                 Updated {new Date(lastFetchedAt).toLocaleTimeString()}
@@ -253,7 +263,9 @@ export default function RosterDashboard() {
               onClick={fetchRoster}
               disabled={loading}
               className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-text-dim hover:text-text hover:border-accent-blue transition-colors disabled:opacity-50"
-              title="Pull the latest player list from the Google Sheet (names, orgs, tiers)"
+              title={rosterSource === 'registry'
+                ? 'Pull the latest player list from sv-registry (names, orgs, tiers)'
+                : 'Pull the latest player list from the Google Sheet (names, orgs, tiers)'}
             >
               {loading ? (
                 <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />

@@ -6,6 +6,11 @@ export interface Coordinates {
 export type PlayerLevel = 'Pro' | 'NCAA' | 'HS'
 
 export interface RosterPlayer {
+  /** sv-registry slug: the stable join key. Always set on the registry
+   *  source; set on the sheet source only if the CSV carries a `slug` column
+   *  (the registry's sheet-shaped CSV does, the legacy sheet does not). */
+  slug?: string
+  /** Display name only. Do not join on it where a slug or MLBAM id exists. */
   playerName: string
   normalizedName: string
   org: string
