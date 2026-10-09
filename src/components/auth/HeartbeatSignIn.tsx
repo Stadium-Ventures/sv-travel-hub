@@ -5,11 +5,11 @@ import { useHeartbeatStore } from '../../store/heartbeatStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { getRosterSourceOrNull } from '../../lib/rosterSource'
 
-/** Heartbeat access bar. Renders nothing while Heartbeat answers normally
- *  (today, and through heartbeat's observe window). When Heartbeat answers
- *  401 with no token it offers Google sign-in; when it turns down a token it
- *  says so and stops (no re-prompt, no retry loop). A new token triggers one
- *  refetch only if the last fetch went out without one. */
+/** Heartbeat access bar. Renders nothing while Heartbeat answers normally.
+ *  With no token the store skips Heartbeat and this offers Google sign-in;
+ *  when Heartbeat turns down a token it says so and stops (no re-prompt, no
+ *  retry loop). A new token triggers one refetch only if the last fetch went
+ *  out without one. */
 export default function HeartbeatSignIn() {
   const authState = useHeartbeatStore((s) => s.authState)
   // On the registry roster source the roster's own sign-in bar is showing

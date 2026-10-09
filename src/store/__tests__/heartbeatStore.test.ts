@@ -66,15 +66,15 @@ describe('heartbeatAuth helpers', () => {
 })
 
 describe('heartbeatStore.fetchHeartbeat credentials', () => {
-  it('signed out: sends the same credential-less requests as before (no-op)', async () => {
+  it('signed out: does not call Heartbeat, asks for sign-in instead', async () => {
     const calls = stubFetch(() => 200)
     await useHeartbeatStore.getState().fetchHeartbeat()
-    expect(calls).toHaveLength(3)
-    for (const c of calls) expect(authHeader(c)).toBeUndefined()
+    expect(calls).toHaveLength(0)
     const s = useHeartbeatStore.getState()
-    expect(s.authState).toBe('ok')
+    expect(s.authState).toBe('signed-out')
     expect(s.lastFetchSentToken).toBe(false)
-    expect(s.error).toBeNull()
+    expect(s.error).toMatch(/sign in/)
+    expect(s.loading).toBe(false)
   })
 
   it('signed in: sends the Google ID token as Bearer on all three calls', async () => {
@@ -87,21 +87,12 @@ describe('heartbeatStore.fetchHeartbeat credentials', () => {
     expect(useHeartbeatStore.getState().lastFetchSentToken).toBe(true)
   })
 
-  it('an expired token is not sent', async () => {
+  it('an expired token is not sent, and Heartbeat is not called', async () => {
     __setIdTokenForTests(fakeJwt({ exp: 1 }))
     const calls = stubFetch(() => 200)
     await useHeartbeatStore.getState().fetchHeartbeat()
-    for (const c of calls) expect(authHeader(c)).toBeUndefined()
-  })
-
-  it('401 with no token: asks for sign-in, one request per endpoint (no retry)', async () => {
-    const calls = stubFetch(() => 401)
-    await useHeartbeatStore.getState().fetchHeartbeat()
-    expect(calls).toHaveLength(3)
-    const s = useHeartbeatStore.getState()
-    expect(s.authState).toBe('signed-out')
-    expect(s.error).toMatch(/sign in/)
-    expect(s.loading).toBe(false)
+    expect(calls).toHaveLength(0)
+    expect(useHeartbeatStore.getState().authState).toBe('signed-out')
   })
 
   it('401 with a fresh token: shows the error and KEEPS the token (no One Tap re-sign loop)', async () => {
@@ -116,8 +107,8 @@ describe('heartbeatStore.fetchHeartbeat credentials', () => {
     expect(peekIdToken()).toBe(t)
   })
 
-  it('recovers to ok on the next good answer', async () => {
-    stubFetch(() => 401)
+  it('recovers to ok once the viewer signs in', async () => {
+    stubFetch(() => 200)
     await useHeartbeatStore.getState().fetchHeartbeat()
     expect(useHeartbeatStore.getState().authState).toBe('signed-out')
     vi.unstubAllGlobals()

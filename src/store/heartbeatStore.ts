@@ -162,12 +162,18 @@ export const useHeartbeatStore = create<HeartbeatState>()(
       fetchHeartbeat: async () => {
         if (get().loading) return
         set({ loading: true, error: null })
-        // Viewer's Google ID token when signed in; otherwise the same
-        // credential-less request as before (heartbeat's observe window).
+        // Viewer's Google ID token when signed in. Heartbeat enforces sign-in,
+        // so with no token don't call it at all: a credential-less request is
+        // always a 401, and it shows up in Heartbeat's health check as a caller
+        // being turned away. Go straight to the sign-in bar instead.
         // peekIdToken never loads Google sign-in on its own.
         const token = peekIdToken()
-        const init = heartbeatRequestInit(token)
         set({ lastFetchSentToken: !!token })
+        if (!token) {
+          set({ loading: false, authState: 'signed-out', error: heartbeatAuthMessage('signed-out') })
+          return
+        }
+        const init = heartbeatRequestInit(token)
         try {
           const [priorityRes, summaryRes, visitCountsRes] = await Promise.all([
             fetchWithRetry(`${HEARTBEAT_BASE}/visit-priority`, init),
