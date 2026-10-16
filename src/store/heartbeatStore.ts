@@ -124,24 +124,54 @@ function buildLookups(players: HeartbeatPlayer[], priorities: HeartbeatPriority[
 // Apply visit counts from Heartbeat as overrides to the roster store
 // Uses calendarYear as visitsCompleted for the current year
 // Deferred to avoid calling before roster is loaded
+let pendingVisitApply: (() => void) | null = null
 function _applyVisitCountsToRoster(visitCounts: Record<string, VisitCount>) {
   // Defer to next tick so roster store is fully initialized
   setTimeout(() => {
     import('./rosterStore').then(({ useRosterStore }) => {
-      const rosterState = useRosterStore.getState()
-      const players = rosterState.players
-      if (players.length === 0) return
+      // A newer Heartbeat fetch replaces any apply still waiting on the roster.
+      pendingVisitApply?.()
+      pendingVisitApply = null
 
-      for (const vc of Object.values(visitCounts)) {
-        const player = players.find((p) => normalizeName(p.playerName) === normalizeName(vc.name))
-        if (!player) continue
-        if (vc.calendarYear > 0 || vc.lastVisitDate) {
-          const heartbeatDate = vc.lastVisitDate ? vc.lastVisitDate.split('T')[0] ?? null : null
-          rosterState.setVisitOverride(player.playerName, vc.calendarYear, heartbeatDate)
+      const apply = () => {
+        const rosterState = useRosterStore.getState()
+        const players = rosterState.players
+        for (const vc of Object.values(visitCounts)) {
+          const player = players.find((p) => normalizeName(p.playerName) === normalizeName(vc.name))
+          if (!player) continue
+          if (vc.calendarYear > 0 || vc.lastVisitDate) {
+            const heartbeatDate = vc.lastVisitDate ? vc.lastVisitDate.split('T')[0] ?? null : null
+            rosterState.setVisitOverride(player.playerName, vc.calendarYear, heartbeatDate)
+          }
         }
       }
+
+      if (useRosterStore.getState().players.length > 0) {
+        apply()
+        return
+      }
+      // Roster not loaded yet (the registry source starts empty and waits for
+      // sign-in, and Heartbeat can answer first). Apply once players arrive
+      // instead of dropping this fetch's counts.
+      const unsubscribe = useRosterStore.subscribe((s) => {
+        if (s.players.length === 0) return
+        unsubscribe()
+        pendingVisitApply = null
+        apply()
+      })
+      pendingVisitApply = unsubscribe
     })
   }, 100)
+}
+
+/** Whether a newly arrived Google credential should refetch Heartbeat: the
+ *  last attempt went out without a token, or went out with one and failed for
+ *  a reason other than access (outage, timeout). Never after Heartbeat turned
+ *  a token down ('denied'): that is configuration, and refetching on every
+ *  One Tap credential would loop. */
+export function shouldRefetchOnSignIn(s: Pick<HeartbeatState, 'loading' | 'authState' | 'lastFetchSentToken' | 'error'>): boolean {
+  if (s.loading || s.authState === 'denied') return false
+  return !s.lastFetchSentToken || s.error !== null
 }
 
 export const useHeartbeatStore = create<HeartbeatState>()(
@@ -223,8 +253,14 @@ export const useHeartbeatStore = create<HeartbeatState>()(
           // Auto-apply visit counts to roster
           _applyVisitCountsToRoster(visitCounts)
         } catch (e) {
+          // This attempt carried a token and failed for a non-auth reason, so
+          // it is not a sign-in problem: drop any 'signed-out' state left from
+          // an earlier token-less attempt (that bar would keep offering a
+          // sign-in that changes nothing). The outage shows as stale Heartbeat
+          // in the status pill, and the next credential or page load retries.
           set({
             loading: false,
+            authState: 'ok',
             error: e instanceof Error ? e.message : 'Failed to fetch heartbeat data',
           })
         }

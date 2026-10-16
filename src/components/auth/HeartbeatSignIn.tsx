@@ -1,23 +1,22 @@
-import { useEffect, useRef, useState } from 'react'
-import { initGoogleAuth, onAuthChange, peekIdToken, renderSignInButton } from '../../lib/googleAuth'
+import { useEffect } from 'react'
+import { initGoogleAuth, onAuthChange, peekIdToken } from '../../lib/googleAuth'
 import { proactiveSignInEnabled } from '../../lib/heartbeatAuth'
-import { useHeartbeatStore } from '../../store/heartbeatStore'
+import { shouldRefetchOnSignIn, useHeartbeatStore } from '../../store/heartbeatStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { getRosterSourceOrNull } from '../../lib/rosterSource'
+import GoogleSignInButton from './GoogleSignInButton'
 
 /** Heartbeat access bar. Renders nothing while Heartbeat answers normally.
  *  With no token the store skips Heartbeat and this offers Google sign-in;
  *  when Heartbeat turns down a token it says so and stops (no re-prompt, no
- *  retry loop). A new token triggers one refetch only if the last fetch went
- *  out without one. */
+ *  retry loop). A new token refetches when the last fetch went out without
+ *  one, or went out with one and failed for a reason other than access. */
 export default function HeartbeatSignIn() {
   const authState = useHeartbeatStore((s) => s.authState)
   // On the registry roster source the roster's own sign-in bar is showing
   // while it needs a token; one sign-in serves both, so don't show two.
   const rosterBarShowing = useRosterStore((s) => s.needsSignIn) && getRosterSourceOrNull() === 'registry'
   const error = useHeartbeatStore((s) => s.error)
-  const [buttonFailed, setButtonFailed] = useState(false)
-  const buttonRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (proactiveSignInEnabled(import.meta.env.VITE_HEARTBEAT_SIGN_IN as string | undefined)) {
@@ -25,26 +24,16 @@ export default function HeartbeatSignIn() {
     }
     return onAuthChange(() => {
       const hb = useHeartbeatStore.getState()
-      if (peekIdToken() && !hb.lastFetchSentToken) void hb.fetchHeartbeat()
+      if (peekIdToken() && shouldRefetchOnSignIn(hb)) void hb.fetchHeartbeat()
     })
   }, [])
-
-  useEffect(() => {
-    if (authState !== 'signed-out' || !buttonRef.current) return
-    let cancelled = false
-    void renderSignInButton(buttonRef.current).then((ok) => { if (!cancelled) setButtonFailed(!ok) })
-    return () => { cancelled = true }
-  }, [authState])
 
   if (authState === 'ok' || (authState === 'signed-out' && rosterBarShowing)) return null
   return (
     <div className="flex flex-wrap items-center gap-3 border-b border-border bg-surface px-5 py-3 text-sm" role="alert">
       <span className={authState === 'denied' ? 'text-accent-orange' : 'text-text'}>{error}</span>
-      {authState === 'signed-out' && <div ref={buttonRef} />}
-      {authState === 'signed-out' && buttonFailed && (
-        <span className="text-xs text-accent-red">
-          Google sign-in could not load (blocked script or network). Heartbeat data stays paused.
-        </span>
+      {authState === 'signed-out' && (
+        <GoogleSignInButton unavailableNote="Heartbeat data stays paused." />
       )}
     </div>
   )

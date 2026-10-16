@@ -78,13 +78,26 @@ function handleCredential(resp: GisCredentialResponse) {
   notify()
 }
 
+/** How long to wait for the GIS script before calling it failed. */
+export const GIS_SCRIPT_TIMEOUT_MS = 15_000
+
 function loadScript(): Promise<void> {
   if (window.google?.accounts?.id) return Promise.resolve()
   return new Promise((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(`script[src="${GIS_SRC}"]`)
     const s = existing ?? document.createElement('script')
-    s.addEventListener('load', () => resolve(), { once: true })
-    s.addEventListener('error', () => reject(new Error('Google sign-in script failed to load')), { once: true })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const fail = (why: string) => {
+      clearTimeout(timer)
+      // A tag whose load failed never fires load/error again, so a retry that
+      // found it would wait forever. Remove it so the next attempt starts a
+      // fresh download (retry without reloading the page).
+      s.remove()
+      reject(new Error(why))
+    }
+    timer = setTimeout(() => fail('Google sign-in script timed out'), GIS_SCRIPT_TIMEOUT_MS)
+    s.addEventListener('load', () => { clearTimeout(timer); resolve() }, { once: true })
+    s.addEventListener('error', () => fail('Google sign-in script failed to load'), { once: true })
     if (!existing) {
       s.src = GIS_SRC
       s.async = true
@@ -95,14 +108,15 @@ function loadScript(): Promise<void> {
 }
 
 /** Load GIS once and initialise it. Resolves null (never rejects) so a
- *  blocked script shows as "not signed in" rather than crashing the page. */
+ *  blocked script shows as "not signed in" rather than crashing the page.
+ *  A failure is not cached: the next call tries again. */
 export function initGoogleAuth(): Promise<GisId | null> {
   if (typeof window === 'undefined') return Promise.resolve(null)
   if (!initPromise) {
     initPromise = loadScript()
       .then(() => {
         const gis = window.google?.accounts?.id ?? null
-        if (!gis) return null
+        if (!gis) throw new Error('Google sign-in script loaded but did not set up')
         gis.initialize({
           client_id: clientId(),
           callback: handleCredential,
