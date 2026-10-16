@@ -33,27 +33,28 @@ describe('heartbeatAccessFinding', () => {
     expect(heartbeatAccessFinding({ status: null, svAuth: null }, base)).toBeNull()
   })
 
-  it('401 with no token: lockout, tells you to set HEARTBEAT_READ_TOKEN, every run', () => {
+  it('401 with no token: lockout, tells you to add the read key, every run', () => {
     const f = heartbeatAccessFinding({ status: 401, svAuth: 'denied (no credential)' }, base)
     expect(f).not.toBeNull()
+    expect(f!.title).toBe('Travel Hub is locked out of Heartbeat')
     expect(f!.what).toMatch(/locked out of Heartbeat/)
-    expect(f!.how).toMatch(/HTTP 401.*not set/)
-    expect(f!.todo).toMatch(/HEARTBEAT_READ_TOKEN/)
-    expect(f!.todo).toMatch(/no VITE_ prefix/)
+    expect(f!.how).toMatch(/turned the health check away.*no Heartbeat read key set/)
+    expect(f!.todo).toMatch(/add the Heartbeat read key/)
+    expect(f!.todo).toMatch(/server-only, marked Sensitive/)
     expect(f!.todo).toContain(ENV_URL)
     expect(f!.code).toBe(false)
   })
 
-  it('401 with a token set: says the value does not match', () => {
+  it('401 with a token set: says the key does not match', () => {
     const f = heartbeatAccessFinding({ status: 401, svAuth: null }, { ...base, tokenSet: true })
-    expect(f!.how).toMatch(/even though HEARTBEAT_READ_TOKEN is set/)
+    expect(f!.how).toMatch(/even though Travel Hub has a Heartbeat read key/)
     expect(f!.todo).toMatch(/^Re-copy/)
   })
 
-  it('403: points at the heartbeat read-token path list', () => {
+  it('403: points at what Heartbeat lets read keys fetch', () => {
     const f = heartbeatAccessFinding({ status: 403, svAuth: null }, { ...base, tokenSet: true })
-    expect(f!.how).toMatch(/403/)
-    expect(f!.todo).toMatch(/READ_TOKEN_PATHS/)
+    expect(f!.how).toMatch(/recognized Travel Hub's read key/)
+    expect(f!.todo).toMatch(/sv-heartbeat in Claude Code/)
   })
 
   it('observe-mode would-401: weekly heads-up only', () => {
@@ -61,7 +62,7 @@ describe('heartbeatAccessFinding', () => {
     expect(heartbeatAccessFinding(probe, base)).toBeNull()
     const f = heartbeatAccessFinding(probe, { ...base, weekly: true })
     expect(f!.what).toMatch(/will lock Travel Hub out/)
-    expect(f!.how).toMatch(/no read token/)
+    expect(f!.how).toMatch(/carry no read key/)
     const g = heartbeatAccessFinding({ status: 200, svAuth: 'would-401: unknown bearer' }, { ...base, weekly: true, tokenSet: true })
     expect(g!.how).toMatch(/would be refused/)
   })
