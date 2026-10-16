@@ -808,9 +808,10 @@ export default function TripPlanner() {
             {progressDetail && (
               <p className="mt-2 text-sm text-text-dim whitespace-pre-line">{progressDetail}</p>
             )}
-            {/* Schedule help only when schedules are the problem; an origin
-                block with "Load Schedules" under it sent Kent the wrong way. */}
-            {(progressStep === 'Error' || /schedule/i.test(progressDetail)) && (
+            {/* Schedule help only when schedules are the problem (or aren't
+                loaded yet); an origin block with "Load Schedules" under it
+                and every schedule loaded sent Kent the wrong way. */}
+            {(progressStep === 'Error' || /schedule/i.test(progressDetail) || !allSchedulesLoaded) && (
               <>
                 <p className="mt-3 text-xs text-text-dim">
                   Trips need game schedules. Load them right here, or check the <strong>Schedule</strong> tab to see what's already loaded.

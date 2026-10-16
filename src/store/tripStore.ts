@@ -230,6 +230,35 @@ export const useTripStore = create<TripState>()(
     if (get().computing) return
     const { startDate, endDate, maxDriveMinutes, maxFlightHours, priorityPlayers, useHeartbeatBoost, maxNights, pinnedGame } = get()
     let { homeBase, homeBaseName } = get()
+    const players = useRosterStore.getState().players
+    let scheduleState = useScheduleStore.getState()
+
+    // BLOCK: Refuse to generate if priority player schedule data is missing.
+    // Checked before the origin: with schedules not loaded there is no game
+    // to anchor around either, and "pick an origin" would send Kent the wrong
+    // way.
+    if (priorityPlayers.length > 0) {
+      const missingSchedule: string[] = []
+      for (const pName of priorityPlayers) {
+        const player = players.find((p) => p.playerName === pName)
+        if (!player) continue
+        if (player.level === 'Pro' && scheduleState.proGames.length === 0) {
+          missingSchedule.push(`${pName} (Pro): click "Load Pro Schedules" first`)
+        }
+        if (player.level === 'NCAA' && scheduleState.ncaaGames.length === 0) {
+          missingSchedule.push(`${pName} (NCAA): click "Load College Schedules" first`)
+        }
+      }
+      if (missingSchedule.length > 0) {
+        set({
+          computing: false,
+          tripPlan: null,
+          progressStep: 'Blocked',
+          progressDetail: `Can't generate trips, missing schedule data for priority player(s):\n${missingSchedule.join('\n')}`,
+        })
+        return
+      }
+    }
 
     // Origin scrapped (Tom 2026-07-22): with priority players set, anchor
     // the engine at the FIRST priority player's earliest in-range game —
@@ -238,8 +267,7 @@ export const useTripStore = create<TripState>()(
     // trip" on a specific row) overrides that: anchor at the PINNED game's
     // venue so the clicked game is always inside the drive radius.
     if (priorityPlayers.length > 0) {
-      const ss = useScheduleStore.getState()
-      const pool = [...ss.proGames, ...ss.ncaaGames, ...ss.hsGames]
+      const pool = [...scheduleState.proGames, ...scheduleState.ncaaGames, ...scheduleState.hsGames]
       const anchorGame =
         (pinnedGame
           ? pool.find((g) =>
@@ -263,46 +291,24 @@ export const useTripStore = create<TripState>()(
     }
     // No origin at all — the origin starts unset (no pre-set default), and
     // without either a base or a priority-player anchor the engine has no
-    // "from where". Block with the fix instead of guessing a city.
+    // "from where". Block with the fix instead of guessing a city. With a
+    // priority player set, the real cause is that they have no game in the
+    // date range to anchor around, so say that.
     if (!homeBase) {
       set({
         computing: false,
         tripPlan: null,
         progressStep: 'Blocked',
-        progressDetail: 'Pick a Trip origin (or add a priority player to anchor around) before generating trips.',
+        progressDetail: priorityPlayers.length > 0
+          ? `${priorityPlayers[0]} has no games loaded between ${startDate} and ${endDate}, so there is nothing to build the trip around. Change the dates, or pick a Trip origin.`
+          : 'Pick a Trip origin (or add a priority player to anchor around) before generating trips.',
       })
       return
     }
     const base: Coordinates = homeBase
     const baseName = homeBaseName || 'trip start'
-    const players = useRosterStore.getState().players
-    let scheduleState = useScheduleStore.getState()
 
     set({ computing: true, tripPlan: null, progressStep: 'Preparing...', progressDetail: '' })
-
-    // BLOCK: Refuse to generate if priority player schedule data is missing
-    if (priorityPlayers.length > 0) {
-      const missingSchedule: string[] = []
-      for (const pName of priorityPlayers) {
-        const player = players.find((p) => p.playerName === pName)
-        if (!player) continue
-        if (player.level === 'Pro' && scheduleState.proGames.length === 0) {
-          missingSchedule.push(`${pName} (Pro): click "Load Pro Schedules" first`)
-        }
-        if (player.level === 'NCAA' && scheduleState.ncaaGames.length === 0) {
-          missingSchedule.push(`${pName} (NCAA): click "Load College Schedules" first`)
-        }
-      }
-      if (missingSchedule.length > 0) {
-        set({
-          computing: false,
-          tripPlan: null,
-          progressStep: 'Blocked',
-          progressDetail: `Can't generate trips, missing schedule data for priority player(s):\n${missingSchedule.join('\n')}`,
-        })
-        return
-      }
-    }
 
     // Pre-flight check: warn immediately if priority players have no drivable games
     if (priorityPlayers.length > 0) {
