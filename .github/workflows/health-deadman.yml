@@ -42,7 +42,8 @@ jobs:
             -H "Authorization: Bearer $CRON_SECRET" \
             "https://sv-travel-hub.vercel.app/api/health-monitor?dryRun=1" || echo "000")
           echo "HTTP $status"
-          cat /tmp/body.json 2>/dev/null || true
+          # Count only: this repo is public and findings can name clients.
+          jq -r '"findings: \(.findings | length)"' /tmp/body.json 2>/dev/null || echo "body was not JSON"
           if [ "$status" = "200" ]; then
             echo "Health monitor alive — checks ran. Staying silent."
             exit 0
