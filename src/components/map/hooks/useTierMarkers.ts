@@ -52,6 +52,11 @@ export function useTierMarkers(
 
   return useMemo(() => {
     const markers: TierMarker[] = []
+    // Every client the roster places at some venue, to name visiting clients.
+    const infoByName = new Map<string, VenuePlayer>()
+    for (const list of venuePlayerMap.values()) {
+      for (const p of list) if (!infoByName.has(p.name)) infoByName.set(p.name, p)
+    }
 
     for (const [key, venueInfo] of Object.entries(venues)) {
       // Skip venues without players
@@ -109,12 +114,21 @@ export function useTierMarkers(
       // so with a date filter active, keep only players who actually have a
       // game here in the window — otherwise a player whose team visited in
       // May haunts an August marker (and "Where to go" inherits the ghost).
-      // NCAA/HS/ST venues keep their roster-based lists: a school venue with
-      // games in range means its roster players are playing.
+      // HS/ST venues keep their roster-based lists.
       let visiblePlayers = playerList
       if (key.startsWith('pro-') && (filterStart || filterEnd)) {
         visiblePlayers = playerList.filter((p) => namesInRange.has(p.name))
         if (visiblePlayers.length === 0) continue
+      } else if (key.startsWith('ncaa-') && (filterStart || filterEnd)) {
+        // College parks also host fall exhibitions and road games of OTHER
+        // client schools, so the home roster isn't who plays here in the
+        // window: a Georgia client showed "0 games" at Foley Field while
+        // another school played there (2026-10-16). List the clients in
+        // this window's games instead.
+        const inGames = [...namesInRange]
+          .map((n) => playerList.find((p) => p.name === n) ?? infoByName.get(n))
+          .filter((p): p is VenuePlayer => !!p)
+        if (inGames.length > 0) visiblePlayers = inGames
       }
 
       const bestTier = Math.min(...visiblePlayers.map((p) => p.tier))
