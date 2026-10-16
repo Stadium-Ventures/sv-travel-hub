@@ -9,9 +9,10 @@ import { applyRosterMoves, orgChangeWarning, releaseFromMove, releaseWarning, ro
 import { MLB_PARENT_IDS, resolveNcaaName, resolveMLBTeamId } from '../data/aliases'
 import type { GameEvent } from '../types/schedule'
 import { extractVenueCoords } from '../lib/mlbApi'
-import type { D1Schedule } from '../lib/d1baseball'
-import { fetchAllD1Schedules, resolveOpponentVenue, resolveOpponentVenueAsync } from '../lib/d1baseball'
-import { NCAA_VENUES } from '../data/ncaaVenues'
+import type { NcaaSchedule, UnresolvedNcaaGame } from '../lib/ncaaEvents'
+import { ncaaScheduleToEvents } from '../lib/ncaaEvents'
+import type { NcaaNotice } from '../lib/ncaaSchedules'
+import { fetchAllNcaaSchedules, geocodePlaces, lookupPlace } from '../lib/ncaaSchedules'
 import type { MaxPrepsSchedule } from '../lib/maxpreps'
 import { fetchScheduleCsv } from '../lib/scheduleCsv'
 import { useRosterStore } from './rosterStore'
@@ -70,14 +71,14 @@ interface ScheduleState {
   schedulesError: string | null
   schedulesProgress: { completed: number; total: number } | null
 
-  // NCAA schedules (from D1Baseball)
-  ncaaSchedules: Record<string, D1Schedule> // school name → schedule
+  // NCAA schedules (official athletics sites, via /api/ncaa-schedules)
+  ncaaSchedules: Record<string, NcaaSchedule> // school name → schedule
   ncaaGames: GameEvent[]
   ncaaLoading: boolean
   ncaaError: string | null
   ncaaProgress: { completed: number; total: number } | null
   ncaaFailedSchools: string[]         // schools whose schedule fetch failed
-  ncaaDroppedAwayGames: number        // away games skipped due to unknown opponent venue
+  ncaaDroppedAwayGames: number        // games not placed yet: ballpark not in the venue tables or geocode cache
 
   // HS schedules (from MaxPreps)
   hsSchedules: Record<string, MaxPrepsSchedule> // org|state key → schedule
@@ -1233,7 +1234,7 @@ export const useScheduleStore = create<ScheduleState>()(
           get().regenerateProGames()
         }
       },
-      fetchNcaaSchedules: async (playerOrgs, { merge = false, forceRefresh = false } = {}) => {
+      fetchNcaaSchedules: async (playerOrgs, { merge = false, forceRefresh: _forceRefresh = false } = {}) => {
         if (get().ncaaLoading) return
         // Resolve each player's org to a canonical NCAA school name
         const customNcaa = get().customNcaaAliases
@@ -1253,9 +1254,7 @@ export const useScheduleStore = create<ScheduleState>()(
           else schoolToPlayers.set(canonical, [playerName])
         }
 
-        // Clear stale ncaa diagnostics BEFORE filing this run's issues —
-        // d1baseball.ts pushes more (stale-bundle fallbacks, 0-game parses)
-        // during the fetch and they must survive.
+        // Clear stale ncaa diagnostics BEFORE filing this run's issues.
         useDiagnosticsStore.getState().clearSource('ncaa')
 
         // A school that resolves to nothing used to be dropped with no trace —
@@ -1268,7 +1267,7 @@ export const useScheduleStore = create<ScheduleState>()(
               source: 'ncaa' as const,
               message: `"${org}" (${players.join(', ')}) doesn't match any known NCAA school — no schedule fetched`,
               details:
-                'Map it under Unknown Team Names on the Roster tab, or add the school to NCAA_ALIASES + D1_BASEBALL_SLUGS in src/data/ so it works for everyone.',
+                'Map it under Unknown Team Names on the Roster tab, or add the school to NCAA_ALIASES (api/_data/ncaaSchools.ts) and its athletics site to api/_data/ncaaSources.ts so it works for everyone.',
             })),
           )
         }
@@ -1292,161 +1291,34 @@ export const useScheduleStore = create<ScheduleState>()(
         })
 
         try {
-          const { schedules, failedSchools } = await fetchAllD1Schedules(
+          const { schedules, failedSchools, notices } = await fetchAllNcaaSchedules(
             [...schoolToPlayers.keys()],
             (completed, total) => set({ ncaaProgress: { completed, total } }),
-            { forceRefresh },
           )
 
-          // Convert D1 games to GameEvents
-          const newGames: GameEvent[] = []
-          const schedulesObj: Record<string, D1Schedule> = merge ? { ...prevState.ncaaSchedules } : {}
-          let droppedAwayGames = merge ? prevState.ncaaDroppedAwayGames : 0
-
-          // Collect unresolved away games for async geocoding
-          const unresolvedAway: Array<{ school: string; game: D1Schedule['games'][number]; playerNames: string[] }> = []
-
-          for (const [school, schedule] of schedules) {
-            schedulesObj[school] = schedule
-            const playerNames = schoolToPlayers.get(school) ?? []
-            const homeVenue = NCAA_VENUES[school]
-
-            for (const game of schedule.games) {
-              const d = new Date(game.date + 'T12:00:00Z')
-
-              let venue: { name: string; coords: { lat: number; lng: number } }
-              if (game.isHome && homeVenue) {
-                venue = { name: homeVenue.venueName, coords: homeVenue.coords }
-              } else if (!game.isHome) {
-                // Away game: try sync resolution first (fast)
-                const oppVenue = resolveOpponentVenue(game.opponent, game.opponentSlug)
-                if (oppVenue) {
-                  venue = oppVenue
-                } else {
-                  // Queue for async geocoding
-                  unresolvedAway.push({ school, game, playerNames })
-                  continue
-                }
-              } else {
-                continue // No venue coords
-              }
-
-              newGames.push({
-                id: `ncaa-d1-${school.toLowerCase().replace(/\s+/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
-                date: game.date,
-                dayOfWeek: d.getUTCDay(),
-                time: game.date + 'T14:00:00Z',
-                homeTeam: game.isHome ? school : game.opponent,
-                awayTeam: game.isHome ? game.opponent : school,
-                isHome: game.isHome,
-                venue,
-                source: 'ncaa-lookup',
-                playerNames,
-                confidence: 'high',
-                confidenceNote: game.isHome
-                  ? 'Confirmed home game from D1Baseball'
-                  : `Away game at ${game.opponent}`,
-                sourceUrl: `https://d1baseball.com/team/${schedule.slug}/schedule/`,
-              })
+          // Official athletics-site schedules → GameEvents. Places that are
+          // not in the venue tables yet (neutral sites, unknown opponents'
+          // parks) are geocoded after the games are on screen.
+          const schedulesObj: Record<string, NcaaSchedule> = merge ? { ...prevState.ncaaSchedules } : {}
+          const convert = () => {
+            const events: GameEvent[] = []
+            const unresolved: UnresolvedNcaaGame[] = []
+            for (const [school, schedule] of schedules) {
+              const out = ncaaScheduleToEvents(schedule, schoolToPlayers.get(school) ?? [], lookupPlace)
+              events.push(...out.events)
+              unresolved.push(...out.unresolved)
             }
+            return { events, unresolved }
           }
-
-          // Phase 2: Resolve away games at unknown venues
-          // Try cached venues first (instant), then batch-geocode uncached ones
-          if (unresolvedAway.length > 0) {
-            const needsGeocoding: typeof unresolvedAway = []
-            // Fast pass: resolve from localStorage cache
-            for (const entry of unresolvedAway) {
-              const oppVenue = resolveOpponentVenue(entry.game.opponent, entry.game.opponentSlug)
-              if (oppVenue) {
-                const d = new Date(entry.game.date + 'T12:00:00Z')
-                newGames.push({
-                  id: `ncaa-d1-${entry.school.toLowerCase().replace(/\s+/g, '-')}-${entry.game.date}-${entry.game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
-                  date: entry.game.date,
-                  dayOfWeek: d.getUTCDay(),
-                  time: entry.game.date + 'T14:00:00Z',
-                  homeTeam: entry.game.opponent,
-                  awayTeam: entry.school,
-                  isHome: false,
-                  venue: oppVenue,
-                  source: 'ncaa-lookup',
-                  playerNames: entry.playerNames,
-                  confidence: 'medium',
-                  confidenceNote: `Away game at ${entry.game.opponent} (cached venue)`,
-                  sourceUrl: `https://d1baseball.com/team/${schedulesObj[entry.school]!.slug}/schedule/`,
-                })
-              } else {
-                needsGeocoding.push(entry)
-              }
-            }
-
-            // Async geocoding only for truly unknown venues — skip on first load
-            // (bundled data + NCAA_VENUES covers most cases; geocode on reload)
-            const MAX_GEOCODE = merge ? 10 : 0
-            const geocodeBatch = needsGeocoding.slice(0, MAX_GEOCODE)
-            if (geocodeBatch.length > 0) {
-              const baseCompleted = schoolToPlayers.size
-              const extendedTotal = baseCompleted + geocodeBatch.length
-              set({ ncaaProgress: { completed: baseCompleted, total: extendedTotal } })
-              let geocoded = 0
-              let geocodeIdx = 0
-              for (const { school, game, playerNames } of geocodeBatch) {
-                geocodeIdx++
-                set({ ncaaProgress: { completed: baseCompleted + geocodeIdx, total: extendedTotal } })
-                const oppVenue = await resolveOpponentVenueAsync(
-                  game.opponent, game.opponentSlug,
-                  game.venueName, game.venueCity,
-                )
-                if (oppVenue) {
-                  const d = new Date(game.date + 'T12:00:00Z')
-                  const schedule = schedulesObj[school]!
-                  newGames.push({
-                    id: `ncaa-d1-${school.toLowerCase().replace(/\s+/g, '-')}-${game.date}-${game.opponent.toLowerCase().replace(/\s+/g, '-')}`,
-                    date: game.date,
-                    dayOfWeek: d.getUTCDay(),
-                    time: game.date + 'T14:00:00Z',
-                    homeTeam: game.opponent,
-                    awayTeam: school,
-                    isHome: false,
-                    venue: oppVenue,
-                    source: 'ncaa-lookup',
-                    playerNames,
-                    confidence: 'medium',
-                    confidenceNote: `Away game at ${game.opponent} (venue geocoded)`,
-                    sourceUrl: `https://d1baseball.com/team/${schedule.slug}/schedule/`,
-                  })
-                  geocoded++
-                } else {
-                  droppedAwayGames++
-                }
-                // Rate limit for Nominatim
-                await new Promise(r => setTimeout(r, 1200))
-              }
-              if (geocoded > 0) {
-                const diag = useDiagnosticsStore.getState()
-                diag.addIssue({
-                  level: 'info',
-                  source: 'ncaa',
-                  message: `${geocoded} NCAA away game venue(s) discovered via geocoding`,
-                })
-              }
-            }
-            // Count remaining unresolved as dropped (will be geocoded on next load from cache)
-            droppedAwayGames += needsGeocoding.length - geocodeBatch.length
-          }
-
-          // Merge or replace games
-          let allGames: GameEvent[]
-          if (merge) {
-            // Dedup by game ID — new games overwrite existing ones for the same ID
+          for (const [school, schedule] of schedules) schedulesObj[school] = schedule
+          const first = convert()
+          const mergeGames = (base: GameEvent[], incoming: GameEvent[]) => {
             const gameMap = new Map<string, GameEvent>()
-            for (const g of prevState.ncaaGames) gameMap.set(g.id, g)
-            for (const g of newGames) gameMap.set(g.id, g)
-            allGames = [...gameMap.values()]
-          } else {
-            allGames = newGames
+            for (const g of base) gameMap.set(g.id, g)
+            for (const g of incoming) gameMap.set(g.id, g)
+            return [...gameMap.values()].sort((a, b) => a.date.localeCompare(b.date))
           }
-          allGames.sort((a, b) => a.date.localeCompare(b.date))
+          const allGames = merge ? mergeGames(prevState.ncaaGames, first.events) : [...first.events].sort((a, b) => a.date.localeCompare(b.date))
 
           // Merge failed schools — append new failures, don't duplicate
           const mergedFailed = merge
@@ -1454,9 +1326,10 @@ export const useScheduleStore = create<ScheduleState>()(
             : failedSchools
 
           // Derive ncaaFetchedAt from the underlying schedules' own fetchedAt
-          // (min across schools) so bundled/stale snapshots aren't masked by a
+          // (min across schools) so saved/bundled copies aren't masked by a
           // Date.now() stamped at conversion time.
           const scheduleTimestamps = Object.values(schedulesObj)
+            .filter((s) => s.games.length > 0)
             .map((s) => s.fetchedAt)
             .filter((t): t is number => typeof t === 'number' && t > 0)
           const derivedNcaaFetchedAt = scheduleTimestamps.length > 0
@@ -1470,38 +1343,65 @@ export const useScheduleStore = create<ScheduleState>()(
             ncaaProgress: null,
             ncaaFetchedAt: derivedNcaaFetchedAt,
             ncaaFailedSchools: mergedFailed,
-            ncaaDroppedAwayGames: droppedAwayGames,
+            ncaaDroppedAwayGames: first.unresolved.length,
             cachedNcaaSchools: [...new Set([...(merge ? prevState.cachedNcaaSchools ?? [] : []), ...schoolToPlayers.keys()])],
           })
 
-          // Diagnostics (source already cleared before the fetch)
+          // Diagnostics (source already cleared before the fetch), in plain
+          // English: "not published yet" is the offseason, not a failure.
           const diag = useDiagnosticsStore.getState()
-          const STALE_SNAPSHOT_AGE = 7 * 24 * 60 * 60 * 1000
-          const staleSchools = Object.values(schedulesObj)
-            .filter((s) => Date.now() - s.fetchedAt > STALE_SNAPSHOT_AGE)
-          if (staleSchools.length > 0) {
-            const oldest = Math.min(...staleSchools.map((s) => s.fetchedAt))
+          const day = (t?: number) => (t ? new Date(t).toISOString().split('T')[0] : 'an earlier load')
+          const byKind = (pred: (n: NcaaNotice) => boolean) => notices.filter(pred)
+          const empty = byKind((n) => n.kind === 'empty' && n.fallback === 'none')
+          if (empty.length > 0) {
             diag.addIssue({
               level: 'info',
               source: 'ncaa',
-              message: `Serving bundled/stale schedule snapshot for ${staleSchools.length} NCAA school(s) — oldest from ${new Date(oldest).toISOString().split('T')[0]}`,
-              details: staleSchools.map((s) => s.school).join(', '),
+              message: `${empty.length} ${empty.length === 1 ? 'school has' : 'schools have'} no upcoming games published yet. Their games will show up once the schools post their schedules.`,
+              details: empty.map((n) => n.school).join(', '),
             })
           }
-          if (mergedFailed.length > 0) {
+          const fromSheet = byKind((n) => n.fallback === 'sheet')
+          if (fromSheet.length > 0) {
+            diag.addIssue({
+              level: fromSheet.every((n) => n.kind === 'empty') ? 'info' : 'warning',
+              source: 'ncaa',
+              message: `Showing games from the Client Game Schedule sheet for ${fromSheet.map((n) => n.school).join(', ')}.`,
+              details: fromSheet.map((n) => n.message).join(' '),
+            })
+          }
+          for (const n of byKind((x) => x.kind !== 'empty' && (x.fallback === 'saved' || x.fallback === 'bundled'))) {
             diag.addIssue({
               level: 'warning',
               source: 'ncaa',
-              message: `${mergedFailed.length} NCAA school(s) failed to fetch`,
-              details: mergedFailed.join(', '),
+              message: `${n.school}: the official schedule could not be read, so the map shows a saved copy from ${day(n.fallbackFetchedAt)}. Recent changes may be missing.`,
+              details: n.message,
             })
           }
-          if (droppedAwayGames > 0) {
+          for (const n of byKind((x) => x.kind !== 'empty' && x.fallback === 'none')) {
             diag.addIssue({
-              level: 'info',
+              level: 'warning',
               source: 'ncaa',
-              message: `${droppedAwayGames} NCAA away games skipped — unknown opponent venue`,
+              message: `${n.school}: no schedule to show. ${n.message} To show games now, add them to the Client Game Schedule sheet.`,
             })
+          }
+
+          // Look up places not in the venue tables, a few per load (the
+          // free geocoder allows one request a second), then add the games.
+          if (first.unresolved.length > 0) {
+            const found = await geocodePlaces(first.unresolved, merge ? 12 : 6)
+            const second = convert()
+            if (found > 0) {
+              set({ ncaaGames: mergeGames(get().ncaaGames, second.events), ncaaDroppedAwayGames: second.unresolved.length })
+            }
+            if (second.unresolved.length > 0) {
+              diag.addIssue({
+                level: 'info',
+                source: 'ncaa',
+                message: `${second.unresolved.length} college ${second.unresolved.length === 1 ? 'game is' : 'games are'} not on the map yet because the ballpark has not been located. More are looked up on each load.`,
+                details: [...new Set(second.unresolved.map((u) => u.query))].slice(0, 10).join('; '),
+              })
+            }
           }
         } catch (e) {
           set({

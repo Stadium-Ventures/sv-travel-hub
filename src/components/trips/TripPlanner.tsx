@@ -177,7 +177,7 @@ function getProgressPercent(step: string): string {
 function getProgressNote(step: string): string {
   if (step.includes('Auto-assigning')) return 'Checking MLB/MiLB rosters for player affiliates (~5s)'
   if (step.includes('Pro schedules')) return 'Fetching game schedules from MLB API (~15-30s)'
-  if (step.includes('College')) return 'Scraping D1Baseball schedules (~30-60s)'
+  if (step.includes('College')) return 'Loading college schedules from school athletics sites'
   if (step.includes('Mapping HS')) return 'Geocoding high school locations (~5s)'
   if (step.includes('HS schedules')) return 'Loading HS games from the schedule sheet'
   if (step.includes('Starting') || step.includes('Analyzing')) return 'Building trip candidates...'

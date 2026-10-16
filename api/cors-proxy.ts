@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 
-// Vercel serverless CORS proxy — primary proxy for D1Baseball and MaxPreps fetches.
+// Vercel serverless CORS proxy — primary proxy for MaxPreps fetches (NCAA
+// schedules are read server-side by api/ncaa-schedules.ts).
 // Falls back to public CORS proxies if this is unavailable.
 //
 // Hardening:
@@ -11,7 +12,6 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 //     of `*` — this proxy exists for the Travel Hub frontend, nobody else.
 
 const ALLOWED_DOMAINS = [
-  'd1baseball.com',
   'www.maxpreps.com',
   'maxpreps.com',
 ]

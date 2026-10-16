@@ -65,7 +65,7 @@ function getVisitContext(source: ScheduleSource, isHome: boolean, awayTeam: stri
   }
   if (source === 'ncaa-lookup') {
     return confidence === 'high'
-      ? { label: 'D1Baseball', color: 'bg-accent-green/15 text-accent-green' }
+      ? { label: 'School site', color: 'bg-accent-green/15 text-accent-green' }
       : { label: 'Est.', color: 'bg-accent-orange/15 text-accent-orange' }
   }
   return confidence === 'high'

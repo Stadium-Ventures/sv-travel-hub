@@ -36,7 +36,7 @@ export interface GameEvent {
   gameType?: string
   confidence?: VisitConfidence
   confidenceNote?: string // e.g. "Typical home game day" or "May be traveling for away series"
-  sourceUrl?: string // Link to verify this game (MLB Gameday, D1Baseball schedule, etc.)
+  sourceUrl?: string // Link to verify this game (MLB Gameday, school schedule page, etc.)
   gameStatus?: string // e.g. "Final", "Postponed", "Cancelled" from MLB API status.detailedState
   probablePitcherNames?: string[] // fullNames from MLB API probablePitcher hydration
 }

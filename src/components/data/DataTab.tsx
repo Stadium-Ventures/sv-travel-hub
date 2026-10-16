@@ -55,7 +55,7 @@ const LEVEL_COLORS: Record<string, string> = {
 // the maxpreps.com sourceUrl on those rows is just a verification link.
 const SOURCE_LABELS: Record<GameEvent['source'], string> = {
   'mlb-api': 'MLB API',
-  'ncaa-lookup': 'D1Baseball',
+  'ncaa-lookup': 'School sites',
   'hs-lookup': 'Schedule Sheet',
 }
 

@@ -7,7 +7,10 @@ import { keys as idbKeys, del as idbDel } from 'idb-keyval'
  */
 export function clearScheduleCaches(): void {
   const cacheKeys = [
-    'sv-travel-d1baseball-cache',
+    'sv-travel-d1baseball-cache', // retired 2026-10 (D1Baseball moved to JavaScript)
+    'sv-travel-ncaa-venue-cache', // retired 2026-10
+    'sv-travel-ncaa-official-v1',
+    'sv-travel-ncaa-places-v1',
     'sv-travel-maxpreps-cache',
     'sv-travel-geocode-cache',
     'sv-travel-drivetime-cache',

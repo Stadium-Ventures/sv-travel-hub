@@ -186,7 +186,7 @@ export default function ScheduleCalendar({ games }: Props) {
                 const sourceColor = SOURCE_COLORS[g.source] ?? 'border-border/30 bg-gray-950/30'
                 const sourceLabel = SOURCE_LABELS[g.source] ?? 'Unknown'
                 const confirmLabel = g.source === 'mlb-api' ? 'Confirmed' :
-                  g.source === 'ncaa-lookup' && g.confidence === 'high' ? 'D1Baseball' :
+                  g.source === 'ncaa-lookup' && g.confidence === 'high' ? 'School site' :
                   g.source === 'hs-lookup' && g.confidence === 'high' ? 'Schedule Sheet' :
                   'Estimated'
                 const confirmColor = confirmLabel === 'Estimated'

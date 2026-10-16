@@ -1,13 +1,18 @@
 /**
- * Generate static schedule data for NCAA (D1Baseball) and HS (MaxPreps) players.
+ * Generate static schedule data for NCAA (official athletics sites) and HS
+ * (MaxPreps) players.
  *
- * College and HS players don't get traded/promoted mid-season, so their schedules
- * are stable once published. This script scrapes them server-side (no CORS proxy
- * needed) and writes static TypeScript files that the app imports instantly.
+ * The NCAA file is the app's last-resort copy: the live app reads each
+ * school's official site through /api/ncaa-schedules, and only falls back to
+ * this bundle when that fails. Both use the same reader
+ * (api/_lib/ncaaSchedule.ts), so the bundle matches what the app shows.
  *
  * Run:  npx tsx scripts/generateSchedules.ts
- *       npx tsx scripts/generateSchedules.ts --ncaa-only
+ *       npx tsx scripts/generateSchedules.ts --ncaa-only [--season=2027]
  *       npx tsx scripts/generateSchedules.ts --hs-only
+ *
+ * A school whose site gives no games this run keeps its previous bundled
+ * games, and the file is not rewritten at all when no school returns games.
  *
  * Output:
  *   src/data/ncaaSchedules.generated.ts
@@ -18,7 +23,9 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
 import { parse as parseHTML } from 'node-html-parser'
-import { D1_BASEBALL_SLUGS } from '../src/data/d1baseballSlugs'
+import { fetchSchoolSchedule, upcomingSeason, type NcaaSourceGame } from '../api/_lib/ncaaSchedule'
+import { NCAA_SCHEDULE_SOURCES } from '../api/_data/ncaaSources'
+import { BUNDLED_NCAA_SCHEDULES } from '../src/data/ncaaSchedules.generated'
 import { MAXPREPS_SLUGS } from '../src/data/maxprepsSlugs'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -53,59 +60,35 @@ async function fetchWithRetry(url: string, retries = 3): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// D1Baseball parsing (ported from src/lib/d1baseball.ts for node-html-parser)
+// NCAA bundle shape (what src/data/ncaaSchedules.generated.ts exports)
 // ---------------------------------------------------------------------------
-interface D1Game {
-  date: string
-  isHome: boolean
-  opponent: string
-  opponentSlug: string
-  venueName: string
-  venueCity: string
-}
-
-interface D1Schedule {
+interface BundledNcaaSchedule {
   school: string
-  slug: string
-  games: D1Game[]
+  season: number
+  sourceUrl: string
   fetchedAt: number
+  games: NcaaSourceGame[]
 }
 
-function parseD1Html(html: string): D1Game[] {
-  const root = parseHTML(html)
-  const games: D1Game[] = []
-
-  const rows = root.querySelectorAll('table tbody tr')
-  for (const row of rows) {
-    const cells = row.querySelectorAll('td')
-    if (cells.length < 4) continue
-
-    const dateLink = cells[0]?.querySelector('a')
-    if (!dateLink) continue
-    const href = dateLink.getAttribute('href') ?? ''
-    const dateMatch = href.match(/date=(\d{4})(\d{2})(\d{2})/)
-    if (!dateMatch) continue
-    const date = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`
-
-    const locText = cells[1]?.textContent?.trim() ?? ''
-    const isHome = locText === 'vs'
-
-    const teamName = cells[2]?.querySelector('.team-name')?.textContent?.trim() ?? ''
-    const teamLink = cells[2]?.querySelector('a.team-logo-name')?.getAttribute('href') ?? ''
-    const slugMatch = teamLink.match(/\/team\/([^/]+)\//)
-    const opponentSlug = slugMatch ? slugMatch[1]! : ''
-
-    const venueText = cells[cells.length - 1]?.textContent?.trim() ?? ''
-    const venueParts = venueText.split(',').map((s) => s.trim())
-    const venueName = venueParts.length >= 3 ? venueParts.slice(2).join(', ') : venueText
-    const venueCity = venueParts.length >= 2 ? `${venueParts[0]}, ${venueParts[1]}` : ''
-
-    if (date && teamName) {
-      games.push({ date, isHome, opponent: teamName, opponentSlug, venueName, venueCity })
-    }
-  }
-
-  return games
+/** Older bundles were D1Baseball-shaped (isHome, venueCity). */
+function toBundled(school: string, raw: unknown): BundledNcaaSchedule | null {
+  const r = raw as { season?: number; sourceUrl?: string; slug?: string; fetchedAt?: number; games?: Array<Record<string, unknown>> }
+  if (!r?.games?.length) return null
+  if (typeof r.season === 'number') return r as BundledNcaaSchedule
+  const games: NcaaSourceGame[] = r.games.map((g) => ({
+    date: String(g.date),
+    startTime: null,
+    timeText: '',
+    side: g.isHome ? 'home' : 'away',
+    opponent: String(g.opponent ?? ''),
+    location: String(g.venueCity ?? ''),
+    venueName: String(g.venueName ?? ''),
+    exhibition: false,
+    tournament: '',
+    status: 'scheduled',
+  }))
+  const year = parseInt(games[0]!.date.slice(0, 4), 10)
+  return { school, season: year, sourceUrl: r.slug ? `https://d1baseball.com/team/${r.slug}/schedule/` : '', fetchedAt: r.fetchedAt ?? 0, games }
 }
 
 // ---------------------------------------------------------------------------
@@ -212,38 +195,35 @@ function parseMaxPrepsHtml(html: string, schoolName: string): { teamName: string
 }
 
 // ---------------------------------------------------------------------------
-// Scrape all NCAA schedules
+// Read all NCAA schedules from the official athletics sites
 // ---------------------------------------------------------------------------
-async function scrapeNcaaSchedules(): Promise<Record<string, D1Schedule>> {
-  const entries = Object.entries(D1_BASEBALL_SLUGS)
-  const results: Record<string, D1Schedule> = {}
-  const now = Date.now()
-  let totalGames = 0
-
-  console.log(`\nScraping ${entries.length} NCAA schedules from D1Baseball...\n`)
-
-  for (let i = 0; i < entries.length; i++) {
-    const [school, slug] = entries[i]!
-    process.stdout.write(`  [${i + 1}/${entries.length}] ${school}...`)
-
-    try {
-      const url = `https://d1baseball.com/team/${slug}/schedule/`
-      const html = await fetchWithRetry(url)
-      const games = parseD1Html(html)
-
-      results[school] = { school, slug, games, fetchedAt: now }
-      totalGames += games.length
-      console.log(` ${games.length} games`)
-    } catch (err) {
-      console.log(` FAILED: ${err instanceof Error ? err.message : err}`)
-    }
-
-    // Be polite — 1s delay between requests
-    if (i < entries.length - 1) await sleep(1000)
+async function scrapeNcaaSchedules(season: number): Promise<{ data: Record<string, BundledNcaaSchedule>; fresh: number }> {
+  const schools = Object.keys(NCAA_SCHEDULE_SOURCES)
+  const data: Record<string, BundledNcaaSchedule> = {}
+  for (const [school, raw] of Object.entries(BUNDLED_NCAA_SCHEDULES)) {
+    const prev = toBundled(school, raw)
+    if (prev) data[school] = prev
   }
-
-  console.log(`\nNCAA: ${Object.keys(results).length}/${entries.length} schools, ${totalGames} total games`)
-  return results
+  let fresh = 0
+  let totalGames = 0
+  console.log(`\nReading ${schools.length} NCAA ${season} schedules from official athletics sites...\n`)
+  for (let i = 0; i < schools.length; i++) {
+    const school = schools[i]!
+    process.stdout.write(`  [${i + 1}/${schools.length}] ${school}...`)
+    const result = await fetchSchoolSchedule(school, { season })
+    if (result.status === 'ok' && result.games.length > 0) {
+      data[school] = { school, season, sourceUrl: result.sourceUrl, fetchedAt: result.fetchedAt, games: result.games }
+      fresh++
+      totalGames += result.games.length
+      console.log(` ${result.games.length} games`)
+    } else {
+      console.log(` ${result.status}: ${result.message}${data[school] ? ' Kept the previous bundled games.' : ''}`)
+    }
+    // Be polite: one school at a time, a second apart.
+    if (i < schools.length - 1) await sleep(1000)
+  }
+  console.log(`\nNCAA: ${fresh}/${schools.length} schools read, ${totalGames} games`)
+  return { data, fresh }
 }
 
 // ---------------------------------------------------------------------------
@@ -341,14 +321,32 @@ async function scrapeHsSchedules(): Promise<Record<string, MaxPrepsSchedule>> {
 // ---------------------------------------------------------------------------
 // Write output files
 // ---------------------------------------------------------------------------
-function writeNcaaFile(data: Record<string, D1Schedule>) {
+function writeNcaaFile(data: Record<string, BundledNcaaSchedule>) {
   const outPath = path.join(OUT_DIR, 'ncaaSchedules.generated.ts')
-  const json = JSON.stringify(data, null, 2)
-  const content = `// Auto-generated by scripts/generateSchedules.ts — do not edit
+  // One game per line keeps the file (and the app bundle) small and diffs readable.
+  const json = '{\n' + Object.entries(data).map(([school, s]) => [
+    `  ${JSON.stringify(school)}: {`,
+    `    "school": ${JSON.stringify(s.school)}, "season": ${s.season}, "sourceUrl": ${JSON.stringify(s.sourceUrl)}, "fetchedAt": ${s.fetchedAt},`,
+    `    "games": [`,
+    s.games.map((g) => `      ${JSON.stringify(g)}`).join(',\n'),
+    `    ]`,
+    `  }`,
+  ].join('\n')).join(',\n') + '\n}'
+  const content = `// Auto-generated by scripts/generateSchedules.ts. Do not edit.
 // Generated: ${new Date().toISOString()}
-import type { D1Schedule } from '../lib/d1baseball'
+// Last-resort copy of each school's schedule from its official athletics
+// site; the app reads the live schedules through /api/ncaa-schedules.
+import type { NcaaSourceGame } from '../../api/_lib/ncaaSchedule'
 
-export const BUNDLED_NCAA_SCHEDULES: Record<string, D1Schedule> = ${json}
+interface BundledNcaaSchedule {
+  school: string
+  season: number
+  sourceUrl: string
+  fetchedAt: number
+  games: NcaaSourceGame[]
+}
+
+export const BUNDLED_NCAA_SCHEDULES: Record<string, BundledNcaaSchedule> = ${json}
 `
   fs.writeFileSync(outPath, content, 'utf-8')
   console.log(`\nWrote ${outPath} (${(Buffer.byteLength(content) / 1024).toFixed(1)} KB)`)
@@ -380,8 +378,15 @@ async function main() {
   console.log('=== SV Travel Hub Schedule Generator ===')
 
   if (doNcaa) {
-    const ncaa = await scrapeNcaaSchedules()
-    writeNcaaFile(ncaa)
+    const seasonArg = args.find((a) => a.startsWith('--season='))
+    const season = seasonArg ? parseInt(seasonArg.split('=')[1]!, 10) : upcomingSeason()
+    const { data, fresh } = await scrapeNcaaSchedules(season)
+    if (fresh === 0) {
+      console.error('\nNo school returned games. Not rewriting the NCAA bundle (the sites may be down or changed).')
+      process.exitCode = 1
+    } else {
+      writeNcaaFile(data)
+    }
   }
 
   if (doHs) {

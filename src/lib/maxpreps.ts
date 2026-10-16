@@ -1,5 +1,5 @@
 import { MAXPREPS_SLUGS } from '../data/maxprepsSlugs'
-import { fetchWithCorsProxy } from './d1baseball'
+import { fetchWithCorsProxy } from './corsProxy'
 
 const CACHE_KEY = 'sv-travel-maxpreps-cache'
 const CACHE_TTL = 10 * 60 * 60 * 1000 // 10 hours
