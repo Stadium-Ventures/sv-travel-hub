@@ -547,6 +547,26 @@ export const useScheduleStore = create<ScheduleState>()(
               }
             }
 
+            // Spring training: a player on the big-league roster (in the
+            // offseason that is the whole 40-man) is in big-league camp and
+            // plays its spring games. Check that BEFORE estimating from last
+            // year's rosters: those list everyone who passed through an
+            // affiliate, rehab stints and options included, so 40-man
+            // regulars came out "estimated" at Triple-A (two Rockies clients
+            // on Albuquerque's 2025 list; a Marlins catcher's rehab put him
+            // on Jacksonville's).
+            if (isSpringTraining) {
+              const campMatch = mlbPlayerIdToTeam.get(player.mlbPlayerId!)
+              const campIl = mlbIlPlayerIdToTeam.get(player.mlbPlayerId!)
+              if (campMatch || campIl) {
+                newAssignments[player.playerName] = campMatch
+                  ? { ...campMatch, source: 'mlb-roster' }
+                  : { ...campIl!, source: 'mlb-il' }
+                assignedCount++
+                continue
+              }
+            }
+
             // Spring training fallback: use last year's level, promote by 1
             if (isSpringTraining && lastYearMilbLookup.size > 0) {
               const lastYearMatch = lastYearMilbLookup.get(player.mlbPlayerId!)

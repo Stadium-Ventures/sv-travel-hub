@@ -147,3 +147,40 @@ describe('checkRosterMoves', () => {
     expect(msgs.some((m) => m.startsWith('Player C is with the Seattle Mariners organization now'))).toBe(true)
   })
 })
+
+describe('autoAssignPlayers in spring training mode', () => {
+  it('puts 40-man players on the big-league club instead of estimating from last year', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2027-02-10T15:00:00Z'))
+    useRosterStore.setState({
+      players: [
+        player('Player A', 1001, 'Colorado Rockies'),
+        player('Player C', 1003, 'Colorado Rockies'),
+        player('Prospect Player', 900001, 'Colorado Rockies'),
+      ],
+    })
+    useScheduleStore.setState({ playerTeamAssignments: {} })
+    const person = (id: number, fullName: string) => ({ person: { id, fullName }, position: { code: 'P' }, status: { code: 'A' } })
+    stubFetch((url) => {
+      if (url.includes('/teams/115/roster?rosterType=active') || url.includes('/teams/115/roster?rosterType=40Man')) {
+        return { roster: [person(1001, 'Player A'), person(1003, 'Player C')] }
+      }
+      // Last season's full lists name everyone who passed through, options
+      // and rehab stints included.
+      if (url.includes('/teams/342/roster?rosterType=fullRoster&season=2026')) {
+        return { roster: [person(1001, 'Player A'), person(1003, 'Player C')] }
+      }
+      if (url.includes('/teams/538/roster?rosterType=fullRoster&season=2026')) {
+        return { roster: [person(900001, 'Prospect Player')] }
+      }
+      return { roster: [] }
+    })
+    await useScheduleStore.getState().autoAssignPlayers()
+    const a = useScheduleStore.getState().playerTeamAssignments
+    expect(a['Player A']).toMatchObject({ teamId: 115, source: 'mlb-roster' })
+    expect(a['Player C']).toMatchObject({ teamId: 115, source: 'mlb-roster' })
+    // Not on the 40-man: still estimated, one level up from last year (AA to AAA).
+    expect(a['Prospect Player']).toMatchObject({ teamId: 342, source: 'estimated' })
+    expect(useScheduleStore.getState().assignmentsVerifiedAt).toBe(Date.parse('2027-02-10T15:00:00Z'))
+  })
+})
