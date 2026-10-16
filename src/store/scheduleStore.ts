@@ -857,6 +857,7 @@ export const useScheduleStore = create<ScheduleState>()(
             if (clipped.length === 0) continue
             const event = mlbGameToEvent(game, teamId, clipped, aflTeamIds.has(teamId) ? AFL_SPORT_ID : undefined)
             if (!event) continue
+            event.gameType = game.gameType
             const existing = eventsById.get(event.id)
             if (existing) mergeEventPlayers(existing, event)
             else eventsById.set(event.id, event)
@@ -1056,6 +1057,7 @@ export const useScheduleStore = create<ScheduleState>()(
                 if (game.venue?.name) droppedVenues.add(game.venue.name)
                 continue
               }
+              event.gameType = game.gameType
               const existing = eventsById.get(event.id)
               if (existing) mergeEventPlayers(existing, event)
               else eventsById.set(event.id, event)

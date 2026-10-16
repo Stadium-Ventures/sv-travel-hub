@@ -30,6 +30,10 @@ export interface GameEvent {
    *  determines every listed player's side. */
   playerSides?: Record<string, 'home' | 'away'>
   sportId?: number
+  /** MLB API game type on Pro games: "S" spring training, "E" exhibition,
+   *  "R" regular season. Absent on other sources and on Pro games cached
+   *  before 2026-10. */
+  gameType?: string
   confidence?: VisitConfidence
   confidenceNote?: string // e.g. "Typical home game day" or "May be traveling for away series"
   sourceUrl?: string // Link to verify this game (MLB Gameday, D1Baseball schedule, etc.)

@@ -6,10 +6,27 @@ import type { Coordinates } from '../types/roster'
 // Spring Training typically runs mid-February through late March
 export const SPRING_TRAINING_START = '02-15' // MM-DD
 export const SPRING_TRAINING_END = '03-25'   // MM-DD (MiLB regular season starts late March)
+/** Latest a camp visit is offered when a client's level opens later than
+ *  SPRING_TRAINING_END (2027: Triple-A Mar 26, Double-A and below Apr 2).
+ *  Players stay at the complex until their club's Opening Day. */
+export const LATEST_CAMP_END = '04-10' // MM-DD
 
 export function isSpringTraining(dateStr: string): boolean {
   const mmdd = dateStr.slice(5) // "YYYY-MM-DD" → "MM-DD"
   return mmdd >= SPRING_TRAINING_START && mmdd <= SPRING_TRAINING_END
+}
+
+/** Last camp day for a player in `year`: the day before his club's real
+ *  Opening Day when we know it, else SPRING_TRAINING_END. Capped at
+ *  LATEST_CAMP_END so an injured player's first game in June doesn't turn
+ *  into ten weeks of camp visits. */
+export function campEndDate(year: number, openingDay?: string): string {
+  if (!openingDay) return `${year}-${SPRING_TRAINING_END}`
+  const d = new Date(openingDay + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() - 1)
+  const dayBefore = d.toISOString().slice(0, 10)
+  const cap = `${year}-${LATEST_CAMP_END}`
+  return dayBefore < cap ? dayBefore : cap
 }
 
 export interface SpringTrainingSite {

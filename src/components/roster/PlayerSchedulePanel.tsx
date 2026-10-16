@@ -94,7 +94,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
 
     // Synthetic events
     if (player) {
-      const stEvents = generateSpringTrainingEvents(players, startDate, endDate)
+      const stEvents = generateSpringTrainingEvents(players, startDate, endDate, undefined, proGames)
       games.push(...stEvents.filter((g) => g.playerNames.includes(playerName)))
 
       const ncaaPlayersWithReal = new Set(ncaaGames.flatMap((g) => g.playerNames))

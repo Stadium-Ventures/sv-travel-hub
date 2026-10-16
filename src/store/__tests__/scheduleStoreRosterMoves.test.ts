@@ -26,7 +26,7 @@ const WOR: PlayerTeamAssignment = { teamId: 533, sportId: 11, teamName: 'Worcest
 
 function game(gamePk: number, date: string, homeId: number, homeName: string): MLBGameRaw {
   return {
-    gamePk, gameDate: `${date}T23:00:00Z`, officialDate: date,
+    gamePk, gameDate: `${date}T23:00:00Z`, officialDate: date, gameType: 'R',
     teams: { home: { team: { id: homeId, name: homeName } }, away: { team: { id: 1, name: 'Visitors' } } },
     venue: { id: 1, name: `${homeName} Park`, location: { defaultCoordinates: { latitude: 39.7, longitude: -105 } } },
     status: { detailedState: 'Scheduled' },

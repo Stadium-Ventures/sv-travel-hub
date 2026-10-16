@@ -75,6 +75,9 @@ export interface MLBGameRaw {
     timeZone?: { id?: string }
   }
   status: { detailedState: string }
+  /** "S" spring training, "E" exhibition, "R" regular season, then the
+   *  postseason codes. Tells a camp game from Opening Day. */
+  gameType?: string
 }
 
 // Fetch all MiLB/MLB affiliates for a parent org

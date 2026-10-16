@@ -2,7 +2,7 @@ import type { Coordinates } from '../types/roster'
 import type { RosterPlayer } from '../types/roster'
 import type { GameEvent, TripCandidate, TripPlan, PriorityResult, VisitConfidence, FlyInVisit, ScoreBreakdown, NearMiss, UnvisitablePlayer } from '../types/schedule'
 import { TIER_VISIT_TARGETS, isPlayerInactive } from '../types/roster'
-import { isSpringTraining, getSpringTrainingSite } from '../data/springTraining'
+import { getSpringTrainingSite, campEndDate, SPRING_TRAINING_START, SPRING_TRAINING_END, LATEST_CAMP_END } from '../data/springTraining'
 import { resolveMLBTeamId, resolveNcaaName } from '../data/aliases'
 import { NCAA_VENUES } from '../data/ncaaVenues'
 import { D1_BASEBALL_SLUGS } from '../data/d1baseballSlugs'
@@ -305,18 +305,55 @@ export function computeScoreBreakdown(
 
 // Generate synthetic spring training visit opportunities for Pro players
 // During ST, players are at their parent org's ST facility every day (except Sunday)
+//
+// With `realGames` (the loaded Pro schedule), camp visits follow each
+// player's own calendar instead of a fixed Feb 15 to Mar 25 block: a player
+// gets a camp visit only on days he has no real game, and his camp runs
+// until the day before his club's first regular-season game. Before, ANY
+// loaded Pro game (even an August one) removed a player from spring
+// training entirely, so once the next season's schedules loaded every
+// assigned client vanished from camp planning.
 export function generateSpringTrainingEvents(
   players: RosterPlayer[],
   startDate: string,
   endDate: string,
   customMlbAliases?: Record<string, string>,
+  realGames?: GameEvent[],
 ): GameEvent[] {
   const events: GameEvent[] = []
-  const dates = getDatesInRange(startDate, endDate).filter(
-    (d) => isSpringTraining(d) && isDateAllowed(d),
-  )
+  const dates = getDatesInRange(startDate, endDate).filter((d) => {
+    const mmdd = d.slice(5)
+    return mmdd >= SPRING_TRAINING_START && mmdd <= LATEST_CAMP_END && isDateAllowed(d)
+  })
 
   if (dates.length === 0) return events
+
+  // Per player: dates with a real game, and the first regular-season date
+  // per year (exhibitions and camp games don't end camp).
+  const gameDates = new Map<string, Set<string>>()
+  const openingDay = new Map<string, string>() // `${name}|${year}` → date
+  for (const g of realGames ?? []) {
+    const regular = g.gameType !== 'S' && g.gameType !== 'E'
+    const year = g.date.slice(0, 4)
+    for (const name of g.playerNames) {
+      let set = gameDates.get(name)
+      if (!set) { set = new Set(); gameDates.set(name, set) }
+      set.add(g.date)
+      if (regular && g.date.slice(5) >= SPRING_TRAINING_START) {
+        const key = `${name}|${year}`
+        const prev = openingDay.get(key)
+        if (!prev || g.date < prev) openingDay.set(key, g.date)
+      }
+    }
+  }
+  const inCamp = (name: string, date: string): boolean => {
+    if (gameDates.get(name)?.has(date)) return false
+    const year = Number(date.slice(0, 4))
+    const end = realGames
+      ? campEndDate(year, openingDay.get(`${name}|${year}`))
+      : `${year}-${SPRING_TRAINING_END}`
+    return date <= end
+  }
 
   // Group Pro players by parent org
   const playersByOrg = new Map<number, string[]>()
@@ -330,11 +367,13 @@ export function generateSpringTrainingEvents(
   }
 
   // Create events for each org's ST site on each valid date
-  for (const [orgId, playerNames] of playersByOrg) {
+  for (const [orgId, orgPlayers] of playersByOrg) {
     const site = getSpringTrainingSite(orgId)
     if (!site) continue
 
     for (const date of dates) {
+      const playerNames = orgPlayers.filter((n) => inCamp(n, date))
+      if (playerNames.length === 0) continue
       const d = new Date(date + 'T12:00:00Z')
       events.push({
         id: `st-${orgId}-${date}`,
