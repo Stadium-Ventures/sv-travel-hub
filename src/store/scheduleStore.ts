@@ -986,6 +986,7 @@ export const useScheduleStore = create<ScheduleState>()(
           // Convert to GameEvents — attach only players assigned to this specific team
           const eventsById = new Map<string, GameEvent>()
           const droppedIds = new Set<string>()
+          const droppedVenues = new Set<string>()
 
           for (const [teamIdStr, games] of Object.entries(rawSchedules)) {
             const teamId = parseInt(teamIdStr)
@@ -996,6 +997,7 @@ export const useScheduleStore = create<ScheduleState>()(
               const event = mlbGameToEvent(game, teamId, teamPlayers, aflTeamIds.has(teamId) ? AFL_SPORT_ID : undefined)
               if (!event) {
                 droppedIds.add(`mlb-${game.gamePk}`)
+                if (game.venue?.name) droppedVenues.add(game.venue.name)
                 continue
               }
               const existing = eventsById.get(event.id)
@@ -1041,7 +1043,8 @@ export const useScheduleStore = create<ScheduleState>()(
             diag.addIssue({
               level: 'warning',
               source: 'pro',
-              message: `${droppedGames} Pro games dropped. The MLB API had no venue coordinates for them.`,
+              message: `${droppedGames} Pro game${droppedGames === 1 ? '' : 's'} left off the map. MLB has no map location for ${droppedVenues.size === 1 ? 'this field' : 'these fields'}, so add ${droppedVenues.size === 1 ? 'it' : 'them'} to the venue fallback table.`,
+              details: [...droppedVenues].sort().join(', '),
             })
           }
         } catch (e) {

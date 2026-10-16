@@ -1,6 +1,7 @@
 import type { Coordinates } from '../types/roster'
 import { fetchWithTimeout } from './fetchWithTimeout'
 import { AFL_SPORT_ID } from './season'
+import { fallbackVenueCoords } from '../data/proVenueFallback'
 
 const MLB_BASE = 'https://statsapi.mlb.com/api/v1'
 
@@ -65,6 +66,7 @@ export interface MLBGameRaw {
     id: number
     name: string
     location?: {
+      city?: string
       defaultCoordinates?: {
         latitude: number
         longitude: number
@@ -133,11 +135,18 @@ export async function fetchSchedule(
   return games
 }
 
-// Extract venue coordinates from an MLB game
+// Extract venue coordinates from an MLB game. Complex-league fields and a few
+// minor-league parks come back without coordinates; those fall back to the
+// hand-kept table rather than dropping the game.
 export function extractVenueCoords(game: MLBGameRaw): Coordinates | null {
   const loc = game.venue?.location?.defaultCoordinates
-  if (!loc) return null
-  return { lat: loc.latitude, lng: loc.longitude }
+  if (loc) return { lat: loc.latitude, lng: loc.longitude }
+  if (!game.venue) return null
+  return fallbackVenueCoords({
+    venueId: game.venue.id,
+    venueName: game.venue.name,
+    city: game.venue.location?.city,
+  })
 }
 
 // Fetch current roster for a team (returns player IDs and names)
