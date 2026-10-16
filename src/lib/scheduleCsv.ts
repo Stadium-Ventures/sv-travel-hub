@@ -124,10 +124,14 @@ export function parseScheduleCsv(csvText: string): ScheduleCsvResult {
     const csvTeam = col(row, 'Team').trim()
     if (!csvTeam) continue
 
-    const teamInfo = CSV_TEAM_INFO[csvTeam]
+    // A team missing from the table still loads under its own name: the store
+    // matches "Charlotte Catholic|" to a roster org of the same name, so staff
+    // can add a new client's school by typing its games into the sheet, with
+    // no code change first (2026-10-16). Listed teams also get home hints.
+    let teamInfo = CSV_TEAM_INFO[csvTeam]
     if (!teamInfo) {
       if (!unmappedTeams.includes(csvTeam)) unmappedTeams.push(csvTeam)
-      continue
+      teamInfo = { key: `${csvTeam}|` }
     }
 
     const key = teamInfo.key

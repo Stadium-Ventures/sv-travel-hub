@@ -41,6 +41,24 @@ describe('checkNcaaSchedules', () => {
     expect(unpublished).toEqual([])
   })
 
+  it('from Dec 1, flags a school with no source but not an unpublished season', async () => {
+    const dec = new Date('2026-12-07T12:00:00Z')
+    const noSource = await checkNcaaSchedules(dec, { schools: ['Notre Dame'], fetchFn: sitesServe('') })
+    expect(noSource).toHaveLength(1)
+    expect(noSource[0]!.kind).toBe('no-source')
+    expect(noSource[0]!.what).toContain('Notre Dame')
+
+    const unpublished = await checkNcaaSchedules(dec, {
+      schools: ['Texas'],
+      fetchFn: sitesServe(fixture('sidearm-grid-2026.html')),
+    })
+    expect(unpublished).toEqual([])
+
+    // The fall window still ignores a school with no source.
+    const fall = await checkNcaaSchedules(new Date('2026-10-16T12:00:00Z'), { schools: ['Notre Dame'], fetchFn: sitesServe('') })
+    expect(fall).toEqual([])
+  })
+
   it('in the spring, flags no games and schools with no source the sheet does not cover', async () => {
     const now = new Date('2027-03-10T12:00:00Z')
     const findings = await checkNcaaSchedules(now, {

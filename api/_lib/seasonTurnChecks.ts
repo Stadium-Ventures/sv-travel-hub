@@ -7,10 +7,14 @@
 //                     season's games. Through January that means "enter
 //                     them"; from February on, a sheet with only last season
 //                     usually means the hub still points at last year's tab.
+//   Jan 5 to May 15   HS/JUCO: every high school client's school has this
+//                     season's games in the sheet (about six weeks' notice
+//                     before mid-February openers).
 import { headerIndex, monthDay, normalizeIsoDate, parseCsv } from './csv.js'
 import { MLB_BASE } from './mlbClient.js'
 import { weekly } from './monitorCopy.js'
-import type { FetchJson, Finding } from './monitorTypes.js'
+import type { FetchJson, Finding, RosterClient } from './monitorTypes.js'
+import { CSV_TEAM_INFO } from '../_data/hsTeams.js'
 
 /** HS and college seasons run Feb to Jun, so "the upcoming season" is next
  *  calendar year from October on and the current year before that. */
@@ -22,6 +26,12 @@ export function upcomingSeasonYear(now: Date): number {
 export function isHsSeasonWindow(now: Date): boolean {
   const m = now.getUTCMonth()
   return m === 11 || m <= 4
+}
+
+/** Jan 5 to May 15. */
+export function isHsClientWindow(now: Date): boolean {
+  const md = monthDay(now)
+  return md >= 105 && md <= 515
 }
 
 /** Nov 16 to Feb 15. */
@@ -96,4 +106,48 @@ export async function checkSpringTraining(
   const missing = [...new Set(orgIds)].filter((id) => !withGames.has(id))
   if (missing.length === 0) return []
   return [weekly.springTrainingMissing(season, missing.map(orgName).sort(), withGames.size > 0)]
+}
+
+const INACTIVE = /retired|free agent/i
+
+function isHsLevel(c: RosterClient): boolean {
+  return c.level === 'HS' || /juco|junior college/i.test(c.levelRaw)
+}
+
+/** Every high school and JUCO client's school has this season's games in
+ *  the sheet. Mirrors how the app matches: a sheet Team maps to a roster
+ *  school through the school table, or by the same name. Silent when the
+ *  sheet has no games for the season at all (checkHsSheetSeason owns that,
+ *  and listing every client again would only repeat it). */
+export function checkHsClientCoverage(scheduleCsv: string, clients: RosterClient[], now: Date): Finding[] {
+  const rows = parseCsv(scheduleCsv)
+  if (rows.length < 2) return []
+  const iTeam = headerIndex(rows[0]!, ['team'])
+  const iDate = headerIndex(rows[0]!, ['date', 'game date'])
+  const iLevel = headerIndex(rows[0]!, ['level', 'player level'])
+  if (iTeam < 0 || iDate < 0 || iLevel < 0) return []
+
+  const season = upcomingSeasonYear(now)
+  const schoolsWithGames = new Set<string>()
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r]!
+    const level = (row[iLevel] ?? '').toLowerCase().trim()
+    const isHs = level.includes('hs') || level.includes('high school') || level.includes('juco') || level.includes('junior college')
+    if (!isHs) continue
+    const d = normalizeIsoDate((row[iDate] ?? '').trim())
+    if (!d.startsWith(`${season}-`)) continue
+    const team = (row[iTeam] ?? '').trim()
+    if (!team) continue
+    const info = CSV_TEAM_INFO[team]
+    const school = info ? info.key.split('|')[0]! : team
+    schoolsWithGames.add(school.toLowerCase().trim())
+  }
+  if (schoolsWithGames.size === 0) return []
+
+  const missing = clients
+    .filter((c) => isHsLevel(c) && !c.isCoach && !INACTIVE.test(c.status))
+    .filter((c) => !c.org.trim() || !schoolsWithGames.has(c.org.toLowerCase().trim()))
+    .map((c) => ({ name: c.name, school: c.org.trim() }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return missing.length > 0 ? [weekly.hsClientsMissing(season, missing)] : []
 }

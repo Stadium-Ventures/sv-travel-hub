@@ -5,6 +5,9 @@
 // When it speaks:
 //   Jan 15 to Jun 30   the college season: a client school with no readable
 //                      games, or with no schedule source at all.
+//   Dec 1 to Jan 14    preseason: a broken source, and a school with no
+//                      schedule source at all (six weeks' notice before
+//                      mid-February openers to type its games in the sheet).
 //   Sep 1 to Nov 30    fall ball: only a source that is broken (a page that
 //                      can't be read); "nothing published yet" is normal.
 //   otherwise          silent.
@@ -87,10 +90,12 @@ export async function checkNcaaSchedules(now: Date, opts: NcaaCheckOptions = {})
   const md = monthDay(now)
   const spring = md >= 115 && md <= 630
   const fall = md >= 901 && md <= 1130
-  if (!spring && !fall) return []
+  const preseason = md >= 1201 || md < 115
+  if (!spring && !fall && !preseason) return []
 
   const schools = [...new Set(opts.schools ?? Object.keys(NCAA_SCHEDULE_SOURCES))]
-  const season = spring ? now.getUTCFullYear() : now.getUTCFullYear() + 1
+  // From August on, the season ahead is next calendar year's.
+  const season = md >= 801 ? now.getUTCFullYear() + 1 : now.getUTCFullYear()
   const from = `${season - 1}-08-01`
   const to = `${season}-07-31`
 
@@ -109,7 +114,7 @@ export async function checkNcaaSchedules(now: Date, opts: NcaaCheckOptions = {})
   const findings: NcaaFinding[] = []
 
   const noSource = results.filter((r) => r.status === 'no-source' && sheetGameCount(opts.sheetCsvText, r.school, from, to) === 0)
-  if (spring && noSource.length > 0) {
+  if ((spring || preseason) && noSource.length > 0) {
     const named = noSource.map((r) => r.school)
     const known = named.filter((s) => NCAA_NO_PUBLIC_SOURCE[s])
     findings.push({

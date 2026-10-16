@@ -27,7 +27,10 @@ describe('parseScheduleCsv', () => {
 
     expect(result.hsRowCount).toBe(4)
     expect(result.unmappedTeams).toEqual(['Mystery Prep'])
-    expect(result.schedules.size).toBe(2)
+    // A team outside the school table still loads under its own name, so a
+    // new client's school only needs rows typed into the sheet.
+    expect(result.schedules.size).toBe(3)
+    expect(result.schedules.get('Mystery Prep|')?.games).toHaveLength(1)
 
     const img = result.schedules.get('IMG|FL')
     expect(img).toBeDefined()

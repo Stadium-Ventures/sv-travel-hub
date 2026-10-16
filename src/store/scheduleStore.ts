@@ -1499,14 +1499,17 @@ export const useScheduleStore = create<ScheduleState>()(
           diag.addIssue({ level: 'warning', source: 'hs', message: w })
         }
 
-        // Teams present in the sheet but missing a CSV_TEAM_INFO mapping —
-        // actionable and distinct from "school not in the sheet at all".
-        if (csvUnmappedTeams.length > 0) {
+        // Teams outside the school table load under their own name, so the
+        // only problem left is a sheet team that matches no client's school
+        // (a spelling difference, or a former client).
+        const usedSchoolKeys = new Set(schoolToPlayers.keys())
+        const strayTeams = csvUnmappedTeams.filter((t) => !usedSchoolKeys.has(`${t}|`))
+        if (strayTeams.length > 0) {
           diag.addIssue({
             level: 'warning',
             source: 'hs',
-            message: `${csvUnmappedTeams.length} team(s) in the schedule sheet but not in CSV_TEAM_INFO — add mapping in src/lib/hsCsvShared.ts`,
-            details: csvUnmappedTeams.join(', '),
+            message: `${strayTeams.length} team name${strayTeams.length === 1 ? '' : 's'} in the schedule sheet match no client's school. Spell the Team exactly as the roster does, or ignore former clients.`,
+            details: strayTeams.join(', '),
           })
         }
 

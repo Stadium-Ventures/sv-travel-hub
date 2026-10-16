@@ -19,7 +19,7 @@ import { RECAP_PAUSED } from './_lib/recapStatus.js'
 import { headerIndex, monthDay, normalizeIsoDate, parseCsv } from './_lib/csv.js'
 import { createFetchJson, loadAflClubs, loadOrgIndex, loadRoster, MLB_BASE } from './_lib/mlbClient.js'
 import { coverageFindings, runCoverageCheck } from './_lib/coverageCheck.js'
-import { checkHsSheetSeason, checkSpringTraining, isHsSeasonWindow, isSpringTurnWindow } from './_lib/seasonTurnChecks.js'
+import { checkHsClientCoverage, checkHsSheetSeason, checkSpringTraining, isHsClientWindow, isHsSeasonWindow, isSpringTurnWindow } from './_lib/seasonTurnChecks.js'
 import { ncaaSeasonCheck } from './_lib/ncaaSeasonCheck.js'
 import { runChecksWithRecheck, type RunStats } from './_lib/monitorRunner.js'
 import {
@@ -399,6 +399,7 @@ const recapDryRunCheck: MonitorCheck<MonitorContext> = {
 //   every week      NCAA: client schools the hub can't match to a program
 //   Nov 16–Feb 15   Pro: next spring training is in MLB's schedule per client org
 //   Dec–May         HS/JUCO: the schedule the hub reads has the new season
+//   Jan 5–May 15    HS/JUCO: every high school client's school has games in it
 //   May 15–Aug 15   Summer: placements, no-feed leagues, team names
 //   Sep 15–Nov 20   Arizona Fall League: clubs exist; rosters filled from Oct 1
 // Stateless, so they re-alert every Monday until fixed — deliberate: each one
@@ -440,7 +441,12 @@ const hsSeasonCheck: MonitorCheck<MonitorContext> = {
   run: async (ctx) => {
     if (!ctx.force && !isHsSeasonWindow(ctx.now)) return []
     const sheet = await ctx.scheduleSheet()
-    return sheet?.ok && sheet.text ? checkHsSheetSeason(sheet.text, ctx.now) : []
+    if (!sheet?.ok || !sheet.text) return []
+    const findings = checkHsSheetSeason(sheet.text, ctx.now)
+    // Per-client coverage only once the sheet has the new season at all.
+    if (findings.length > 0 || (!ctx.force && !isHsClientWindow(ctx.now))) return findings
+    const roster = await ctx.roster()
+    return roster.ok ? checkHsClientCoverage(sheet.text, roster.clients, ctx.now) : []
   },
 }
 

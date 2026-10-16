@@ -175,7 +175,7 @@ function AutoFetchData() {
       schedulesInitialized.current = true
       // Re-run HS + NCAA on startup so the latest bundled venue coords are used.
       const sched = useScheduleStore.getState()
-      const hsOrgs = players.filter((p) => p.level === 'HS' && p.state).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
+      const hsOrgs = players.filter((p) => p.level === 'HS' && p.org?.trim()).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state ?? '' }))
       if (hsOrgs.length > 0) sched.fetchHsSchedules(hsOrgs)
       const ncaaOrgs = players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))
       if (ncaaOrgs.length > 0) sched.fetchNcaaSchedules(ncaaOrgs)
@@ -217,10 +217,12 @@ function AutoFetchData() {
       // (rosters, AFL clubs, then ~150 schedules) and must not block them.
       const ncaaOrgs = players.filter((p) => p.level === 'NCAA').map((p) => ({ playerName: p.playerName, org: p.org }))
       if (ncaaOrgs.length > 0) sched.fetchNcaaSchedules(ncaaOrgs)
-      // HS: CSV only, no bundled fallback. Same `p.state` filter as the warm
-      // path above; players without a state can't be matched to a school.
+      // HS: CSV only, no bundled fallback. A client with no home state on the
+      // roster still loads: the sheet match falls back to the school name, and
+      // a school that can't be placed shows in Data health instead of the
+      // client silently vanishing (2026-10-16).
       if (hasHs) {
-        const hsOrgs = players.filter((p) => p.level === 'HS' && p.state).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state! }))
+        const hsOrgs = players.filter((p) => p.level === 'HS' && p.org?.trim()).map((p) => ({ playerName: p.playerName, org: p.org, state: p.state ?? '' }))
         if (hsOrgs.length > 0) sched.fetchHsSchedules(hsOrgs)
       }
       // Pro: auto-assign players to MLB org affiliates, match AFL clubs,

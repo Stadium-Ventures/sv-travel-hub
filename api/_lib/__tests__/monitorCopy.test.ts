@@ -30,6 +30,8 @@ function everyFinding(): Finding[] {
     copy.weekly.ncaaSchoolsUnmatched([{ school: 'Sample State', names: ['Test Player One'] }]),
     copy.weekly.hsSeasonNotEntered(2027, '2026-05-02'),
     copy.weekly.hsStillLastSeason(2027, ''),
+    copy.weekly.hsClientsMissing(2027, [{ name: 'Test Player One', school: 'Sample Prep' }]),
+    copy.weekly.hsClientsMissing(2027, [{ name: 'Test Player One', school: 'Sample Prep' }, { name: 'Test Player Two', school: '' }]),
     copy.weekly.summerSheetNotConnected(),
     copy.weekly.summerSheetUnreadable(),
     copy.weekly.summerMisspelled(['"Test Plyr One" (roster: Test Player One)']),
