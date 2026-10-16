@@ -152,6 +152,32 @@ interface TripState {
 // Track active worker for cancel support
 let activeWorker: Worker | null = null
 
+/** Spring seasons (Jan to Jul of a year) a date range touches. */
+function springYears(startDate: string, endDate: string): Set<number> {
+  const years = new Set<number>()
+  const startYear = Number(startDate.slice(0, 4))
+  const endYear = Number(endDate.slice(0, 4))
+  for (let y = startYear; y <= endYear; y++) {
+    if (startDate <= `${y}-07-31` && endDate >= `${y}-01-01`) years.add(y)
+  }
+  return years
+}
+
+/** Players with at least one real game in a spring season the range
+ *  touches. College and high school baseball are spring sports: fall ball
+ *  and last season's games must not stand in for an unpublished spring
+ *  schedule, or the estimated placeholder games for that spring vanish. */
+export function playersWithSpringGames(games: GameEvent[], startDate: string, endDate: string): Set<string> {
+  const years = springYears(startDate, endDate)
+  const out = new Set<string>()
+  for (const g of games) {
+    const month = Number(g.date.slice(5, 7))
+    if (month > 7 || !years.has(Number(g.date.slice(0, 4)))) continue
+    for (const n of g.playerNames) out.add(n)
+  }
+  return out
+}
+
 export const useTripStore = create<TripState>()(
   persist(
     (set, get) => ({
@@ -363,10 +389,10 @@ export const useTripStore = create<TripState>()(
       players, startDate, endDate, customMlbAliases, scheduledGames,
     )
 
-    // Use real D1Baseball NCAA schedules if available, otherwise fall back to synthetic
-    const ncaaPlayersWithRealSchedules = new Set(
-      realNcaaGames.flatMap((g) => g.playerNames),
-    )
+    // Use real NCAA schedules if available, otherwise fall back to synthetic.
+    // Only real games in a spring season the dates touch count: fall
+    // exhibitions or last season's games don't mean this spring is published.
+    const ncaaPlayersWithRealSchedules = playersWithSpringGames(realNcaaGames, startDate, endDate)
     const ncaaSyntheticEvents = generateNcaaEvents(
       // Only generate synthetic events for NCAA players WITHOUT real schedules
       players.filter((p) => p.level === 'NCAA' && !ncaaPlayersWithRealSchedules.has(p.playerName)),
@@ -377,9 +403,7 @@ export const useTripStore = create<TripState>()(
 
     // Use real MaxPreps HS schedules if available, otherwise fall back to synthetic
     const realHsGames = scheduleState.hsGames
-    const hsPlayersWithRealSchedules = new Set(
-      realHsGames.flatMap((g) => g.playerNames),
-    )
+    const hsPlayersWithRealSchedules = playersWithSpringGames(realHsGames, startDate, endDate)
 
     // Build HS venue lookup from venue store
     const venueState = useVenueStore.getState().venues

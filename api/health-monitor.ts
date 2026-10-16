@@ -237,11 +237,10 @@ export async function runMonitor(opts: MonitorRunOptions): Promise<{ findings: F
   const weeklyRun = opts.force || opts.now.getUTCDay() === 1
   const checks: Array<MonitorCheck<MonitorContext>> = []
   if (!RECAP_PAUSED) checks.push(recapSlackCheck)
-  checks.push(rosterCheck, hsSheetCheck, eventsCheck, heartbeatCheck, mlbCheck, coverageCheck)
+  checks.push(rosterCheck, hsSheetCheck, eventsCheck, heartbeatCheck, mlbCheck, coverageCheck, ncaaScheduleCheck)
   if (!RECAP_PAUSED) checks.push(recapDryRunCheck)
   if (weeklyRun) {
     checks.push(ncaaSchoolNamesCheck, hsSeasonCheck, summerCheck, aflRostersCheck, springTrainingCheck)
-    checks.push(...EXTRA_WEEKLY_CHECKS)
   }
   return runChecksWithRecheck(checks, {
     makeContext: (confirmKeys) => makeContext(opts.now, opts.force, confirmKeys),
@@ -253,11 +252,14 @@ export async function runMonitor(opts: MonitorRunOptions): Promise<{ findings: F
   })
 }
 
-/** Extra weekly checks that plug in from their own modules. The new NCAA
- *  schedule source's season check goes here (api/_lib/ncaaSeasonCheck.ts). */
-const EXTRA_WEEKLY_CHECKS: Array<MonitorCheck<MonitorContext>> = [
-  { name: 'ncaa-season', label: 'college schedule', run: ncaaSeasonCheck },
-]
+/** College schedules: each client school's source still reads, in fall ball
+ *  and the college season (the check keeps its own windows). Daily, so a
+ *  site redesign mid-season is caught the next morning. */
+const ncaaScheduleCheck: MonitorCheck<MonitorContext> = {
+  name: 'ncaa-season',
+  label: 'college schedule',
+  run: ncaaSeasonCheck,
+}
 
 // ─── Daily: sources ──────────────────────────────────────────────────────────
 
@@ -395,7 +397,6 @@ const recapDryRunCheck: MonitorCheck<MonitorContext> = {
 //
 // Seasonal calendar (UTC; Mondays, or any day with ?force=1):
 //   every week      NCAA: client schools the hub can't match to a program
-//   (hook)          NCAA: next season's schedules (api/_lib/ncaaSeasonCheck.ts)
 //   Nov 16–Feb 15   Pro: next spring training is in MLB's schedule per client org
 //   Dec–May         HS/JUCO: the schedule the hub reads has the new season
 //   May 15–Aug 15   Summer: placements, no-feed leagues, team names

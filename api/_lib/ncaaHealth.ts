@@ -14,6 +14,12 @@ import { fetchSchoolSchedule, type NcaaSchoolSchedule } from './ncaaSchedule.js'
 import { NCAA_SCHEDULE_SOURCES, NCAA_NO_PUBLIC_SOURCE } from '../_data/ncaaSources.js'
 
 export interface NcaaFinding {
+  /** Which problem this is; the monitor keys its same-run re-check on it. */
+  kind: 'no-source' | 'unreadable' | 'empty'
+  /** Short headline for the Slack post. */
+  title: string
+  /** Schools behind the finding. */
+  schools: string[]
   severity: 'critical' | 'warning'
   code: boolean
   what: string
@@ -107,13 +113,16 @@ export async function checkNcaaSchedules(now: Date, opts: NcaaCheckOptions = {})
     const named = noSource.map((r) => r.school)
     const known = named.filter((s) => NCAA_NO_PUBLIC_SOURCE[s])
     findings.push({
+      kind: 'no-source',
+      title: `${named.length} college ${named.length === 1 ? 'school has' : 'schools have'} no schedule in the hub`,
+      schools: named,
       severity: 'warning',
       code: known.length < named.length,
       what: `College games for ${named.join(', ')} won't show in the Travel Hub. ${named.length === 1 ? 'That school has' : 'Those schools have'} no schedule the app can read, and the Client Game Schedule sheet has no games for ${named.length === 1 ? 'it' : 'them'} this season.`,
       how: noSource.map((r) => r.message).join(' '),
       todo: known.length === named.length
         ? `Type the games into the Client Game Schedule sheet (Level NCAA). The app shows sheet games for schools without a readable site.`
-        : `Add the school's athletics site to api/_data/ncaaSources.ts in sv-travel-hub (Claude Code can find it). Until then, type the games into the Client Game Schedule sheet (Level NCAA).`,
+        : `Open sv-travel-hub in Claude Code and add the school's athletics site to the college schedule sources. Until then, type the games into the Client Game Schedule sheet (Level NCAA).`,
     })
   }
 
@@ -121,20 +130,26 @@ export async function checkNcaaSchedules(now: Date, opts: NcaaCheckOptions = {})
   const emptyInSeason = spring ? results.filter((r) => r.status === 'empty') : []
   if (broken.length > 0) {
     findings.push({
+      kind: 'unreadable',
+      title: `${broken.length} college schedule ${broken.length === 1 ? 'page' : 'pages'} can't be read`,
+      schools: broken.map((r) => r.school),
       severity: 'warning',
       code: true,
       what: `College games for ${broken.map((r) => r.school).join(', ')} may be missing or out of date in the Travel Hub. The schedule ${broken.length === 1 ? 'page' : 'pages'} could not be read.`,
       how: broken.map((r) => `${r.message}${r.sourceUrl ? ` (${r.sourceUrl})` : ''}`).join(' '),
-      todo: 'Open sv-travel-hub in Claude Code and check the reader in api/_lib/ncaaSchedule.ts against the page (the site may have changed its layout), or the entry in api/_data/ncaaSources.ts. Meanwhile the app shows sheet games or its last saved copy.',
+      todo: 'Open sv-travel-hub in Claude Code and check the college schedule reader against the page (the site may have changed its layout or address). Meanwhile the app shows sheet games or its last saved copy.',
     })
   }
   if (emptyInSeason.length > 0) {
     findings.push({
+      kind: 'empty',
+      title: `${emptyInSeason.length} college ${emptyInSeason.length === 1 ? 'school shows' : 'schools show'} no games mid-season`,
+      schools: emptyInSeason.map((r) => r.school),
       severity: 'warning',
       code: true,
       what: `No ${season} games found for ${emptyInSeason.map((r) => r.school).join(', ')}, in the middle of the college season.`,
       how: `The schedule ${emptyInSeason.length === 1 ? 'page loads' : 'pages load'} but list no ${season} games: ${emptyInSeason.map((r) => r.sourceUrl).filter(Boolean).join(', ')}.`,
-      todo: 'Open the page: if the games are there, the reader in api/_lib/ncaaSchedule.ts needs a fix (Claude Code). If the site moved the schedule, update api/_data/ncaaSources.ts.',
+      todo: 'Open the page. If the games are there, open sv-travel-hub in Claude Code to fix the college schedule reader; if the site moved the schedule, update its address in the college schedule sources.',
     })
   }
   return findings

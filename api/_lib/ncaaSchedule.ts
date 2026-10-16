@@ -644,7 +644,7 @@ export async function fetchSchoolSchedule(school: string, opts: FetchScheduleOpt
       const page = await getText(fetchFn, url, timeoutMs)
       if (page.status === 404) continue
       if (page.status !== 200) {
-        errors.push(`the site answered HTTP ${page.status}`)
+        errors.push('the site returned an error')
         continue
       }
       const all = parseSchedule(source, page.text, season)
