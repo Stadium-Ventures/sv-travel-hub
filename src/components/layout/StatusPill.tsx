@@ -15,7 +15,9 @@ export default function StatusPill() {
   const [open, setOpen] = useState(false)
 
   const rosterLoading = useRosterStore((s) => s.loading)
-  const rosterFetched = useRosterStore((s) => s.lastFetchedAt)
+  // An empty roster is never "current", whatever the last fetch time says
+  // (the registry source starts empty until someone signs in).
+  const rosterFetched = useRosterStore((s) => (s.players.length > 0 ? s.lastFetchedAt : null))
   const heartbeatLoading = useHeartbeatStore((s) => s.loading)
   const heartbeatFetched = useHeartbeatStore((s) => s.lastFetchedAt)
   const proLoading = useScheduleStore((s) => s.schedulesLoading)

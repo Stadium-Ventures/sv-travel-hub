@@ -62,7 +62,8 @@ describe('rosterStore on the registry source: 401 handling', () => {
     await useRosterStore.getState().fetchRoster()
     const s = useRosterStore.getState()
     expect(s.needsSignIn).toBe(true)
-    expect(s.error).toMatch(/Sign in/)
+    // A sign-in prompt, not an error: the Roster tab must not show "Failed to load roster".
+    expect(s.error).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

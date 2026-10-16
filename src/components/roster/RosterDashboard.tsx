@@ -10,6 +10,7 @@ import PlayerCard from './PlayerCard'
 import CoveragePanel from './CoveragePanel'
 import DiagnosticsPanel from '../diagnostics/DiagnosticsPanel'
 import { proSeasonWindow } from '../../lib/season'
+import { getRosterSourceOrNull } from '../../lib/rosterSource'
 
 export default function RosterDashboard() {
   const players = useRosterStore((s) => s.players)
@@ -20,6 +21,8 @@ export default function RosterDashboard() {
   const generatedAt = useRosterStore((s) => s.generatedAt)
   const parseWarnings = useRosterStore((s) => s.parseWarnings)
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
+  const needsSignIn = useRosterStore((s) => s.needsSignIn)
+  const shrinkBlocked = useRosterStore((s) => s.shrinkBlocked)
 
   const rawRosterMoves = useScheduleStore((s) => s.rosterMoves)
   // Dedupe per player: keep only the most-recent meaningful move. Cascading
@@ -222,23 +225,49 @@ export default function RosterDashboard() {
     )
   }
 
-  if (error) {
+  // Registry source with nothing loaded yet: a sign-in prompt, not a
+  // failure. The bar at the top of the page carries the Google button.
+  if (needsSignIn && players.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-6 text-center">
+        <p className="font-medium text-text">Sign in to see the roster</p>
+        <p className="mt-1 text-sm text-text-dim">
+          Use the Google sign-in button at the top of the page with your @stadium-ventures.com account. The roster loads as soon as you are signed in.
+        </p>
+      </div>
+    )
+  }
+
+  // fetchRoster keeps the roster it had when a refresh fails, so only take
+  // over the page when there is nothing loaded to show.
+  if (error && players.length === 0) {
     return (
       <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-6 text-center">
         <p className="text-accent-red font-medium">Failed to load roster</p>
         <p className="mt-1 text-sm text-text-dim">{error}</p>
-        <button
-          onClick={fetchRoster}
-          className="mt-4 rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/80"
-        >
-          Retry
-        </button>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <button
+            onClick={fetchRoster}
+            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/80"
+          >
+            Retry
+          </button>
+          {shrinkBlocked && <AcceptSmallerRosterButton />}
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-4">
+      {error && (
+        <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 px-5 py-3 text-sm" role="alert">
+          <p className="font-medium text-accent-red">The roster could not refresh. Showing the last roster that loaded.</p>
+          <p className="mt-1 text-text-dim">{error}</p>
+          {shrinkBlocked && <div className="mt-2"><AcceptSmallerRosterButton /></div>}
+        </div>
+      )}
+
       {/* Compact summary: player count + refresh */}
       <div className="rounded-xl border border-border bg-surface overflow-hidden">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3">
@@ -571,7 +600,11 @@ export default function RosterDashboard() {
       {players.length === 0 && !loading && !error && (
         <div className="py-10 text-center">
           <p className="text-sm text-text-dim">No players loaded yet.</p>
-          <p className="mt-1 text-xs text-text-dim/60">The roster pulls automatically from the Google Sheet. Click Refresh above if it hasn't loaded.</p>
+          <p className="mt-1 text-xs text-text-dim/60">
+            {getRosterSourceOrNull() === 'registry'
+              ? "The roster loads from sv-registry once you are signed in. Click Refresh above if it hasn't loaded."
+              : "The roster pulls automatically from the Google Sheet. Click Refresh above if it hasn't loaded."}
+          </p>
         </div>
       )}
 
@@ -826,3 +859,19 @@ function VerifyResultsPanel({ log, springTraining: _springTraining }: { log: Ass
   )
 }
 
+/** Shown when a fetched roster was held back for being far smaller than the
+ *  last good one. Accepting it prunes everyone it leaves out. */
+function AcceptSmallerRosterButton() {
+  const acceptSmallerRoster = useRosterStore((s) => s.acceptSmallerRoster)
+  const loading = useRosterStore((s) => s.loading)
+  return (
+    <button
+      onClick={() => { void acceptSmallerRoster() }}
+      disabled={loading}
+      title="Only if clients really were removed. Their saved teams, trip picks and visit counts are dropped."
+      className="rounded-lg border border-accent-red/40 px-4 py-2 text-sm font-medium text-accent-red hover:bg-accent-red/10 disabled:opacity-50"
+    >
+      Load the smaller roster anyway
+    </button>
+  )
+}

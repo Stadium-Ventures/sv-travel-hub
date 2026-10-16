@@ -49,3 +49,26 @@ describe('sv-travel-roster persist migration', () => {
     expect(copy.phone).toBe('555-0100')
   })
 })
+
+describe('sv-travel-roster v2: visit overrides get a timestamp', () => {
+  const NOW = '2026-10-16T12:00:00.000Z'
+  it('stamps unstamped overrides from older snapshots so they can expire', () => {
+    const migrated = migrateRosterPersist(
+      { players: [], visitOverrides: { a: { visitsCompleted: 1, lastVisitDate: null } } },
+      1,
+      NOW,
+    ) as { visitOverrides: Record<string, unknown> }
+    expect(migrated.visitOverrides).toEqual({ a: { visitsCompleted: 1, lastVisitDate: null, appliedAt: NOW } })
+  })
+  it('keeps an existing stamp', () => {
+    const migrated = migrateRosterPersist(
+      { players: [], visitOverrides: { a: { visitsCompleted: 1, lastVisitDate: null, appliedAt: 'earlier' } } },
+      1,
+      NOW,
+    ) as { visitOverrides: Record<string, { appliedAt: string }> }
+    expect(migrated.visitOverrides.a!.appliedAt).toBe('earlier')
+  })
+  it('is version 2', () => {
+    expect(ROSTER_PERSIST_VERSION).toBe(2)
+  })
+})

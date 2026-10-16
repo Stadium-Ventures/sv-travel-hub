@@ -9,10 +9,12 @@ import { fetchWithTimeout } from './fetchWithTimeout'
  *  this loader refuses a payload that does not assert that. */
 export const DEFAULT_REGISTRY_ROSTER_URL = 'https://sv-registry.vercel.app/api/roster-projection'
 
-/** Fail closed below this many client rows. The projection carries ~99 rows
- *  and the sheet ~88; a response far below that is a broken build or a
- *  truncated read, and pruning every persisted store against it would drop
- *  real clients. Override with VITE_ROSTER_MIN_ROWS. */
+/** Fail closed below this many usable client rows (counted after coaches and
+ *  former clients are dropped). The projection carries ~92 clients and the
+ *  sheet ~88; a response far below that is a broken build or a truncated
+ *  read, and pruning every persisted store against it would drop real
+ *  clients. Override with VITE_ROSTER_MIN_ROWS. A smaller drop is caught by
+ *  the store's sharp-drop guard (src/store/rosterSafety.ts). */
 export const DEFAULT_MIN_ROWS = 50
 
 export interface ProjectionVisits {
@@ -168,11 +170,6 @@ export function projectionToRoster(json: unknown, opts: { minRows?: number; gene
     throw new RosterContractError('Registry roster: _meta.contains_no_contact_data is not true; refusing to load')
   }
   if (!Array.isArray(rows)) throw new RosterContractError('Registry roster: response has no rows array')
-  if (rows.length < minRows) {
-    throw new RosterContractError(
-      `Registry roster returned ${rows.length} rows, below the fail-closed floor of ${minRows}. Keeping the previous roster; report this in #sv-automation.`,
-    )
-  }
 
   const warnings: string[] = []
   const players: RosterPlayer[] = []
@@ -192,6 +189,14 @@ export function projectionToRoster(json: unknown, opts: { minRows?: number; gene
     if (r.is_client === false) continue // former clients are excluded at source; belt and braces
     if (r.is_coach === true) continue // same rule as the sheet's "Is Coach" filter
     players.push(mapProjectionRow(r, warnings))
+  }
+  // The floor counts usable client rows, after coaches, former clients,
+  // duplicates and unusable rows are dropped: a build of mostly coaches or
+  // blanks must not pass on its raw row count.
+  if (players.length < minRows) {
+    throw new RosterContractError(
+      `Registry roster has ${players.length} usable client rows (${rows.length} rows sent), below the fail-closed floor of ${minRows}. Keeping the previous roster; report this in #sv-automation.`,
+    )
   }
 
   const generatedAt = str(_meta.generated_at) || str(opts.generatedAtHeader)

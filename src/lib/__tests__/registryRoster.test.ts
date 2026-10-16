@@ -120,11 +120,17 @@ describe('projectionToRoster', () => {
   })
 
   it('drops coaches and former clients, like the sheet coach filter', () => {
-    const rows = many(DEFAULT_MIN_ROWS, (i) => (i === 1 ? { is_coach: true } : i === 2 ? { is_client: false } : {}))
+    const rows = many(DEFAULT_MIN_ROWS + 2, (i) => (i === 1 ? { is_coach: true } : i === 2 ? { is_client: false } : {}))
     const r = projectionToRoster(payload(rows))
     expect(r.players.map((p) => p.slug)).not.toContain('test-player-1')
     expect(r.players.map((p) => p.slug)).not.toContain('test-player-2')
-    expect(r.players).toHaveLength(DEFAULT_MIN_ROWS - 2)
+    expect(r.players).toHaveLength(DEFAULT_MIN_ROWS)
+  })
+
+  it('counts the floor on usable client rows, not raw rows', () => {
+    // 50 rows sent, 45 of them coaches: 5 clients must not pass a floor of 50.
+    const rows = many(DEFAULT_MIN_ROWS, (i) => (i > 5 ? { is_coach: true } : {}))
+    expect(() => projectionToRoster(payload(rows))).toThrow(/5 usable client rows \(50 rows sent\), below the fail-closed floor of 50/)
   })
 
   it('skips duplicate slugs and slug-less rows with a warning', () => {
