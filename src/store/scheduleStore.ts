@@ -3,8 +3,9 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { idbStorage } from '../lib/idbStorage'
 import { debugLog } from '../lib/debugLog'
 import type { MLBAffiliate, MLBGameRaw, MLBTransaction } from '../lib/mlbApi'
-import { fetchAllAffiliates, fetchAllSchedules, fetchAllTransactions, fetchAllRosters, fetchAflTeams } from '../lib/mlbApi'
-import { AFL_SPORT_ID, isAflSeason } from '../lib/season'
+import { fetchAllAffiliates, fetchAllSchedules, fetchPlayerTransactions, fetchAllRosters, fetchAflTeams } from '../lib/mlbApi'
+import { AFL_SPORT_ID, isAflSeason, proSeasonWindow } from '../lib/season'
+import { applyRosterMoves, orgChangeWarning, releaseFromMove, releaseWarning, rosterMovesWindowStart, type RosterRelease } from '../lib/rosterMoves'
 import { MLB_PARENT_IDS, resolveNcaaName, resolveMLBTeamId } from '../data/aliases'
 import type { GameEvent } from '../types/schedule'
 import { extractVenueCoords } from '../lib/mlbApi'
@@ -96,6 +97,16 @@ interface ScheduleState {
   // Fetch timestamps
   proFetchedAt: number | null
   ncaaFetchedAt: number | null
+  /** Last time proGames was rebuilt from raw schedules (a fetch or a
+   *  regenerate). The stale-schedules banner compares against it. */
+  proGamesBuiltAt: number | null
+  /** Last successful Check Assignments (live rosters). Transactions posted
+   *  before it can't override what the rosters said. */
+  assignmentsVerifiedAt: number | null
+  /** Clients the transactions say were released, became free agents or
+   *  retired. Check Assignments drops their old team unless a live roster
+   *  still lists them. */
+  rosterReleases: Record<string, RosterRelease>
 
   // Cached coverage tracking (for incremental fetching)
   cachedProTeamIds: number[]
@@ -120,6 +131,9 @@ interface ScheduleState {
   regenerateProGames: () => void
   pruneRemovedPlayers: () => void
   checkRosterMoves: () => Promise<void>
+  /** Rebuild Pro games after assignments changed, fetching any club whose
+   *  schedule isn't loaded yet. */
+  refreshProGamesForTeams: (teamIds: number[]) => Promise<void>
   fetchNcaaSchedules: (playerOrgs: Array<{ playerName: string; org: string }>, opts?: { merge?: boolean; forceRefresh?: boolean }) => Promise<void>
   fetchHsSchedules: (playerOrgs: Array<{ playerName: string; org: string; state: string }>, opts?: { merge?: boolean; forceRefresh?: boolean }) => Promise<void>
 }
@@ -241,6 +255,9 @@ export const useScheduleStore = create<ScheduleState>()(
 
       proFetchedAt: null,
       ncaaFetchedAt: null,
+      proGamesBuiltAt: null,
+      assignmentsVerifiedAt: null,
+      rosterReleases: {},
 
       cachedProTeamIds: [],
       cachedNcaaSchools: [],
@@ -597,6 +614,19 @@ export const useScheduleStore = create<ScheduleState>()(
             notFoundNames.push(player.playerName)
           }
 
+          // Not found usually keeps the last known team (a winter roster gap
+          // shouldn't blank a client). Not when the transactions say he was
+          // released, became a free agent or retired: then the old team is
+          // wrong, so drop it. Found on a roster again clears the release.
+          const releases = { ...(state.rosterReleases ?? {}) }
+          for (const name of Object.keys(releases)) {
+            // Same object as before = not matched on any roster this run
+            // (not found, or kept because its roster fetch failed).
+            const matched = newAssignments[name] !== state.playerTeamAssignments[name]
+            if (matched) delete releases[name]
+            else delete newAssignments[name]
+          }
+
           // Phase 3: Name-based fallback for players without mlbPlayerId
           if (proPlayersWithoutId.length > 0) {
             // Build a name lookup from all rosters already fetched (MLB + MiLB)
@@ -663,6 +693,8 @@ export const useScheduleStore = create<ScheduleState>()(
 
           set({
             playerTeamAssignments: newAssignments,
+            assignmentsVerifiedAt: Date.now(),
+            rosterReleases: releases,
             autoAssignLoading: false,
             autoAssignResult: {
               assigned: assignedCount,
@@ -726,14 +758,18 @@ export const useScheduleStore = create<ScheduleState>()(
         const oldLog = get().assignmentLog ?? []
         const prunedLog = oldLog.filter((e) => rosterNames.has(e.playerName))
         const aflRemoved = Object.keys(get().aflAssignments).filter((n) => !rosterNames.has(n))
-        if (removed.length === 0 && aflRemoved.length === 0 && prunedMoves.length === oldMoves.length && prunedLog.length === oldLog.length) return
+        const releasesRemoved = Object.keys(get().rosterReleases ?? {}).filter((n) => !rosterNames.has(n))
+        if (removed.length === 0 && aflRemoved.length === 0 && releasesRemoved.length === 0 && prunedMoves.length === oldMoves.length && prunedLog.length === oldLog.length) return
         const pruned = { ...assignments }
         for (const n of removed) delete pruned[n]
         const prunedAfl = { ...get().aflAssignments }
         for (const n of Object.keys(prunedAfl)) if (!rosterNames.has(n)) delete prunedAfl[n]
+        const prunedReleases = { ...(get().rosterReleases ?? {}) }
+        for (const n of releasesRemoved) delete prunedReleases[n]
         set({
           playerTeamAssignments: pruned,
           aflAssignments: prunedAfl,
+          rosterReleases: prunedReleases,
           rosterMoves: prunedMoves,
           assignmentLog: prunedLog,
         })
@@ -809,7 +845,7 @@ export const useScheduleStore = create<ScheduleState>()(
 
         const allGames = [...eventsById.values()]
         allGames.sort((a, b) => a.date.localeCompare(b.date))
-        set({ proGames: allGames })
+        set({ proGames: allGames, proGamesBuiltAt: Date.now() })
       },
 
       hasProAssignments: () => {
@@ -1018,6 +1054,7 @@ export const useScheduleStore = create<ScheduleState>()(
             schedulesLoading: false,
             schedulesProgress: null,
             proFetchedAt: Date.now(),
+            proGamesBuiltAt: Date.now(),
             cachedProTeamIds: teamsToFetch.map((t) => t.teamId),
           })
 
@@ -1057,106 +1094,94 @@ export const useScheduleStore = create<ScheduleState>()(
       },
       checkRosterMoves: async () => {
         if (get().rosterMovesLoading) return
-        const state = get()
-        const assignments = state.playerTeamAssignments
-        const allAffiliates = state.affiliates
-
-        // Collect unique parent org IDs from assigned players
-        const parentOrgIds = new Set<number>()
-        for (const assignment of Object.values(assignments)) {
-          const aff = allAffiliates.find((a) => a.teamId === assignment.teamId)
-          if (aff?.parentOrgId) parentOrgIds.add(aff.parentOrgId)
-        }
-
-        if (parentOrgIds.size === 0) return
+        const rosterPlayers = useRosterStore.getState().players
+        const tracked = rosterPlayers
+          .filter((p) => p.level === 'Pro' && p.mlbPlayerId)
+          .map((p) => ({ playerName: p.playerName, mlbPlayerId: p.mlbPlayerId! }))
+        if (tracked.length === 0) return
+        if (get().affiliates.length === 0) await get().fetchAffiliates()
+        const allAffiliates = get().affiliates
+        if (allAffiliates.length === 0) return
 
         set({ rosterMovesLoading: true })
 
         try {
-          // Look back to start of current season (Feb 1) to catch all moves
+          // Ask by player, not by org: a team query misses releases filed by
+          // an affiliate and moves filed by a new club after a trade.
           const now = new Date()
           const endDate = now.toISOString().split('T')[0]!
-          const seasonStart = new Date(now.getFullYear(), 1, 1) // Feb 1
-          const startDate = seasonStart.toISOString().split('T')[0]!
-
-          const txResult = await fetchAllTransactions(
-            [...parentOrgIds],
-            startDate,
-            endDate,
-          )
-          const transactions = txResult.transactions
-          if (txResult.failedTeamIds.length > 0) {
-            console.warn(`Transaction fetch failed for ${txResult.failedTeamIds.length} team(s):`, txResult.failedTeamIds)
+          const startDate = rosterMovesWindowStart(now, get().assignmentsVerifiedAt)
+          const txResult = await fetchPlayerTransactions(tracked.map((p) => p.mlbPlayerId), startDate, endDate)
+          if (txResult.failedPlayerIds.length === tracked.length) {
+            throw new Error('the MLB Stats API transactions request failed')
           }
 
-          // Cross-reference: find transactions involving assigned players
-          const playerMlbIds = new Map<number, string>() // mlbPlayerId → playerName
-          const playerAssignedTeams = new Map<string, number>() // playerName → assigned teamId
+          const byTeamId = new Map(allAffiliates.map((a) => [a.teamId, a]))
+          const lookupTeam = (teamId: number) => byTeamId.get(teamId)
+          const before = get().playerTeamAssignments
+          const { assignments: after, changes } = applyRosterMoves(txResult.transactions, tracked, before, lookupTeam)
 
-          const rosterPlayers = useRosterStore.getState().players
+          // One row per player per run: where they started vs where they
+          // ended. Replaying every option and recall of the season as its
+          // own "Moved" row flooded the panel (two Rockies clients, nine rows
+          // a day, 2026-10-16).
+          const ts = Date.now()
+          const moveLog: AssignmentChange[] = changes.map((c) => c.to
+            ? { playerName: c.playerName, action: c.from ? 'reassigned' as const : 'assigned' as const, from: c.from?.teamName, to: c.to.teamName, timestamp: ts }
+            : { playerName: c.playerName, action: 'removed' as const, from: c.from?.teamName, timestamp: ts })
 
-          for (const player of rosterPlayers) {
-            if (player.level !== 'Pro' || !player.mlbPlayerId) continue
-            playerMlbIds.set(player.mlbPlayerId, player.playerName)
-            const assignment = assignments[player.playerName]
-            if (assignment) playerAssignedTeams.set(player.playerName, assignment.teamId)
-          }
-
-          // Apply moves CHRONOLOGICALLY against the evolving assignment.
-          // The old logic compared every move against the pre-update
-          // assignment, so a May recall could stick forever: the later
-          // option BACK to the original team read as "not a move" and was
-          // dropped (Sterlin Thompson stuck on the Rockies, 2026-07-22).
-          const candidateMoves = transactions
-            .filter((t) => playerMlbIds.has(t.player.id) && t.toTeam)
-            .sort((a, b) => (a.effectiveDate || a.date).localeCompare(b.effectiveDate || b.date))
-
-          const updatedAssignments = { ...assignments }
-          const moveLog: AssignmentChange[] = []
-          const moveTimestamp = Date.now()
-          const relevantMoves: typeof transactions = []
-
-          for (const move of candidateMoves) {
-            const playerName = playerMlbIds.get(move.player.id)
-            if (!playerName || !move.toTeam) continue
-            const current = updatedAssignments[playerName]
-            if (!current) continue
-            if (move.toTeam.id === current.teamId) continue
-
-            // Find the destination team in affiliates to get sportId
-            const destAff = allAffiliates.find((a) => a.teamId === move.toTeam!.id)
-            if (!destAff) continue
-
-            // Paper moves to the MLB club ("Assigned", contract selections in
-            // spring, etc.) don't mean the player physically plays there —
-            // only honor a real call-up.
-            if (destAff.sportId === 1 && !/recall|selected|purchas/i.test(move.typeDesc)) continue
-
-            relevantMoves.push(move)
-            updatedAssignments[playerName] = {
-              teamId: destAff.teamId,
-              sportId: destAff.sportId,
-              teamName: destAff.teamName,
-            }
-            moveLog.push({
-              playerName,
-              action: 'reassigned',
-              from: current.teamName,
-              to: destAff.teamName,
-              timestamp: moveTimestamp,
-            })
+          const releases = { ...get().rosterReleases }
+          for (const c of changes) {
+            if (c.kind === 'released') releases[c.playerName] = releaseFromMove(c)
+            else delete releases[c.playerName]
           }
 
           set({
-            rosterMoves: relevantMoves,
+            rosterMoves: changes.filter((c) => c.kind === 'moved').map((c) => c.transaction),
             rosterMovesLoading: false,
+            rosterMovesError: null,
             rosterMovesCheckedAt: new Date().toISOString(),
-            // Auto-update assignments from detected moves
-            ...(moveLog.length > 0 ? {
-              playerTeamAssignments: updatedAssignments,
+            rosterReleases: releases,
+            ...(changes.length > 0 ? {
+              playerTeamAssignments: after as Record<string, PlayerTeamAssignment>,
               assignmentLog: [...(get().assignmentLog ?? []), ...moveLog].slice(-50),
             } : {}),
           })
+
+          // Tell staff what the roster sheet needs. Re-filed on every run so
+          // the reminder stays up until the sheet is fixed.
+          const diag = useDiagnosticsStore.getState()
+          diag.clearSource('moves')
+          const customMlb = get().customMlbAliases
+          const issues: Parameters<typeof diag.addIssues>[0] = []
+          for (const p of rosterPlayers) {
+            if (p.level !== 'Pro') continue
+            const release = releases[p.playerName]
+            if (release) {
+              issues.push({ level: 'warning', source: 'moves', message: releaseWarning(p.playerName, release) })
+              continue
+            }
+            const a = get().playerTeamAssignments[p.playerName]
+            const destOrg = a ? byTeamId.get(a.teamId)?.parentOrgId : undefined
+            const sheetOrg = resolveMLBTeamId(p.org, customMlb)
+            if (a && destOrg && sheetOrg && destOrg !== sheetOrg) {
+              const orgName = allAffiliates.find((t) => t.teamId === destOrg && t.sportId === 1)?.teamName ?? a.teamName
+              issues.push({ level: 'warning', source: 'moves', message: orgChangeWarning(p.playerName, p.org, orgName, a.teamName) })
+            }
+          }
+          if (txResult.failedPlayerIds.length > 0) {
+            issues.push({
+              level: 'warning',
+              source: 'moves',
+              message: `Roster moves could not be checked for ${txResult.failedPlayerIds.length} client${txResult.failedPlayerIds.length === 1 ? '' : 's'}. Their teams were left as they were.`,
+            })
+          }
+          if (issues.length > 0) diag.addIssues(issues)
+
+          // Rebuild games for the new teams right away, so a moved client's
+          // schedule never waits for a manual reload.
+          const movedTo = changes.flatMap((c) => (c.to ? [c.to.teamId] : []))
+          if (changes.length > 0) await get().refreshProGamesForTeams(movedTo)
         } catch (e) {
           const msg = e instanceof Error ? e.message : 'Unknown error'
           set({
@@ -1164,6 +1189,26 @@ export const useScheduleStore = create<ScheduleState>()(
             rosterMovesError: `Failed to check roster moves: ${msg}`,
           })
           console.error('Failed to check roster moves:', e)
+        }
+      },
+
+      refreshProGamesForTeams: async (teamIds) => {
+        // A schedule fetch already in flight was started with the old
+        // assignments. Let it land, then rebuild from what it loaded.
+        if (get().schedulesLoading) {
+          await new Promise<void>((resolve) => {
+            const unsub = useScheduleStore.subscribe((s) => {
+              if (!s.schedulesLoading) { unsub(); resolve() }
+            })
+          })
+        }
+        const raw = get().proSchedules
+        const needFetch = Object.keys(raw).length === 0 || teamIds.some((id) => !(id in raw))
+        if (needFetch) {
+          const { start, end } = proSeasonWindow()
+          await get().fetchProSchedules(start, end)
+        } else {
+          get().regenerateProGames()
         }
       },
       fetchNcaaSchedules: async (playerOrgs, { merge = false, forceRefresh = false } = {}) => {
@@ -1816,6 +1861,9 @@ export const useScheduleStore = create<ScheduleState>()(
         // NCAA and HS games are NOT persisted — always recomputed from bundled data on startup
         // This prevents stale cached games from overriding newer bundled schedules
         proFetchedAt: state.proFetchedAt,
+        proGamesBuiltAt: state.proGamesBuiltAt,
+        assignmentsVerifiedAt: state.assignmentsVerifiedAt,
+        rosterReleases: state.rosterReleases,
         // Track cached coverage for incremental fetching
         cachedProTeamIds: state.cachedProTeamIds,
         cachedNcaaSchools: state.cachedNcaaSchools,

@@ -11,6 +11,7 @@ import CoveragePanel from './CoveragePanel'
 import DiagnosticsPanel from '../diagnostics/DiagnosticsPanel'
 import { proSeasonWindow } from '../../lib/season'
 import { getRosterSourceOrNull } from '../../lib/rosterSource'
+import { schedulesStaleAfterMoves } from '../../lib/rosterMoves'
 
 export default function RosterDashboard() {
   const players = useRosterStore((s) => s.players)
@@ -75,6 +76,8 @@ export default function RosterDashboard() {
   const setCustomAlias = useScheduleStore((s) => s.setCustomAlias)
   const proGames = useScheduleStore((s) => s.proGames)
   const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
+  const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
+  const proGamesBuiltAt = useScheduleStore((s) => s.proGamesBuiltAt)
 
   const sortField = useRosterStore((s) => s.sortColumn)
   const sortDir = useRosterStore((s) => s.sortDirection)
@@ -502,8 +505,10 @@ export default function RosterDashboard() {
                 log={recentLog}
                 springTraining={autoAssignResult?.springTrainingEstimate ?? false}
               />
-              {/* Stale schedules warning when assignments changed */}
-              {recentLog.some((e) => e.action === 'reassigned') && proGames.length > 0 && (
+              {/* Stale schedules warning when assignments changed, until
+                  Pro games are rebuilt after the change (reload or the
+                  automatic rebuild after a roster move). */}
+              {schedulesStaleAfterMoves(recentLog, proFetchedAt, proGamesBuiltAt) && proGames.length > 0 && (
                 <div className="mb-3 rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-4 py-2.5">
                   <div className="flex items-center justify-between">
                     <div>

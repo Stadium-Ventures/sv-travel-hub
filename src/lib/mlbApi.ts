@@ -312,6 +312,29 @@ export interface MLBTransaction {
   typeDesc: string          // "Recalled", "Optioned", "Traded", etc.
   date: string              // "2026-03-01"
   effectiveDate: string
+  /** API transaction id. Ids grow with posting order, so they break ties
+   *  between moves that share an effective date. */
+  id?: number
+  /** Short type code: OPT, CU, ASG, SC, TR, REL, DFA (elected free
+   *  agency), RET, R5, ... */
+  typeCode?: string
+  /** Full sentence, e.g. "Boston Red Sox activated RHP John Doe from the
+   *  15-day injured list." */
+  description?: string
+}
+
+function toTransaction(t: Record<string, any>): MLBTransaction {
+  return {
+    player: { id: t.person?.id ?? 0, fullName: t.person?.fullName ?? 'Unknown' },
+    fromTeam: t.fromTeam ? { id: t.fromTeam.id, name: t.fromTeam.name } : undefined,
+    toTeam: t.toTeam ? { id: t.toTeam.id, name: t.toTeam.name } : undefined,
+    typeDesc: t.typeDesc ?? t.description ?? '',
+    date: t.date ?? '',
+    effectiveDate: t.effectiveDate ?? t.date ?? '',
+    id: typeof t.id === 'number' ? t.id : undefined,
+    typeCode: t.typeCode ?? undefined,
+    description: t.description ?? undefined,
+  }
 }
 
 // Fetch transactions for a team within a date range
@@ -325,18 +348,37 @@ export async function fetchTransactions(
   if (!res.ok) throw new Error(`MLB transactions fetch failed: ${res.status}`)
   const data = await res.json()
 
+  return (data.transactions ?? []).map(toTransaction)
+}
+
+/** Transactions for specific players, whatever club filed them. A team
+ *  query misses moves filed by an affiliate (a complex-league release, a
+ *  Triple-A free agency election) and by the club a player was traded to,
+ *  so the roster-move check asks by player instead. The endpoint takes a
+ *  comma list of ids; chunked to keep URLs short. */
+export async function fetchPlayerTransactions(
+  playerIds: number[],
+  startDate: string,
+  endDate: string,
+): Promise<{ transactions: MLBTransaction[]; failedPlayerIds: number[] }> {
+  const ids = [...new Set(playerIds.filter((id) => id > 0))]
   const transactions: MLBTransaction[] = []
-  for (const t of data.transactions ?? []) {
-    transactions.push({
-      player: { id: t.person?.id ?? 0, fullName: t.person?.fullName ?? 'Unknown' },
-      fromTeam: t.fromTeam ? { id: t.fromTeam.id, name: t.fromTeam.name } : undefined,
-      toTeam: t.toTeam ? { id: t.toTeam.id, name: t.toTeam.name } : undefined,
-      typeDesc: t.typeDesc ?? t.description ?? '',
-      date: t.date ?? '',
-      effectiveDate: t.effectiveDate ?? t.date ?? '',
-    })
+  const failedPlayerIds: number[] = []
+  const chunkSize = 25
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize)
+    try {
+      const url = `${MLB_BASE}/transactions?playerId=${chunk.join(',')}&startDate=${startDate}&endDate=${endDate}`
+      const res = await fetchWithRetry(url)
+      if (!res.ok) throw new Error(`MLB transactions fetch failed: ${res.status}`)
+      const data = await res.json()
+      transactions.push(...(data.transactions ?? []).map(toTransaction))
+    } catch (e) {
+      console.warn('Player transactions fetch failed:', e)
+      failedPlayerIds.push(...chunk)
+    }
   }
-  return transactions
+  return { transactions, failedPlayerIds }
 }
 
 // Batch fetch transactions for multiple teams
