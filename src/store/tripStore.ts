@@ -15,6 +15,7 @@ import { useHeartbeatStore } from './heartbeatStore'
 import { useSummerStore } from './summerStore'
 import { isInSummerWindow } from '../data/summerLeagues'
 import { restOfSeasonEnd } from '../lib/season'
+import { formatDate } from '../lib/formatters'
 
 function toISO(d: Date): string {
   return d.toISOString().split('T')[0]!
@@ -300,7 +301,7 @@ export const useTripStore = create<TripState>()(
         tripPlan: null,
         progressStep: 'Blocked',
         progressDetail: priorityPlayers.length > 0
-          ? `${priorityPlayers[0]} has no games loaded between ${startDate} and ${endDate}, so there is nothing to build the trip around. Change the dates, or pick a Trip origin.`
+          ? `${priorityPlayers[0]} has no games loaded between ${formatDate(startDate)} and ${formatDate(endDate)}, so there is nothing to build the trip around. Change the dates, or pick a Trip origin.`
           : 'Pick a Trip origin (or add a priority player to anchor around) before generating trips.',
       })
       return

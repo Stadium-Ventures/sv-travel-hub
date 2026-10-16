@@ -47,7 +47,7 @@ describe('generateTrips blocked messages', () => {
     await useTripStore.getState().generateTrips()
     const s = useTripStore.getState()
     expect(s.progressStep).toBe('Blocked')
-    expect(s.progressDetail).toMatch(/Test Pro has no games loaded between 2026-10-20 and 2026-10-30/)
+    expect(s.progressDetail).toMatch(/Test Pro has no games loaded between Tue Oct 20 and Fri Oct 30/)
     expect(s.progressDetail).not.toMatch(/add a priority player/)
     expect(s.progressDetail).not.toMatch(/[–—…]|\.\.\./)
   })
