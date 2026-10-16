@@ -91,3 +91,21 @@ describe('campEndDate', () => {
     expect(campEndDate(2027)).toBe('2027-03-25')
   })
 })
+
+describe('SPRING_TRAINING_SITES', () => {
+  // MLB Stats API venue locations (2027 spring schedule).
+  const kmBetween = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) =>
+    111 * Math.hypot(a.lat - b.lat, (a.lng - b.lng) * Math.cos((a.lat * Math.PI) / 180))
+
+  it('puts the Tigers at Joker Marchant Stadium in Lakeland', () => {
+    expect(kmBetween(SPRING_TRAINING_SITES[116]!.coords, { lat: 28.074822, lng: -81.9508415 })).toBeLessThan(0.5)
+  })
+  it('puts the Red Sox at JetBlue Park', () => {
+    expect(kmBetween(SPRING_TRAINING_SITES[111]!.coords, { lat: 26.55092, lng: -81.76225 })).toBeLessThan(0.5)
+  })
+  it('uses current complex names', () => {
+    expect(SPRING_TRAINING_SITES[117]!.venueName).toBe('CACTI Park of the Palm Beaches')
+    expect(SPRING_TRAINING_SITES[120]!.venueName).toBe('CACTI Park of the Palm Beaches')
+    expect(SPRING_TRAINING_SITES[142]!.venueName).toBe('Lee Health Sports Complex')
+  })
+})

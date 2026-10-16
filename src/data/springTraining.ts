@@ -1,6 +1,8 @@
 import type { Coordinates } from '../types/roster'
 
-// Spring Training sites — last verified: March 2026
+// Spring Training sites. Last verified Oct 2026 against the 2027 MLB
+// spring schedule: all 30 clubs keep their 2026 complexes. Pins moved more
+// than 2 km from the MLB Stats API venue location were reset to it.
 // Update when teams relocate (rare, ~1 per 2-3 years)
 
 // Spring Training typically runs mid-February through late March
@@ -56,7 +58,7 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
   },
   111: { // Red Sox
     venueName: 'JetBlue Park',
-    coords: { lat: 26.5560, lng: -81.8465 },
+    coords: { lat: 26.5509, lng: -81.7623 }, // MLB venue 4309
     league: 'Grapefruit',
     teamName: 'Boston Red Sox',
     complexName: 'JetBlue Park at Fenway South',
@@ -95,18 +97,18 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
     zip: '33458',
   },
   120: { // Nationals
-    venueName: 'The Ballpark of the Palm Beaches',
+    venueName: 'CACTI Park of the Palm Beaches',
     coords: { lat: 26.7525, lng: -80.1227 },
     league: 'Grapefruit',
     teamName: 'Washington Nationals',
-    complexName: 'The Ballpark of the Palm Beaches',
+    complexName: 'CACTI Park of the Palm Beaches',
     streetAddress: '5444 Haverhill Rd',
     cityState: 'West Palm Beach, FL',
     zip: '33407',
   },
   144: { // Braves
     venueName: 'CoolToday Park',
-    coords: { lat: 27.0229, lng: -82.2360 },
+    coords: { lat: 27.0442, lng: -82.2359 }, // MLB venue 5380
     league: 'Grapefruit',
     teamName: 'Atlanta Braves',
     complexName: 'CoolToday Park',
@@ -115,18 +117,18 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
     zip: '34293',
   },
   142: { // Twins
-    venueName: 'Hammond Stadium at CenturyLink Sports Complex',
-    coords: { lat: 26.5549, lng: -81.8087 },
+    venueName: 'Lee Health Sports Complex',
+    coords: { lat: 26.5378, lng: -81.8420 }, // MLB venue 2862
     league: 'Grapefruit',
     teamName: 'Minnesota Twins',
-    complexName: 'Hammond Stadium at CenturyLink Sports Complex',
+    complexName: 'Lee Health Sports Complex (Hammond Stadium)',
     streetAddress: '14100 Six Mile Cypress Pkwy',
     cityState: 'Fort Myers, FL',
     zip: '33912',
   },
   139: { // Rays
     venueName: 'Charlotte Sports Park',
-    coords: { lat: 26.9609, lng: -82.1133 },
+    coords: { lat: 26.9989, lng: -82.1821 }, // MLB venue 2534
     league: 'Grapefruit',
     teamName: 'Tampa Bay Rays',
     complexName: 'Charlotte Sports Park',
@@ -136,7 +138,7 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
   },
   116: { // Tigers
     venueName: 'Publix Field at Joker Marchant Stadium',
-    coords: { lat: 28.0672, lng: -81.7539 },
+    coords: { lat: 28.0748, lng: -81.9508 }, // MLB venue 2511
     league: 'Grapefruit',
     teamName: 'Detroit Tigers',
     complexName: 'Publix Field at Joker Marchant Stadium',
@@ -176,7 +178,7 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
   },
   121: { // Mets
     venueName: 'Clover Park',
-    coords: { lat: 27.3069, lng: -80.3667 },
+    coords: { lat: 27.3249, lng: -80.4069 }, // MLB venue 2856
     league: 'Grapefruit',
     teamName: 'New York Mets',
     complexName: 'Clover Park',
@@ -185,11 +187,11 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
     zip: '34986',
   },
   117: { // Astros
-    venueName: 'The Ballpark of the Palm Beaches',
+    venueName: 'CACTI Park of the Palm Beaches',
     coords: { lat: 26.7525, lng: -80.1227 },
     league: 'Grapefruit',
     teamName: 'Houston Astros',
-    complexName: 'The Ballpark of the Palm Beaches',
+    complexName: 'CACTI Park of the Palm Beaches',
     streetAddress: '5444 Haverhill Rd',
     cityState: 'West Palm Beach, FL',
     zip: '33407',
@@ -208,7 +210,7 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
   },
   136: { // Mariners
     venueName: 'Peoria Sports Complex',
-    coords: { lat: 33.5812, lng: -112.2385 },
+    coords: { lat: 33.6319, lng: -112.2336 }, // MLB venue 2530
     league: 'Cactus',
     teamName: 'Seattle Mariners',
     complexName: 'Peoria Sports Complex',
@@ -248,7 +250,7 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
   },
   119: { // Dodgers
     venueName: 'Camelback Ranch',
-    coords: { lat: 33.5076, lng: -112.3199 },
+    coords: { lat: 33.5143, lng: -112.2961 }, // MLB venue 3809
     league: 'Cactus',
     teamName: 'Los Angeles Dodgers',
     complexName: 'Camelback Ranch',
@@ -268,7 +270,7 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
   },
   112: { // Cubs
     venueName: 'Sloan Park',
-    coords: { lat: 33.4353, lng: -111.8291 },
+    coords: { lat: 33.4308, lng: -111.8820 }, // MLB venue 4629
     league: 'Cactus',
     teamName: 'Chicago Cubs',
     complexName: 'Sloan Park',
@@ -278,7 +280,7 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
   },
   145: { // White Sox
     venueName: 'Camelback Ranch',
-    coords: { lat: 33.5076, lng: -112.3199 },
+    coords: { lat: 33.5143, lng: -112.2961 }, // MLB venue 3809
     league: 'Cactus',
     teamName: 'Chicago White Sox',
     complexName: 'Camelback Ranch',
@@ -288,7 +290,7 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
   },
   158: { // Brewers
     venueName: 'American Family Fields of Phoenix',
-    coords: { lat: 33.5260, lng: -112.1494 },
+    coords: { lat: 33.4920, lng: -112.1727 }, // MLB venue 2518
     league: 'Cactus',
     teamName: 'Milwaukee Brewers',
     complexName: 'American Family Fields of Phoenix',
@@ -298,7 +300,7 @@ export const SPRING_TRAINING_SITES: Record<number, SpringTrainingSite> = {
   },
   135: { // Padres
     venueName: 'Peoria Sports Complex',
-    coords: { lat: 33.5812, lng: -112.2385 },
+    coords: { lat: 33.6319, lng: -112.2336 }, // MLB venue 2530
     league: 'Cactus',
     teamName: 'San Diego Padres',
     complexName: 'Peoria Sports Complex',
