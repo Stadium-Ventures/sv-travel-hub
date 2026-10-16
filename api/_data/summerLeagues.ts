@@ -73,6 +73,9 @@ export function isSummerStatusActive(status: string): boolean {
 // Sheet shape (one section per draft class):
 //   "<YYYY> Draft Players,,,,,,"                   <- section header
 //   "Player,School,Team,League,Status,Contact,"    <- column header
+//
+// The Contact column is deliberately NOT read: nothing displays it, and
+// contact details must not ride along into the app's persisted state.
 //   "Riley Goodman,SC,Harwich Mariners,CCBL,Confirmed,..."  <- data
 //
 // Pure (rows in, placements out) so the app and the health monitor parse the
@@ -84,7 +87,6 @@ export interface SummerPlacementRow {
   summerTeam: string
   league: SummerLeagueCode
   status: string
-  contact?: string
   active: boolean         // false if Shut Down / Injured / Out
 }
 
@@ -117,7 +119,6 @@ export function parseSummerPlacementRows(rows: string[][]): { placements: Summer
     const summerTeam = (row[2] ?? '').trim()
     const leagueRaw = (row[3] ?? '').trim()
     const status = (row[4] ?? '').trim()
-    const contact = (row[5] ?? '').trim() || undefined
 
     // No team and no league is an incomplete placement; skip silently.
     if (!summerTeam && !leagueRaw) continue
@@ -131,7 +132,7 @@ export function parseSummerPlacementRows(rows: string[][]): { placements: Summer
       warnings.push(`${playerName}: ${leagueRaw} assignment missing team name — skipped`)
       continue
     }
-    placements.push({ playerName, school, summerTeam, league, status, contact, active: isSummerStatusActive(status) })
+    placements.push({ playerName, school, summerTeam, league, status, active: isSummerStatusActive(status) })
   }
   return { placements, warnings }
 }

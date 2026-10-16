@@ -16,6 +16,7 @@ import { SUMMER_LEAGUES, type SummerLeagueCode } from '../data/summerLeagues'
 import { lookupSummerVenueCoords } from '../data/summerVenues'
 import { fetchManualSummerSchedule, isManualCsvConfigured } from '../lib/summerManualSchedule'
 import { useDiagnosticsStore } from './diagnosticsStore'
+import { SUMMER_PERSIST_VERSION, migrateSummerPersist } from './summerPersist'
 // Cycle with rosterStore (it imports us for pruning) — safe under ESM
 // because both sides only ACCESS the binding at runtime, never at module
 // init (same pattern as the scheduleStore ↔ rehabStore cycle).
@@ -346,7 +347,8 @@ export const useSummerStore = create<SummerState>()(
     }),
     {
       name: 'sv-travel-summer',
-      version: 1,
+      version: SUMMER_PERSIST_VERSION,
+      migrate: (persisted, version) => migrateSummerPersist(persisted, version) as SummerState,
       storage: createJSONStorage(() => idbStorage),
       partialize: (state) => ({
         assignments: state.assignments,
