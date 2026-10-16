@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 // .js extension required: Vercel runs functions as strict node ESM.
 import { HEARTBEAT_SUMMARY_URL, heartbeatReadHeaders } from './_lib/heartbeatAuth.js'
 import { rosterCsvRequest, checkRowFloor } from './_lib/rosterSource.js'
+import { RECAP_PAUSED, RECAP_PAUSED_REASON } from './_lib/recapStatus.js'
 
 // SV Travel Hub — Weekly Slack recap.
 //
@@ -107,14 +108,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true'
 
   // Paused INDEFINITELY per Kent (2026-08-25): "Can we remove these alerts
-  // please?" — no more scheduled trip pings. Dry runs still execute so the
-  // daily health monitor keeps validating the pipeline. Manual runs from the
-  // app's admin button are also blocked unless ?force=1 is passed. To resume,
-  // flip RECAP_PAUSED to false.
-  const RECAP_PAUSED = true
+  // please?" — no more scheduled trip pings. Dry runs still execute; manual
+  // runs from the app's admin button are blocked unless ?force=1 is passed.
+  // The switch lives in api/_lib/recapStatus.ts, shared with the health
+  // monitor, which skips its recap-only checks while this is paused.
   const force = req.query.force === '1'
   if (RECAP_PAUSED && !dryRun && !force) {
-    return res.status(200).json({ skipped: true, reason: 'Recap paused indefinitely per Kent (2026-08-25)' })
+    return res.status(200).json({ skipped: true, reason: RECAP_PAUSED_REASON })
   }
 
   const botToken = process.env.SLACK_BOT_TOKEN
