@@ -106,7 +106,7 @@ describe('registry sign-in bar clears on any outcome after sign-in', () => {
 })
 
 describe('sharp-drop guard', () => {
-  it('holds back a roster more than a quarter smaller: keeps the old one, prunes nothing, files a plain warning', async () => {
+  it('shows a roster more than a quarter smaller but prunes nothing, keeps the last good count and files a plain warning', async () => {
     vi.stubEnv('VITE_ROSTER_SOURCE', 'sheet')
     useRosterStore.setState({
       players: roster(60),
@@ -118,14 +118,16 @@ describe('sharp-drop guard', () => {
     await useRosterStore.getState().fetchRoster()
 
     const s = useRosterStore.getState()
-    expect(s.players).toHaveLength(60)
+    expect(s.players).toHaveLength(40)
     expect(s.shrinkBlocked).toEqual({ count: 40, previous: 60 })
-    expect(s.error).toMatch(/40 clients, down from 60/)
+    expect(s.error).toBeNull()
+    expect(s.lastGoodCount).toBe(60)
     expect(s.visitOverrides['Test Player 50']).toBeDefined()
     expect(prunes).toEqual([])
     const issues = useDiagnosticsStore.getState().issues
     expect(issues).toHaveLength(1)
     expect(issues[0]!.level).toBe('warning')
+    expect(issues[0]!.message).toMatch(/40 clients, down from 60/)
     expect(issues[0]!.message).not.toMatch(/[–—…]|\.\.\./)
   })
 
@@ -144,11 +146,14 @@ describe('sharp-drop guard', () => {
     useRosterStore.setState({ players: [], lastGoodCount: 92 })
     sheetFetch.mockResolvedValue({ players: roster(55), warnings: [] })
     await useRosterStore.getState().fetchRoster()
-    expect(useRosterStore.getState().players).toHaveLength(0)
+    // Shown, so the app isn't empty on every reload, but still guarded.
+    expect(useRosterStore.getState().players).toHaveLength(55)
     expect(useRosterStore.getState().shrinkBlocked).toEqual({ count: 55, previous: 92 })
+    expect(useRosterStore.getState().lastGoodCount).toBe(92)
+    expect(prunes).toEqual([])
   })
 
-  it('"Load the smaller roster anyway" accepts it and prunes', async () => {
+  it('"Confirm the smaller roster" accepts it and prunes', async () => {
     vi.stubEnv('VITE_ROSTER_SOURCE', 'sheet')
     useRosterStore.setState({ players: roster(60), lastGoodCount: 60 })
     sheetFetch.mockResolvedValue({ players: roster(40), warnings: [] })
@@ -166,7 +171,9 @@ describe('sharp-drop guard', () => {
     // The override is one-shot: the next ordinary fetch is guarded again.
     sheetFetch.mockResolvedValue({ players: roster(20), warnings: [] })
     await useRosterStore.getState().fetchRoster()
-    expect(useRosterStore.getState().players).toHaveLength(40)
+    expect(useRosterStore.getState().shrinkBlocked).toEqual({ count: 20, previous: 40 })
+    expect(useRosterStore.getState().lastGoodCount).toBe(40)
+    expect(prunes).toEqual(['schedule', 'trip', 'rehab', 'summer'])
   })
 })
 

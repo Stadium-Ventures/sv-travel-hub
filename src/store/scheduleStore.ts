@@ -5,7 +5,7 @@ import { debugLog } from '../lib/debugLog'
 import type { MLBAffiliate, MLBGameRaw, MLBTransaction } from '../lib/mlbApi'
 import { fetchAllAffiliates, fetchAllSchedules, fetchPlayerTransactions, fetchAllRosters, fetchAflTeams } from '../lib/mlbApi'
 import { AFL_SPORT_ID, isAflSeason, proSeasonWindow } from '../lib/season'
-import { applyRosterMoves, orgChangeWarning, releaseFromMove, releaseWarning, rosterMovesWindowStart, type RosterRelease } from '../lib/rosterMoves'
+import { applyRosterMoves, orgChangeWarning, playerMovesWindowStart, releaseFromMove, releaseWarning, type RosterRelease } from '../lib/rosterMoves'
 import { MLB_PARENT_IDS, resolveNcaaName, resolveMLBTeamId } from '../data/aliases'
 import type { GameEvent } from '../types/schedule'
 import { extractVenueCoords } from '../lib/mlbApi'
@@ -20,6 +20,14 @@ import { useVenueStore } from './venueStore'
 import { useDiagnosticsStore } from './diagnosticsStore'
 import { useRehabStore } from './rehabStore'
 import { HS_VENUE_COORDS } from '../data/hsVenueCoords'
+
+/** Automatic runs check only some clients and leave hand-set teams alone. */
+export interface AutoAssignOptions {
+  /** Check just these clients (others keep their teams untouched). */
+  only?: string[]
+  /** Skip clients whose team was set by hand. */
+  keepManual?: boolean
+}
 
 export interface PlayerTeamAssignment {
   teamId: number
@@ -104,6 +112,14 @@ interface ScheduleState {
   /** Last successful Check Assignments (live rosters). Transactions posted
    *  before it can't override what the rosters said. */
   assignmentsVerifiedAt: number | null
+  /** Per client: the last time a live roster placed him (Check Assignments,
+   *  full or for a few clients). The moves check reads each client's
+   *  transactions from his own time, so a client a check could not find is
+   *  not skipped past. Null until this browser runs its first check with it. */
+  playerVerifiedAt: Record<string, number> | null
+  /** Last automatic re-check of a few clients' teams (no team, or a team
+   *  outside the registry organization). Limits it to once a day. */
+  assignmentsRecheckedAt: number | null
   /** Clients the transactions say were released, became free agents or
    *  retired. Check Assignments drops their old team unless a live roster
    *  still lists them. */
@@ -123,7 +139,7 @@ interface ScheduleState {
   assignPlayerToTeam: (playerName: string, assignment: PlayerTeamAssignment) => void
   removePlayerAssignment: (playerName: string) => void
   setCustomAlias: (type: 'mlb' | 'ncaa', raw: string, canonical: string) => void
-  autoAssignPlayers: () => Promise<void>
+  autoAssignPlayers: (opts?: AutoAssignOptions) => Promise<void>
   /** Match Pro clients against the six AFL rosters (Sep-Nov); clears them otherwise. */
   assignAflPlayers: () => Promise<void>
   /** True when anything Pro (org affiliate or AFL club) is assigned. */
@@ -258,6 +274,8 @@ export const useScheduleStore = create<ScheduleState>()(
       ncaaFetchedAt: null,
       proGamesBuiltAt: null,
       assignmentsVerifiedAt: null,
+      playerVerifiedAt: null,
+      assignmentsRecheckedAt: null,
       rosterReleases: {},
 
       cachedProTeamIds: [],
@@ -306,9 +324,14 @@ export const useScheduleStore = create<ScheduleState>()(
         }
       },
 
-      autoAssignPlayers: async () => {
+      autoAssignPlayers: async (opts) => {
         if (get().autoAssignLoading) return
-        set({ autoAssignLoading: true, autoAssignResult: null })
+        // A run for a few clients leaves the last full result (and its
+        // spring training flag) on screen.
+        const partial = !!opts?.only
+        set({ autoAssignLoading: true, ...(partial ? {} : { autoAssignResult: null }) })
+        const finish = (result: NonNullable<ScheduleState['autoAssignResult']>) =>
+          set({ autoAssignLoading: false, ...(partial ? {} : { autoAssignResult: result }) })
 
         let state = get()
         const customMlb = state.customMlbAliases
@@ -321,20 +344,40 @@ export const useScheduleStore = create<ScheduleState>()(
         }
 
         const allAffiliates = state.affiliates
+        const only = opts?.only ? new Set(opts.only) : null
+        const inScope = (name: string) =>
+          (!only || only.has(name)) &&
+          !(opts?.keepManual && state.playerTeamAssignments[name]?.source === 'manual')
 
         // Get ALL Pro players — re-check even previously assigned ones
         const proPlayers = rosterPlayers.filter(
-          (p) => p.level === 'Pro' && p.mlbPlayerId,
+          (p) => p.level === 'Pro' && p.mlbPlayerId && inScope(p.playerName),
         )
 
         // Also get Pro players without mlbPlayerId (will be handled via fallback)
         const proPlayersWithoutId = rosterPlayers.filter(
-          (p) => p.level === 'Pro' && !p.mlbPlayerId,
+          (p) => p.level === 'Pro' && !p.mlbPlayerId && inScope(p.playerName),
         )
 
         if (proPlayers.length === 0 && proPlayersWithoutId.length === 0) {
-          set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, confirmed: 0, estimated: 0, notFound: [] } })
+          finish({ assigned: 0, confirmed: 0, estimated: 0, notFound: [] })
           return
+        }
+
+        // The organization a client's current team belongs to. After a trade
+        // the moves check puts him on the new club before sv-registry's Org
+        // catches up, so his rosters are searched under both organizations.
+        const orgOfTeam = new Map(allAffiliates.map((a) => [a.teamId, a.parentOrgId]))
+        const assignedOrg = (name: string): number | undefined => {
+          const a = state.playerTeamAssignments[name]
+          return a ? orgOfTeam.get(a.teamId) : undefined
+        }
+        // For spring training estimates: a team the transactions set (no
+        // source) is newer than the registry's Org, so its organization wins.
+        const estimateOrg = (p: { playerName: string; org: string }): number | null => {
+          const a = state.playerTeamAssignments[p.playerName]
+          const moved = a && !a.source ? orgOfTeam.get(a.teamId) : undefined
+          return moved ?? resolveMLBTeamId(p.org, customMlb)
         }
 
         // Collect unique parent org IDs and build orgId → orgName lookup
@@ -346,10 +389,12 @@ export const useScheduleStore = create<ScheduleState>()(
             parentOrgIds.add(orgId)
             if (!orgIdToName.has(orgId)) orgIdToName.set(orgId, p.org)
           }
+          const other = assignedOrg(p.playerName)
+          if (other) parentOrgIds.add(other)
         }
 
         if (parentOrgIds.size === 0) {
-          set({ autoAssignLoading: false, autoAssignResult: { assigned: 0, confirmed: 0, estimated: 0, notFound: [...proPlayers, ...proPlayersWithoutId].map((p) => p.playerName) } })
+          finish({ assigned: 0, confirmed: 0, estimated: 0, notFound: [...proPlayers, ...proPlayersWithoutId].map((p) => p.playerName) })
           return
         }
 
@@ -416,6 +461,8 @@ export const useScheduleStore = create<ScheduleState>()(
             for (const p of proPlayers) {
               const orgId = resolveMLBTeamId(p.org, customMlb)
               if (orgId) allOrgIds.add(orgId)
+              const other = assignedOrg(p.playerName)
+              if (other) allOrgIds.add(other)
             }
 
             // Get MiLB affiliate teams (exclude sportId=1 since that's MLB level)
@@ -533,6 +580,9 @@ export const useScheduleStore = create<ScheduleState>()(
           // over 40-man roster (where they might just be on the reserve list).
           // During spring training, use last year's level + 1 as estimate.
           const remainingPlayers: typeof proPlayers = []
+          // Clients a live roster placed this run (not estimates, not teams
+          // kept because a roster fetch failed).
+          const placedByRoster = new Set<string>()
           for (const player of proPlayers) {
             // Check current MiLB first — if found, they're playing at that level
             const milbMatch = milbPlayerIdToTeam.get(player.mlbPlayerId!)
@@ -543,6 +593,7 @@ export const useScheduleStore = create<ScheduleState>()(
                 // Fall through to spring training promotion logic below
               } else {
                 newAssignments[player.playerName] = { ...milbMatch, source: 'milb-roster' }
+                placedByRoster.add(player.playerName)
                 assignedCount++
                 continue
               }
@@ -563,6 +614,7 @@ export const useScheduleStore = create<ScheduleState>()(
                 newAssignments[player.playerName] = campMatch
                   ? { ...campMatch, source: 'mlb-roster' }
                   : { ...campIl!, source: 'mlb-il' }
+                placedByRoster.add(player.playerName)
                 assignedCount++
                 continue
               }
@@ -573,7 +625,7 @@ export const useScheduleStore = create<ScheduleState>()(
               const lastYearMatch = lastYearMilbLookup.get(player.mlbPlayerId!)
               if (lastYearMatch) {
                 const promotedSportId = PROMOTE_SPORT[lastYearMatch.sportId] ?? lastYearMatch.sportId
-                const orgId = resolveMLBTeamId(player.org, customMlb)
+                const orgId = estimateOrg(player)
                 const promoted = orgId ? findAffiliateForSport(orgId, promotedSportId) : null
                 if (promoted) {
                   newAssignments[player.playerName] = { ...promoted, source: 'estimated' }
@@ -587,7 +639,7 @@ export const useScheduleStore = create<ScheduleState>()(
             // assign to the org's lowest full-season affiliate (A→High-A→AA→AAA) instead of MLB
             const wasOnComplexTeam = milbMatch && COMPLEX_LEAGUE_PATTERNS.test(milbMatch.teamName)
             if (isSpringTraining && wasOnComplexTeam) {
-              const orgId = resolveMLBTeamId(player.org, customMlb)
+              const orgId = estimateOrg(player)
               if (orgId) {
                 // Try A (14), then High-A (13), then AA (12), then AAA (11)
                 const levelOrder = [14, 13, 12, 11]
@@ -619,11 +671,13 @@ export const useScheduleStore = create<ScheduleState>()(
             const ilMatch = mlbIlPlayerIdToTeam.get(player.mlbPlayerId!)
             if (mlbMatch2) {
               newAssignments[player.playerName] = { ...mlbMatch2, source: 'mlb-roster' }
+              placedByRoster.add(player.playerName)
               assignedCount++
             } else if (ilMatch) {
               // On the injured list with the big-league club — travels with
               // the team, so show the club's schedule.
               newAssignments[player.playerName] = { ...ilMatch, source: 'mlb-il' }
+              placedByRoster.add(player.playerName)
               assignedCount++
             } else {
               remainingPlayers.push(player)
@@ -641,6 +695,7 @@ export const useScheduleStore = create<ScheduleState>()(
           // wrong, so drop it. Found on a roster again clears the release.
           const releases = { ...(state.rosterReleases ?? {}) }
           for (const name of Object.keys(releases)) {
+            if (!inScope(name)) continue
             // Same object as before = not matched on any roster this run
             // (not found, or kept because its roster fetch failed).
             const matched = newAssignments[name] !== state.playerTeamAssignments[name]
@@ -681,6 +736,7 @@ export const useScheduleStore = create<ScheduleState>()(
                   }
                 }
                 newAssignments[player.playerName] = { ...match, source: match.sportId === 1 ? 'mlb-roster' : 'milb-roster' }
+                placedByRoster.add(player.playerName)
                 assignedCount++
                 // Remove from notFoundNames if present
                 const idx = notFoundNames.indexOf(player.playerName)
@@ -698,6 +754,7 @@ export const useScheduleStore = create<ScheduleState>()(
           const changeLog: AssignmentChange[] = []
           const logTimestamp = Date.now()
           for (const [playerName, newAssignment] of Object.entries(newAssignments)) {
+            if (!inScope(playerName)) continue
             const oldAssignment = oldAssignments[playerName]
             if (!oldAssignment) {
               changeLog.push({ playerName, action: 'assigned', to: newAssignment.teamName, timestamp: logTimestamp })
@@ -712,19 +769,32 @@ export const useScheduleStore = create<ScheduleState>()(
             changeLog.push({ playerName: name, action: 'not-found', timestamp: logTimestamp })
           }
 
+          // Write only the clients this run checked, onto the latest map: a
+          // moves check that landed while the rosters loaded keeps its result
+          // for everyone else.
+          const merged = { ...get().playerTeamAssignments }
+          for (const name of new Set([...Object.keys(newAssignments), ...Object.keys(oldAssignments)])) {
+            if (!inScope(name)) continue
+            const next = newAssignments[name]
+            if (next) merged[name] = next
+            else delete merged[name]
+          }
+          const verified = { ...(get().playerVerifiedAt ?? {}) }
+          for (const name of placedByRoster) verified[name] = logTimestamp
           set({
-            playerTeamAssignments: newAssignments,
-            assignmentsVerifiedAt: Date.now(),
+            playerTeamAssignments: merged,
+            ...(partial ? {} : { assignmentsVerifiedAt: logTimestamp }),
+            playerVerifiedAt: verified,
+            assignmentsRecheckedAt: logTimestamp,
             rosterReleases: releases,
-            autoAssignLoading: false,
-            autoAssignResult: {
-              assigned: assignedCount,
-              confirmed: Object.values(newAssignments).filter((a) => a.source === 'milb-roster' || a.source === 'mlb-roster').length,
-              estimated: Object.values(newAssignments).filter((a) => a.source === 'estimated').length,
-              notFound: notFoundNames,
-              springTrainingEstimate: isSpringTraining,
-            },
             assignmentLog: [...(get().assignmentLog ?? []), ...changeLog],
+          })
+          finish({
+            assigned: assignedCount,
+            confirmed: Object.values(merged).filter((a) => a.source === 'milb-roster' || a.source === 'mlb-roster').length,
+            estimated: Object.values(merged).filter((a) => a.source === 'estimated').length,
+            notFound: notFoundNames,
+            springTrainingEstimate: isSpringTraining,
           })
 
           // Drop assignments for names no longer on the roster BEFORE
@@ -751,10 +821,7 @@ export const useScheduleStore = create<ScheduleState>()(
           }
         } catch (e) {
           const msg = e instanceof Error ? e.message : 'Unknown error'
-          set({
-            autoAssignLoading: false,
-            autoAssignResult: { assigned: 0, confirmed: 0, estimated: 0, notFound: [...proPlayers, ...proPlayersWithoutId].map((p) => p.playerName), error: msg },
-          })
+          finish({ assigned: 0, confirmed: 0, estimated: 0, notFound: [...proPlayers, ...proPlayersWithoutId].map((p) => p.playerName), error: msg })
           console.error('Auto-assign failed:', e)
         }
       },
@@ -771,6 +838,9 @@ export const useScheduleStore = create<ScheduleState>()(
         // sheet means not stored anywhere).
         const rosterPlayers = useRosterStore.getState().players
         if (rosterPlayers.length === 0) return // roster not loaded — never wipe on an empty read
+        // A roster far smaller than the last good one is shown but not yet
+        // trusted to remove anyone (rosterStore's sharp-drop guard).
+        if (useRosterStore.getState().shrinkBlocked) return
         const rosterNames = new Set(rosterPlayers.map((p) => p.playerName))
         const assignments = get().playerTeamAssignments
         const removed = Object.keys(assignments).filter((n) => !rosterNames.has(n))
@@ -780,17 +850,25 @@ export const useScheduleStore = create<ScheduleState>()(
         const prunedLog = oldLog.filter((e) => rosterNames.has(e.playerName))
         const aflRemoved = Object.keys(get().aflAssignments).filter((n) => !rosterNames.has(n))
         const releasesRemoved = Object.keys(get().rosterReleases ?? {}).filter((n) => !rosterNames.has(n))
-        if (removed.length === 0 && aflRemoved.length === 0 && releasesRemoved.length === 0 && prunedMoves.length === oldMoves.length && prunedLog.length === oldLog.length) return
+        const verifiedRemoved = Object.keys(get().playerVerifiedAt ?? {}).filter((n) => !rosterNames.has(n))
+        if (removed.length === 0 && aflRemoved.length === 0 && releasesRemoved.length === 0 && verifiedRemoved.length === 0 && prunedMoves.length === oldMoves.length && prunedLog.length === oldLog.length) return
         const pruned = { ...assignments }
         for (const n of removed) delete pruned[n]
         const prunedAfl = { ...get().aflAssignments }
         for (const n of Object.keys(prunedAfl)) if (!rosterNames.has(n)) delete prunedAfl[n]
         const prunedReleases = { ...(get().rosterReleases ?? {}) }
         for (const n of releasesRemoved) delete prunedReleases[n]
+        const verifiedAt = get().playerVerifiedAt
+        let prunedVerified = verifiedAt
+        if (verifiedAt && verifiedRemoved.length > 0) {
+          prunedVerified = { ...verifiedAt }
+          for (const n of verifiedRemoved) delete prunedVerified[n]
+        }
         set({
           playerTeamAssignments: pruned,
           aflAssignments: prunedAfl,
           rosterReleases: prunedReleases,
+          playerVerifiedAt: prunedVerified,
           rosterMoves: prunedMoves,
           assignmentLog: prunedLog,
         })
@@ -1130,11 +1208,29 @@ export const useScheduleStore = create<ScheduleState>()(
 
         try {
           // Ask by player, not by org: a team query misses releases filed by
-          // an affiliate and moves filed by a new club after a trade.
+          // an affiliate and moves filed by a new club after a trade. Each
+          // client is read from the last time a live roster placed him, so
+          // the clients are grouped by that start date (usually one or two
+          // requests).
           const now = new Date()
           const endDate = now.toISOString().split('T')[0]!
-          const startDate = rosterMovesWindowStart(now, get().assignmentsVerifiedAt)
-          const txResult = await fetchPlayerTransactions(tracked.map((p) => p.mlbPlayerId), startDate, endDate)
+          const startState = get()
+          const idsByStart = new Map<string, number[]>()
+          for (const p of tracked) {
+            const start = playerMovesWindowStart(
+              now, p.playerName, startState.playerVerifiedAt, startState.assignmentsVerifiedAt,
+              !!startState.playerTeamAssignments[p.playerName],
+            )
+            const ids = idsByStart.get(start)
+            if (ids) ids.push(p.mlbPlayerId)
+            else idsByStart.set(start, [p.mlbPlayerId])
+          }
+          const txResult: { transactions: MLBTransaction[]; failedPlayerIds: number[] } = { transactions: [], failedPlayerIds: [] }
+          for (const [startDate, ids] of idsByStart) {
+            const part = await fetchPlayerTransactions(ids, startDate, endDate)
+            txResult.transactions.push(...part.transactions)
+            txResult.failedPlayerIds.push(...part.failedPlayerIds)
+          }
           if (txResult.failedPlayerIds.length === tracked.length) {
             throw new Error('the MLB Stats API transactions request failed')
           }
@@ -1142,7 +1238,7 @@ export const useScheduleStore = create<ScheduleState>()(
           const byTeamId = new Map(allAffiliates.map((a) => [a.teamId, a]))
           const lookupTeam = (teamId: number) => byTeamId.get(teamId)
           const before = get().playerTeamAssignments
-          const { assignments: after, changes } = applyRosterMoves(txResult.transactions, tracked, before, lookupTeam)
+          const { changes } = applyRosterMoves(txResult.transactions, tracked, before, lookupTeam)
 
           // One row per player per run: where they started vs where they
           // ended. Replaying every option and recall of the season as its
@@ -1159,6 +1255,14 @@ export const useScheduleStore = create<ScheduleState>()(
             else delete releases[c.playerName]
           }
 
+          // Apply the changes onto the latest map, not the one read before
+          // the request: a Check Assignments that finished meanwhile keeps
+          // its result for everyone the transactions didn't move.
+          const after = { ...get().playerTeamAssignments }
+          for (const c of changes) {
+            if (c.to) after[c.playerName] = { teamId: c.to.teamId, sportId: c.to.sportId, teamName: c.to.teamName }
+            else delete after[c.playerName]
+          }
           set({
             rosterMoves: changes.filter((c) => c.kind === 'moved').map((c) => c.transaction),
             rosterMovesLoading: false,
@@ -1166,13 +1270,13 @@ export const useScheduleStore = create<ScheduleState>()(
             rosterMovesCheckedAt: new Date().toISOString(),
             rosterReleases: releases,
             ...(changes.length > 0 ? {
-              playerTeamAssignments: after as Record<string, PlayerTeamAssignment>,
+              playerTeamAssignments: after,
               assignmentLog: [...(get().assignmentLog ?? []), ...moveLog].slice(-50),
             } : {}),
           })
 
-          // Tell staff what the roster sheet needs. Re-filed on every run so
-          // the reminder stays up until the sheet is fixed.
+          // Tell staff what the registry record needs. Re-filed on every run
+          // so the reminder stays up until the record is fixed.
           const diag = useDiagnosticsStore.getState()
           diag.clearSource('moves')
           const customMlb = get().customMlbAliases
@@ -1788,6 +1892,8 @@ export const useScheduleStore = create<ScheduleState>()(
         proFetchedAt: state.proFetchedAt,
         proGamesBuiltAt: state.proGamesBuiltAt,
         assignmentsVerifiedAt: state.assignmentsVerifiedAt,
+        playerVerifiedAt: state.playerVerifiedAt,
+        assignmentsRecheckedAt: state.assignmentsRecheckedAt,
         rosterReleases: state.rosterReleases,
         // Track cached coverage for incremental fetching
         cachedProTeamIds: state.cachedProTeamIds,

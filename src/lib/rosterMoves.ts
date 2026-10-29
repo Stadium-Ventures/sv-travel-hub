@@ -170,6 +170,25 @@ export function rosterMovesWindowStart(now: Date, verifiedAt: number | null): st
   return start.toISOString().split('T')[0]!
 }
 
+/** One client's look-back start. A client counts as checked only when a live
+ *  roster placed him, so one Check Assignments could not find (traded to a
+ *  club outside his listed organization, say) keeps his older start and the
+ *  trade is still read on the next moves check. Before, one check moved
+ *  everyone's start to that day and a trade filed the day before was never
+ *  seen (2026-10-29). `perPlayer` is null in a browser that has not run a
+ *  check since per-client times were kept; then the last full check stands
+ *  in for clients who had a team. */
+export function playerMovesWindowStart(
+  now: Date,
+  playerName: string,
+  perPlayer: Record<string, number> | null,
+  fullCheckAt: number | null,
+  hasAssignment: boolean,
+): string {
+  const verifiedAt = perPlayer ? (perPlayer[playerName] ?? null) : (hasAssignment ? fullCheckAt : null)
+  return rosterMovesWindowStart(now, verifiedAt)
+}
+
 /** A client the transactions say left affiliated ball. Kept until a live
  *  roster or a later transaction shows him on a club again, so Check
  *  Assignments doesn't quietly restore the old team. */
@@ -202,11 +221,13 @@ export function releaseWarning(playerName: string, r: RosterRelease): string {
     : r.typeCode === 'DFA'
       ? `elected free agency from the ${r.teamName}`
       : `was released by the ${r.teamName}`
-  return `${playerName} ${what} on ${monthDayLabel(r.date)}. Removed from Pro schedules. Update the roster sheet.`
+  return `${playerName} ${what} on ${monthDayLabel(r.date)}. Removed from Pro schedules. If his status with SV changed, update his record in sv-registry.`
 }
 
 /** Diagnostics text when transactions put a client in a different
- *  organization than the roster sheet's Org (trade, waiver claim, Rule 5). */
-export function orgChangeWarning(playerName: string, sheetOrg: string, newOrgName: string, teamName: string): string {
-  return `${playerName} is with the ${newOrgName} organization now, but the roster sheet says ${sheetOrg}. Showing ${teamName} games. Update Org in the roster sheet so spring training and Check Assignments use the new club.`
+ *  organization than the roster's Org (trade, waiver claim, Rule 5). The
+ *  roster comes from sv-registry, and spring training and the team checks
+ *  already follow the new club, so the fix is the registry record only. */
+export function orgChangeWarning(playerName: string, rosterOrg: string, newOrgName: string, teamName: string): string {
+  return `${playerName} is with the ${newOrgName} organization now, but sv-registry still says ${rosterOrg}. Showing ${teamName} games, and spring training follows the new club. If sv-registry still says ${rosterOrg} in a few days, update his organization there.`
 }

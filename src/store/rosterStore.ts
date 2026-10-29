@@ -48,8 +48,9 @@ interface RosterState {
   /** Client count of the last roster that was accepted (persisted; a count,
    *  not names). The sharp-drop guard compares against it. */
   lastGoodCount: number | null
-  /** Set while a fetched roster was held back for being far smaller than the
-   *  last good one. Not persisted. */
+  /** Set while the roster on screen is far smaller than the last good one.
+   *  It is shown, but nobody's saved state is removed until staff confirm
+   *  it. Not persisted. */
   shrinkBlocked: { count: number; previous: number } | null
   /** Registry source only: ids + names from the sheet snapshot this browser
    *  held before the switch, so the first registry load can recognise a
@@ -59,7 +60,8 @@ interface RosterState {
   sortDirection: SortDir
 
   fetchRoster: () => Promise<void>
-  /** Refetch and accept the roster even if it is far smaller than the last good one. */
+  /** Refetch and accept the roster even if it is far smaller than the last
+   *  good one, removing the saved state of clients it leaves out. */
   acceptSmallerRoster: () => Promise<void>
   setVisitOverride: (playerName: string, visitsCompleted: number, lastVisitDate: string | null) => void
   clearVisitOverride: (playerName: string) => void
@@ -89,6 +91,7 @@ function carryRenamesIntoStores(renames: Record<string, string>) {
   useScheduleStore.setState({
     playerTeamAssignments: renameKeys(sched.playerTeamAssignments, renames),
     aflAssignments: renameKeys(sched.aflAssignments, renames),
+    ...(sched.playerVerifiedAt ? { playerVerifiedAt: renameKeys(sched.playerVerifiedAt, renames) } : {}),
   })
   const priority = useTripStore.getState().priorityPlayers
   if (priority.some((n) => n in renames)) {
@@ -140,18 +143,6 @@ export const useRosterStore = create<RosterState>()(
               : 'Roster sheet parsed to 0 players — sheet unreachable or columns changed' })
             return
           }
-          // A roster far smaller than the last good one is held back: pruning
-          // below is permanent, and a broken sheet view or truncated registry
-          // build would otherwise wipe real clients' saved state.
-          const previous = get().lastGoodCount ?? (get().players.length || null)
-          if (!allowShrink && previous && isSharpDrop(previous, result.players.length)) {
-            const message = sharpDropMessage(result.players.length, previous)
-            set({ loading: false, needsSignIn: false, error: message, shrinkBlocked: { count: result.players.length, previous } })
-            const diag = useDiagnosticsStore.getState()
-            diag.clearSource('roster')
-            diag.addIssue({ level: 'warning', source: 'roster', message })
-            return
-          }
           // A client whose display name changed (the registry's canon name vs
           // the sheet's spelling) is the same client: carry their name-keyed
           // state over before anything prunes against the new names.
@@ -159,6 +150,32 @@ export const useRosterStore = create<RosterState>()(
           const renames = findRenames(prior, result.players)
           const hasRenames = Object.keys(renames).length > 0
           if (hasRenames) carryRenamesIntoStores(renames)
+          // A roster far smaller than the last good one is shown, but nothing
+          // is pruned and the last good count stays put until staff confirm
+          // it: pruning is permanent, and a broken sheet view or truncated
+          // registry build would otherwise wipe real clients' saved state.
+          // It used to be held back instead, which on the registry source
+          // (never saved in the browser) left the app empty on every reload.
+          const previous = get().lastGoodCount ?? (get().players.length || null)
+          if (!allowShrink && previous && isSharpDrop(previous, result.players.length)) {
+            const message = sharpDropMessage(result.players.length, previous)
+            set({
+              players: applyOverrides(result.players, hasRenames ? renameKeys(get().visitOverrides, renames) : get().visitOverrides),
+              loading: false,
+              lastFetchedAt: new Date().toISOString(),
+              source,
+              generatedAt: result.generatedAt,
+              needsSignIn: false,
+              parseWarnings: result.warnings,
+              ...(hasRenames ? { visitOverrides: renameKeys(get().visitOverrides, renames) } : {}),
+              renameSeed: [],
+              shrinkBlocked: { count: result.players.length, previous },
+            })
+            const diag = useDiagnosticsStore.getState()
+            diag.clearSource('roster')
+            diag.addIssue({ level: 'warning', source: 'roster', message })
+            return
+          }
           // Prune stale visitOverrides for players no longer on the roster
           // (and move name-keyed ones onto the slug when the registry has one).
           const overrides = hasRenames ? renameKeys(get().visitOverrides, renames) : get().visitOverrides

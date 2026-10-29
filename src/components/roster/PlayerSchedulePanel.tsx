@@ -3,7 +3,7 @@ import { useRosterStore } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import { useVenueStore } from '../../store/venueStore'
-import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, estimateDriveMinutes, haversineKm } from '../../lib/tripEngine'
+import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, estimateDriveMinutes, haversineKm, campOrgsFromAssignments } from '../../lib/tripEngine'
 import { formatDate, formatDriveTime } from '../../lib/formatters'
 import { dispatchMapEvent } from '../../lib/mapEvents'
 import CityPicker from '../ui/CityPicker'
@@ -41,6 +41,9 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
   const proGames = useScheduleStore((s) => s.proGames)
   const ncaaGames = useScheduleStore((s) => s.ncaaGames)
   const hsGamesReal = useScheduleStore((s) => s.hsGames)
+  const assignments = useScheduleStore((s) => s.playerTeamAssignments)
+  const affiliates = useScheduleStore((s) => s.affiliates)
+  const rosterReleases = useScheduleStore((s) => s.rosterReleases)
   const tripPlan = useTripStore((s) => s.tripPlan)
   const tripStatuses = useTripStore((s) => s.tripStatuses)
   const startDate = useTripStore((s) => s.startDate)
@@ -94,7 +97,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
 
     // Synthetic events
     if (player) {
-      const stEvents = generateSpringTrainingEvents(players, startDate, endDate, undefined, proGames)
+      const stEvents = generateSpringTrainingEvents(players, startDate, endDate, undefined, proGames, campOrgsFromAssignments(assignments, affiliates, rosterReleases))
       games.push(...stEvents.filter((g) => g.playerNames.includes(playerName)))
 
       const ncaaPlayersWithReal = new Set(ncaaGames.flatMap((g) => g.playerNames))
@@ -128,7 +131,7 @@ function PlayerSchedulePanel({ playerName, onClose }: Props) {
     })
     unique.sort((a, b) => a.date.localeCompare(b.date))
     return unique
-  }, [playerName, player, players, proGames, ncaaGames, hsGamesReal, venueState, startDate, endDate])
+  }, [playerName, player, players, proGames, ncaaGames, hsGamesReal, venueState, startDate, endDate, assignments, affiliates, rosterReleases])
 
   // For the summary view, only show upcoming games
   const upcomingGames = useMemo(() => {

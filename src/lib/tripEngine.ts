@@ -313,12 +313,20 @@ export function computeScoreBreakdown(
 // loaded Pro game (even an August one) removed a player from spring
 // training entirely, so once the next season's schedules loaded every
 // assigned client vanished from camp planning.
+//
+// `campOrgs` (from campOrgsFromAssignments) puts each client at the camp of
+// the organization his current team belongs to. Camp used to follow the
+// roster Org only, so a client traded, picked in the Rule 5 draft or signed
+// by a new club as a free agent was sent to his old club's complex until
+// sv-registry's Org caught up (2026-10-29). A null entry means no camp: the
+// transactions say he was released and no club has him yet.
 export function generateSpringTrainingEvents(
   players: RosterPlayer[],
   startDate: string,
   endDate: string,
   customMlbAliases?: Record<string, string>,
   realGames?: GameEvent[],
+  campOrgs?: Record<string, number | null>,
 ): GameEvent[] {
   const events: GameEvent[] = []
   const dates = getDatesInRange(startDate, endDate).filter((d) => {
@@ -359,7 +367,9 @@ export function generateSpringTrainingEvents(
   const playersByOrg = new Map<number, string[]>()
   for (const p of players) {
     if (p.level !== 'Pro') continue
-    const orgId = resolveMLBTeamId(p.org, customMlbAliases)
+    const orgId = campOrgs && p.playerName in campOrgs
+      ? campOrgs[p.playerName]
+      : resolveMLBTeamId(p.org, customMlbAliases)
     if (!orgId) continue
     const existing = playersByOrg.get(orgId)
     if (existing) existing.push(p.playerName)
@@ -392,6 +402,26 @@ export function generateSpringTrainingEvents(
   }
 
   return events
+}
+
+/** Camp organization per client from the current team assignments: the
+ *  team's parent organization, or null for a client the transactions say was
+ *  released. Clients missing from the result fall back to the roster Org. */
+export function campOrgsFromAssignments(
+  assignments: Record<string, { teamId: number }>,
+  affiliates: Array<{ teamId: number; parentOrgId: number }>,
+  releases?: Record<string, unknown>,
+): Record<string, number | null> {
+  const orgOfTeam = new Map(affiliates.map((a) => [a.teamId, a.parentOrgId]))
+  const out: Record<string, number | null> = {}
+  for (const [name, a] of Object.entries(assignments)) {
+    const org = orgOfTeam.get(a.teamId)
+    if (org) out[name] = org
+  }
+  for (const name of Object.keys(releases ?? {})) {
+    if (!(name in out)) out[name] = null
+  }
+  return out
 }
 
 // NCAA baseball season: mid-February through early June

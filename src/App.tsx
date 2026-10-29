@@ -1,4 +1,4 @@
-import { Component, useEffect, useRef, type ReactNode } from 'react'
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
 import AppShell from './components/layout/AppShell'
 import RosterDashboard from './components/roster/RosterDashboard'
 import TripPlanner from './components/trips/TripPlanner'
@@ -6,11 +6,13 @@ import MapView from './components/map/MapView'
 import DataTab from './components/data/DataTab'
 import HeartbeatSignIn from './components/auth/HeartbeatSignIn'
 import RegistrySignIn from './components/auth/RegistrySignIn'
+import RosterStatusBanner from './components/roster/RosterStatusBanner'
 import { useSummerStore } from './store/summerStore'
 import { useRosterStore } from './store/rosterStore'
 import { useHeartbeatStore } from './store/heartbeatStore'
 import { useScheduleStore } from './store/scheduleStore'
 import { useRehabStore } from './store/rehabStore'
+import { recheckAssignmentsIfDue } from './store/recheckAssignments'
 import { proSeasonWindow, isAflSeason } from './lib/season'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -65,6 +67,7 @@ export default function App() {
       <AutoFetchData />
       <HeartbeatSignIn />
       <RegistrySignIn />
+      <RosterStatusBanner />
       <AppShell>
         {{
           roster: <RosterDashboard />,
@@ -88,6 +91,23 @@ function AutoFetchData() {
   const TWELVE_H = 12 * 3600_000
   const TWENTY_FOUR_H = 24 * 3600_000
 
+  // A tab left open for days never re-ran any of the checks below, since
+  // each one only runs when the page loads. When the tab comes back after
+  // six hours or more, refresh the roster and re-check moves, teams and
+  // schedules as if the page had just loaded (2026-10-29).
+  const [wakeTick, setWakeTick] = useState(0)
+  const lastWakeRef = useRef(Date.now())
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - lastWakeRef.current < SIX_H) return
+      lastWakeRef.current = Date.now()
+      setWakeTick((t) => t + 1)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [SIX_H])
+
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
   useEffect(() => {
     // ALWAYS refetch the roster on mount — no staleness gate. The master
@@ -97,14 +117,29 @@ function AutoFetchData() {
     // persisted snapshot still gives instant first paint, and fetchRoster
     // deliberately keeps it when the fetch fails or parses 0 players.
     fetchRoster()
-  }, [fetchRoster])
+  }, [fetchRoster, wakeTick])
+
+  useEffect(() => {
+    if (wakeTick === 0) return
+    void (async () => {
+      const changedTeams = await recheckAssignmentsIfDue()
+      const sched = useScheduleStore.getState()
+      const proStale = !sched.proFetchedAt || Date.now() - sched.proFetchedAt > SIX_H
+      if (proStale) {
+        const { start, end } = proSeasonWindow()
+        await sched.fetchProSchedules(start, end)
+      } else if (changedTeams.length > 0) {
+        await sched.refreshProGamesForTeams(changedTeams)
+      }
+    })()
+  }, [wakeTick, SIX_H])
 
   const fetchHeartbeat = useHeartbeatStore((s) => s.fetchHeartbeat)
   const heartbeatFetched = useHeartbeatStore((s) => s.lastFetchedAt)
   useEffect(() => {
     const stale = !heartbeatFetched || (Date.now() - new Date(heartbeatFetched).getTime() > SIX_H)
     if (stale) fetchHeartbeat()
-  }, [fetchHeartbeat, heartbeatFetched, SIX_H])
+  }, [fetchHeartbeat, heartbeatFetched, SIX_H, wakeTick])
 
   const loadSummerAssignments = useSummerStore((s) => s.loadAssignments)
   const summerFetched = useSummerStore((s) => s.fetchedAt)
@@ -115,14 +150,17 @@ function AutoFetchData() {
 
   const checkRosterMoves = useScheduleStore((s) => s.checkRosterMoves)
   const rosterMovesCheckedAt = useScheduleStore((s) => s.rosterMovesCheckedAt)
+  const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
   useEffect(() => {
+    // Wait out a Check Assignments in flight; this re-runs when it ends.
+    if (autoAssignLoading) return
     const stale = !rosterMovesCheckedAt || (Date.now() - new Date(rosterMovesCheckedAt).getTime() > TWENTY_FOUR_H)
     if (stale) {
       // Defer 3s so affiliates + roster have time to load first
       const id = setTimeout(() => { checkRosterMoves() }, 3000)
       return () => clearTimeout(id)
     }
-  }, [checkRosterMoves, rosterMovesCheckedAt, TWENTY_FOUR_H])
+  }, [checkRosterMoves, rosterMovesCheckedAt, TWENTY_FOUR_H, autoAssignLoading, wakeTick])
 
   // Rehab fetch depends on roster + assignments. Re-runs when either changes
   // so a freshly-assigned MiLB player gets their rehab window populated.
@@ -182,7 +220,10 @@ function AutoFetchData() {
       // Pick up any Pro teams that became assigned since the cache was built.
       // AFL rosters are re-matched first (daily) so a client who just landed
       // on a fall club gets that club's schedule pulled in the same pass.
+      // Teams are re-checked first when due (weekly for everyone, daily for
+      // clients with no team or a team outside their listed organization).
       void (async () => {
+        const changedTeams = await recheckAssignmentsIfDue()
         // In season: re-match daily. Out of season: run once if anything is
         // still assigned so last fall's clubs get cleared on Dec 1.
         const aflStale = !sched.aflAssignedAt || Date.now() - sched.aflAssignedAt > TWENTY_FOUR_H
@@ -194,7 +235,7 @@ function AutoFetchData() {
           ...Object.values(fresh.aflAssignments).map((a) => a.teamId),
         ])
         const cachedSet = new Set(cachedProTeamIds)
-        const missingProTeams = [...assigned].filter((id) => !cachedSet.has(id))
+        const missingProTeams = [...assigned].filter((id) => !cachedSet.has(id) || changedTeams.includes(id))
         // cachedProTeamIds used to hold array indices, so every load refetched
         // by accident. Now that it holds team ids, refresh on age too (6h,
         // the same threshold the header pill reports).
@@ -226,9 +267,12 @@ function AutoFetchData() {
         if (hsOrgs.length > 0) sched.fetchHsSchedules(hsOrgs)
       }
       // Pro: auto-assign players to MLB org affiliates, match AFL clubs,
-      // then fetch schedules
+      // then fetch schedules. With teams already saved, re-check them when
+      // due instead of never.
       if (Object.keys(sched.playerTeamAssignments).length === 0) {
         await sched.autoAssignPlayers()
+      } else {
+        await recheckAssignmentsIfDue()
       }
       await sched.assignAflPlayers()
       if (useScheduleStore.getState().hasProAssignments()) {

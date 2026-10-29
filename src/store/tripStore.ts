@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Coordinates, RosterPlayer } from '../types/roster'
 import type { GameEvent, TripCandidate, TripPlan } from '../types/schedule'
-import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, computeScoreBreakdown } from '../lib/tripEngine'
+import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES, estimateDriveMinutes, computeScoreBreakdown, campOrgsFromAssignments } from '../lib/tripEngine'
 import { findDoubleUps } from '../lib/doubleUps'
 import { debugLog } from '../lib/debugLog'
 import type { UrgencyMap, PinnedGame } from '../lib/tripEngine'
@@ -387,6 +387,7 @@ export const useTripStore = create<TripState>()(
     // season's schedules loaded.
     const stEvents = generateSpringTrainingEvents(
       players, startDate, endDate, customMlbAliases, scheduledGames,
+      campOrgsFromAssignments(scheduleState.playerTeamAssignments, scheduleState.affiliates, scheduleState.rosterReleases),
     )
 
     // Use real NCAA schedules if available, otherwise fall back to synthetic.

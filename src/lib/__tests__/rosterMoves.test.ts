@@ -3,6 +3,7 @@ import {
   applyRosterMoves,
   classifyTransaction,
   orgChangeWarning,
+  playerMovesWindowStart,
   releaseFromMove,
   releaseWarning,
   rosterMovesWindowStart,
@@ -176,8 +177,28 @@ describe('warning copy', () => {
       releaseWarning('Player A', { date: '2026-08-03', teamName: 'Albuquerque Isotopes', typeCode: 'REL' }),
       orgChangeWarning('Player A', 'Colorado Rockies', 'Seattle Mariners', 'Seattle Mariners'),
     ]
-    expect(msgs[0]).toBe('Player D elected free agency from the Iowa Cubs on Nov 6, 2025. Removed from Pro schedules. Update the roster sheet.')
-    expect(msgs[1]).toBe('Player E retired on Aug 18, 2026. Removed from Pro schedules. Update the roster sheet.')
+    expect(msgs[0]).toBe('Player D elected free agency from the Iowa Cubs on Nov 6, 2025. Removed from Pro schedules. If his status with SV changed, update his record in sv-registry.')
+    expect(msgs[1]).toBe('Player E retired on Aug 18, 2026. Removed from Pro schedules. If his status with SV changed, update his record in sv-registry.')
     for (const m of msgs) expect(m).not.toMatch(/[–—…]|\.\.\.|\p{Extended_Pictographic}/u)
+  })
+})
+
+describe('playerMovesWindowStart', () => {
+  const now = new Date('2026-11-10T15:00:00Z')
+  const fullCheck = Date.parse('2026-11-08T15:00:00Z')
+
+  it('reads each client from the last time a live roster placed him', () => {
+    expect(playerMovesWindowStart(now, 'Player A', { 'Player A': Date.parse('2026-11-09T12:00:00Z') }, fullCheck, true)).toBe('2026-11-09')
+  })
+
+  it('keeps a year of look-back for a client no check has placed, even after a full check', () => {
+    // Traded the day before a Check Assignments that could not find him:
+    // the trade must still be read.
+    expect(playerMovesWindowStart(now, 'Player B', { 'Player A': fullCheck }, fullCheck, true)).toBe('2025-11-10')
+  })
+
+  it('falls back to the last full check for a client with a team in a browser without per-client times', () => {
+    expect(playerMovesWindowStart(now, 'Player A', null, fullCheck, true)).toBe('2026-11-08')
+    expect(playerMovesWindowStart(now, 'Player B', null, fullCheck, false)).toBe('2025-11-10')
   })
 })

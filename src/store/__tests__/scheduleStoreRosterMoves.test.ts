@@ -54,6 +54,7 @@ beforeEach(() => {
       player('Player C', 1003, 'Colorado Rockies'),
       player('Player B', 1002, 'Boston Red Sox'),
     ],
+    shrinkBlocked: null,
   })
   useScheduleStore.setState({
     affiliates,
@@ -65,6 +66,9 @@ beforeEach(() => {
     rosterMovesCheckedAt: null,
     rosterReleases: {},
     assignmentsVerifiedAt: null,
+    playerVerifiedAt: null,
+    assignmentsRecheckedAt: null,
+    autoAssignLoading: false,
     schedulesLoading: false,
     proFetchedAt: 1,
     proGamesBuiltAt: 1,
@@ -119,7 +123,7 @@ describe('checkRosterMoves', () => {
     expect(s.rosterReleases['Player A']).toMatchObject({ typeCode: 'DFA', teamName: 'Albuquerque Isotopes' })
     const warnings = useDiagnosticsStore.getState().issues.filter((i) => i.source === 'moves')
     expect(warnings.map((w) => w.message)).toContain(
-      'Player A elected free agency from the Albuquerque Isotopes on Nov 6, 2026. Removed from Pro schedules. Update the roster sheet.',
+      'Player A elected free agency from the Albuquerque Isotopes on Nov 6, 2026. Removed from Pro schedules. If his status with SV changed, update his record in sv-registry.',
     )
 
     // Live rosters don't list him anywhere: the old team must not come back.
@@ -182,5 +186,102 @@ describe('autoAssignPlayers in spring training mode', () => {
     // Not on the 40-man: still estimated, one level up from last year (AA to AAA).
     expect(a['Prospect Player']).toMatchObject({ teamId: 342, source: 'estimated' })
     expect(useScheduleStore.getState().assignmentsVerifiedAt).toBe(Date.parse('2027-02-10T15:00:00Z'))
+  })
+})
+
+describe('teams keep up with moves (2026-10-29)', () => {
+  const SEA = { teamId: 136, teamName: 'Seattle Mariners', sportId: 1, sportName: '', parentOrgId: 136 }
+  const TAC = { teamId: 529, teamName: 'Tacoma Rainiers', sportId: 11, sportName: '', parentOrgId: 136 }
+  const person = (id: number, fullName: string) => ({ person: { id, fullName }, position: { code: 'P' }, status: { code: 'A' } })
+
+  it('still reads a trade filed before a Check Assignments that could not find the client', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-12-05T15:00:00Z'))
+    const checkedAt = Date.parse('2026-12-03T15:00:00Z')
+    useScheduleStore.setState({
+      affiliates: [...affiliates, SEA],
+      assignmentsVerifiedAt: checkedAt,
+      // Player C wasn't on any roster his listed org searched: no time.
+      playerVerifiedAt: { 'Player A': checkedAt, 'Player B': checkedAt },
+    })
+    const trade = {
+      id: 1000, person: { id: 1003, fullName: 'Player C' }, fromTeam: { id: 115, name: 'Colorado Rockies' },
+      toTeam: { id: 136, name: 'Seattle Mariners' }, typeCode: 'TR', typeDesc: 'Trade',
+      date: '2026-12-02', effectiveDate: '2026-12-02', description: 'Colorado Rockies traded RF Player C to Seattle Mariners.',
+    }
+    const urls = stubFetch((url) => {
+      if (!url.includes('/transactions?')) return {}
+      const start = /startDate=([\d-]+)/.exec(url)![1]!
+      return { transactions: start <= '2026-12-02' ? [trade] : [] }
+    })
+    await useScheduleStore.getState().checkRosterMoves()
+
+    const txUrls = urls.filter((u) => u.includes('/transactions?'))
+    expect(txUrls).toHaveLength(2)
+    expect(txUrls.some((u) => u.includes('playerId=1003') && u.includes('startDate=2025-12-05'))).toBe(true)
+    expect(txUrls.some((u) => u.includes('startDate=2026-12-03') && !u.includes('1003'))).toBe(true)
+    expect(useScheduleStore.getState().playerTeamAssignments['Player C']?.teamId).toBe(136)
+  })
+
+  it('re-checks only the client whose team is outside his listed org, searching both orgs, and leaves the rest alone', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-15T15:00:00Z'))
+    const { recheckAssignmentsIfDue } = await import('../recheckAssignments')
+    const handSet: PlayerTeamAssignment = { ...WOR, source: 'manual' }
+    const traded: PlayerTeamAssignment = { teamId: 136, sportId: 1, teamName: 'Seattle Mariners' } // set by the moves check
+    useScheduleStore.setState({
+      affiliates: [...affiliates, SEA, TAC],
+      playerTeamAssignments: { 'Player A': ABQ, 'Player C': traded, 'Player B': handSet },
+      assignmentsVerifiedAt: Date.parse('2026-07-13T15:00:00Z'),
+      assignmentsRecheckedAt: null,
+      playerVerifiedAt: {},
+      autoAssignResult: { assigned: 3, confirmed: 3, estimated: 0, notFound: [] },
+    })
+    const urls = stubFetch((url) => (url.includes('/teams/529/roster') ? { roster: [person(1003, 'Player C')] } : { roster: [] }))
+
+    const changed = await recheckAssignmentsIfDue()
+
+    const s = useScheduleStore.getState()
+    expect(s.playerTeamAssignments['Player C']).toMatchObject({ teamId: 529, source: 'milb-roster' })
+    expect(s.playerTeamAssignments['Player A']).toBe(ABQ)
+    expect(s.playerTeamAssignments['Player B']).toBe(handSet)
+    expect(changed.sort()).toEqual([136, 529])
+    // Searched the new org's rosters, not just the listed one.
+    expect(urls.some((u) => u.includes('/teams/529/roster'))).toBe(true)
+    expect(s.playerVerifiedAt).toEqual({ 'Player C': Date.parse('2026-07-15T15:00:00Z') })
+    // A few-client run is not a full check.
+    expect(s.assignmentsVerifiedAt).toBe(Date.parse('2026-07-13T15:00:00Z'))
+    expect(s.assignmentsRecheckedAt).toBe(Date.parse('2026-07-15T15:00:00Z'))
+    expect(s.autoAssignResult).toMatchObject({ assigned: 3 })
+
+    // Same day again: nothing is due.
+    expect(await recheckAssignmentsIfDue()).toEqual([])
+  })
+
+  it('runs a full check once a week, leaving hand-set teams alone', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-15T15:00:00Z'))
+    const { recheckAssignmentsIfDue } = await import('../recheckAssignments')
+    const handSet: PlayerTeamAssignment = { ...WOR, source: 'manual' }
+    useScheduleStore.setState({
+      playerTeamAssignments: { 'Player A': ABQ, 'Player C': ABQ, 'Player B': handSet },
+      assignmentsVerifiedAt: Date.parse('2026-07-01T15:00:00Z'),
+      playerVerifiedAt: null,
+    })
+    stubFetch((url) => (url.includes('/teams/342/roster') ? { roster: [person(1001, 'Player A'), person(1003, 'Player C')] } : { roster: [] }))
+    await recheckAssignmentsIfDue()
+    const s = useScheduleStore.getState()
+    expect(s.assignmentsVerifiedAt).toBe(Date.parse('2026-07-15T15:00:00Z'))
+    expect(s.playerTeamAssignments['Player B']).toBe(handSet)
+    expect(Object.keys(s.playerVerifiedAt ?? {}).sort()).toEqual(['Player A', 'Player C'])
+  })
+
+  it('does not prune anyone while a much smaller roster is waiting to be confirmed', () => {
+    useRosterStore.setState({ players: [player('Player A', 1001, 'Colorado Rockies')], shrinkBlocked: { count: 1, previous: 3 } })
+    useScheduleStore.getState().pruneRemovedPlayers()
+    expect(Object.keys(useScheduleStore.getState().playerTeamAssignments).sort()).toEqual(['Player A', 'Player B', 'Player C'])
+    useRosterStore.setState({ shrinkBlocked: null })
+    useScheduleStore.getState().pruneRemovedPlayers()
+    expect(Object.keys(useScheduleStore.getState().playerTeamAssignments)).toEqual(['Player A'])
   })
 })

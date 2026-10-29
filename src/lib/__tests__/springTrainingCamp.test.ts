@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { generateSpringTrainingEvents } from '../tripEngine'
+import { generateSpringTrainingEvents, campOrgsFromAssignments } from '../tripEngine'
 import { SPRING_TRAINING_SITES, campEndDate } from '../../data/springTraining'
 import type { RosterPlayer } from '../../types/roster'
 import type { GameEvent } from '../../types/schedule'
@@ -107,5 +107,38 @@ describe('SPRING_TRAINING_SITES', () => {
     expect(SPRING_TRAINING_SITES[117]!.venueName).toBe('CACTI Park of the Palm Beaches')
     expect(SPRING_TRAINING_SITES[120]!.venueName).toBe('CACTI Park of the Palm Beaches')
     expect(SPRING_TRAINING_SITES[142]!.venueName).toBe('Lee Health Sports Complex')
+  })
+})
+
+describe('spring training camp follows the current team (2026-10-29)', () => {
+  // Invented ids: 115 = Rockies (Arizona camp), 136 = Mariners (Arizona),
+  // 146 = Marlins (Florida camp).
+  const affiliates = [
+    { teamId: 342, parentOrgId: 115 },
+    { teamId: 136, parentOrgId: 136 },
+    { teamId: 146, parentOrgId: 146 },
+  ]
+
+  it('puts a client traded or signed by a new club at the new club camp, and a released client at none', () => {
+    const traded = player('Traded Player', 'Colorado Rockies')
+    const stays = player('Stays Player', 'Colorado Rockies')
+    const released = player('Released Player', 'Colorado Rockies')
+    const campOrgs = campOrgsFromAssignments(
+      { 'Traded Player': { teamId: 146 }, 'Stays Player': { teamId: 342 } },
+      affiliates,
+      { 'Released Player': {} },
+    )
+    expect(campOrgs).toEqual({ 'Traded Player': 146, 'Stays Player': 115, 'Released Player': null })
+    const events = generateSpringTrainingEvents([traded, stays, released], '2027-02-15', '2027-02-20', undefined, undefined, campOrgs)
+    const siteOf = (name: string) => [...new Set(events.filter((e) => e.playerNames.includes(name)).map((e) => e.id.split('-')[1]))]
+    expect(siteOf('Traded Player')).toEqual(['146'])
+    expect(siteOf('Stays Player')).toEqual(['115'])
+    expect(siteOf('Released Player')).toEqual([])
+  })
+
+  it('falls back to the roster Org for a client with no team', () => {
+    const events = generateSpringTrainingEvents([player('No Team Yet', 'Colorado Rockies')], '2027-02-15', '2027-02-16', undefined, undefined, {})
+    expect(events.every((e) => e.id.startsWith('st-115-'))).toBe(true)
+    expect(events.length).toBeGreaterThan(0)
   })
 })

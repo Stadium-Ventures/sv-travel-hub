@@ -38,11 +38,11 @@ import {
   type OrgIndex,
 } from './mlbClient.js'
 import type { FetchJson, Finding, RosterClient } from './monitorTypes.js'
-import { isSkippedClient } from './rosterClients.js'
+import { isFreeAgentToWatch, isSkippedClient } from './rosterClients.js'
 
 export type CoverageIssue =
   | { kind: 'no-id-no-match'; key: string; client: string; org: string; orgKnown: boolean }
-  | { kind: 'org-mismatch'; key: string; client: string; rosterOrg: string; mlbOrg: string }
+  | { kind: 'org-mismatch'; key: string; client: string; rosterOrg: string; mlbOrg: string; freeAgent?: boolean }
   | { kind: 'unknown-id'; key: string; client: string }
   | { kind: 'unmapped-venue'; key: string; client: string; venueId: number; venue: string; place: string; games: number }
   | { kind: 'afl-no-id'; key: string; client: string; club: string; mlbId: number }
@@ -208,8 +208,11 @@ export async function runCoverageCheck(clients: RosterClient[], opts: CoverageOp
   const venueFallback = opts.venueFallback ?? defaultVenueFallback
   const season = now.getUTCFullYear()
   const pros = clients.filter((c) => c.level === 'Pro' && !isSkippedClient(c))
-  if (pros.length === 0) return []
-  const withId = pros.filter((c) => c.mlbId != null)
+  // Free agents are only looked up to see whether a new club signed them.
+  const freeAgents = clients.filter(isFreeAgentToWatch)
+  if (pros.length === 0 && freeAgents.length === 0) return []
+  const withId = [...pros.filter((c) => c.mlbId != null), ...freeAgents]
+  const freeAgentNames = new Set(freeAgents.map((c) => c.name))
   const noId = pros.filter((c) => c.mlbId == null)
 
   // Everything that doesn't need the club list starts at once.
@@ -258,7 +261,8 @@ export async function runCoverageCheck(clients: RosterClient[], opts: CoverageOp
       }
       const ct = p.currentTeam
       if (!ct || typeof ct.id !== 'number') continue // no current club: nothing to compare
-      teamOf.set(c.name, { id: ct.id, name: ct.name ?? '', sportId: 0 })
+      const freeAgent = freeAgentNames.has(c.name)
+      if (!freeAgent) teamOf.set(c.name, { id: ct.id, name: ct.name ?? '', sportId: 0 })
       // Minor leaguers (and fall leaguers) carry their org as parentOrgId; a
       // big leaguer's club IS the org. A winter-league club has neither.
       const mlbOrg = ct.parentOrgId ?? (orgs.ids.has(ct.id) ? ct.id : null)
@@ -270,6 +274,7 @@ export async function runCoverageCheck(clients: RosterClient[], opts: CoverageOp
           client: c.name,
           rosterOrg: c.org,
           mlbOrg: orgs.name(mlbOrg),
+          ...(freeAgent ? { freeAgent: true } : {}),
         })
       }
     }
@@ -384,9 +389,14 @@ export function coverageFindings(issues: CoverageIssue[]): Finding[] {
   if (mismatches.length + unknownIds.length > 0) {
     const n = mismatches.length + unknownIds.length
     const parts: string[] = []
-    if (mismatches.length > 0) {
-      parts.push(`MLB lists a different organization than our roster for ${joinList(mismatches.map((m) =>
+    const signed = mismatches.filter((m) => m.freeAgent)
+    const moved = mismatches.filter((m) => !m.freeAgent)
+    if (moved.length > 0) {
+      parts.push(`MLB lists a different organization than our roster for ${joinList(moved.map((m) =>
         `${m.client} (roster: ${m.rosterOrg || 'none'}, MLB: ${m.mlbOrg})`))}, so the hub may be showing the wrong team's games.`)
+    }
+    if (signed.length > 0) {
+      parts.push(`${joinList(signed.map((m) => `${m.client} (last with ${m.rosterOrg}, now ${m.mlbOrg})`))} ${plural(signed.length, 'is', 'are')} listed as a free agent on our roster, but MLB now has ${plural(signed.length, 'him', 'them')} with a new organization, so ${plural(signed.length, 'he probably signed', 'they probably signed')} there. Update ${plural(signed.length, 'his', 'their')} status and organization in sv-registry.`)
     }
     if (unknownIds.length > 0) {
       parts.push(`MLB has no player under the id on file for ${joinList(unknownIds.map((u) => u.client))}, so the hub can't find their team.`)
