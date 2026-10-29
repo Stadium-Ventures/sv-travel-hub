@@ -6,8 +6,9 @@ import type { RosterPlayer } from '../types/roster'
 // roster that looks broken must not drive it.
 
 /** A roster with more than this fraction fewer clients than the last good one
- *  is held back as an error. A real one-step cut that size is rare; a broken
- *  sheet view or a truncated registry build is not. */
+ *  is shown but not trusted to remove anyone until staff confirm it. A real
+ *  one-step cut that size is rare; a broken sheet view or a truncated
+ *  registry build is not. */
 export const MAX_ROSTER_DROP = 0.25
 
 export function isSharpDrop(previous: number | null, next: number): boolean {
@@ -17,7 +18,7 @@ export function isSharpDrop(previous: number | null, next: number): boolean {
 
 /** Plain-English explanation for the Roster tab and diagnostics. */
 export function sharpDropMessage(next: number, previous: number): string {
-  return `The roster came back with ${next} clients, down from ${previous} last time. That is more than a quarter fewer, which usually means a broken sheet or registry build, so the app kept the roster it had and did not remove anyone's saved teams, trip picks or visit counts. If clients really were removed, click "Load the smaller roster anyway" on the Roster tab. Otherwise tell Tom in #sv-automation.`
+  return `The roster came back with ${next} clients, down from ${previous} last time. That is more than a quarter fewer, which usually means a broken sheet or registry build. The app is showing the smaller roster but has kept everyone's saved teams, trip picks and visit counts. If clients really were removed, click "Confirm the smaller roster". Otherwise tell Tom in #sv-automation.`
 }
 
 /** Just enough of a player to recognise them under a new display name. */

@@ -63,3 +63,15 @@ export function isSkippedClient(c: RosterClient): boolean {
   if (SKIPPED_STATUSES.has(c.status.toLowerCase().trim())) return true
   return c.org.toLowerCase().trim() === 'retired'
 }
+
+/** A pro client listed as a free agent who still has an MLB id and an Org.
+ *  The coverage check skips him for games, but compares his organization
+ *  with MLB's: MLB keeps his old club as his current team until he signs,
+ *  so a different organization there means he signed with a new club (a
+ *  minor league free agent deal, or a Rule 5 pick). */
+export function isFreeAgentToWatch(c: RosterClient): boolean {
+  if (c.isCoach || c.level !== 'Pro' || c.mlbId == null) return false
+  if (c.status.toLowerCase().trim() !== 'free agent') return false
+  const org = c.org.toLowerCase().trim()
+  return org !== '' && org !== 'retired' && org !== 'free agent'
+}

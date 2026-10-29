@@ -145,17 +145,49 @@ describe('runCoverageCheck: organization (b)', () => {
     expect(await runCoverageCheck([client('Test Player One', { mlbId: 900001 })], { now: JULY, fetchJson })).toEqual([])
   })
 
-  it('never looks up injured, retired or free-agent clients, coaches, or amateurs', async () => {
+  it('never looks up injured or retired clients, free agents with no organization or id, coaches, or amateurs', async () => {
     const { fetchJson, calls } = fakeFetch([[/teams\?sportId=1&/, MLB_TEAMS]])
     const issues = await runCoverageCheck([
       client('Test Player One', { mlbId: 900001, status: 'Injured' }),
       client('Test Player Two', { mlbId: 900002, status: 'Retired', org: 'Retired' }),
-      client('Test Player Three', { mlbId: 900003, status: 'Free Agent' }),
+      client('Test Player Three', { mlbId: 900003, status: 'Free Agent', org: 'Free Agent' }),
+      client('Test Player Five', { status: 'Free Agent' }),
       client('Test Coach', { isCoach: true }),
       client('Test Player Four', { level: 'NCAA', org: 'Sample College' }),
     ], { now: JULY, fetchJson })
     expect(issues).toEqual([])
     expect(calls).toEqual([])
+  })
+})
+
+describe('runCoverageCheck: free agents', () => {
+  it('flags a free agent MLB now lists with a new organization, and not one still with his old club', async () => {
+    const { fetchJson, calls } = fakeFetch([
+      [/teams\?sportId=1&/, MLB_TEAMS],
+      [/\/people\?/, people([
+        // MLB keeps the old club as the current team until he signs.
+        { id: 900001, currentTeam: { id: 587, name: 'Tampa Tarpons', parentOrgId: 147 } },
+        { id: 900002, currentTeam: { id: 113, name: 'Cincinnati Reds' } },
+      ])],
+      [/\/schedule\?/, { dates: [] }],
+    ])
+    const issues = await runCoverageCheck([
+      client('Test Player One', { mlbId: 900001, status: 'Free Agent' }),
+      client('Test Player Two', { mlbId: 900002, status: 'Free Agent' }),
+    ], { now: JULY, fetchJson, venueFallback: noFallback })
+    expect(issues).toEqual([
+      { kind: 'org-mismatch', key: 'org:900002:113', client: 'Test Player Two', rosterOrg: 'New York Yankees', mlbOrg: 'Cincinnati Reds', freeAgent: true },
+    ])
+    // Free agents are never placed on a team's schedule by the check.
+    expect(calls.some((u) => u.includes('/schedule?'))).toBe(false)
+  })
+
+  it('says a free agent probably signed, in plain words', () => {
+    const [f] = coverageFindings([
+      { kind: 'org-mismatch', key: 'org:1:113', client: 'Test Player Two', rosterOrg: 'New York Yankees', mlbOrg: 'Cincinnati Reds', freeAgent: true },
+    ])
+    expect(f!.what).toBe('Test Player Two (last with New York Yankees, now Cincinnati Reds) is listed as a free agent on our roster, but MLB now has him with a new organization, so he probably signed there. Update his status and organization in sv-registry.')
+    expect(f!.what).not.toMatch(/[–—…]|\.\.\.|\p{Extended_Pictographic}/u)
   })
 })
 

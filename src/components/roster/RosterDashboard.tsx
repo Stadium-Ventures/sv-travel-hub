@@ -23,7 +23,6 @@ export default function RosterDashboard() {
   const parseWarnings = useRosterStore((s) => s.parseWarnings)
   const fetchRoster = useRosterStore((s) => s.fetchRoster)
   const needsSignIn = useRosterStore((s) => s.needsSignIn)
-  const shrinkBlocked = useRosterStore((s) => s.shrinkBlocked)
 
   const rawRosterMoves = useScheduleStore((s) => s.rosterMoves)
   // Dedupe per player: keep only the most-recent meaningful move. Cascading
@@ -255,7 +254,6 @@ export default function RosterDashboard() {
           >
             Retry
           </button>
-          {shrinkBlocked && <AcceptSmallerRosterButton />}
         </div>
       </div>
     )
@@ -267,7 +265,6 @@ export default function RosterDashboard() {
         <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 px-5 py-3 text-sm" role="alert">
           <p className="font-medium text-accent-red">The roster could not refresh. Showing the last roster that loaded.</p>
           <p className="mt-1 text-text-dim">{error}</p>
-          {shrinkBlocked && <div className="mt-2"><AcceptSmallerRosterButton /></div>}
         </div>
       )}
 
@@ -861,22 +858,5 @@ function VerifyResultsPanel({ log, springTraining: _springTraining }: { log: Ass
         <p className="text-[11px] text-text-dim">{confirmedCount} confirmed, {estimatedCount} unconfirmed. Click "Check Assignments" to refresh from the MLB Stats API.</p>
       )}
     </div>
-  )
-}
-
-/** Shown when a fetched roster was held back for being far smaller than the
- *  last good one. Accepting it prunes everyone it leaves out. */
-function AcceptSmallerRosterButton() {
-  const acceptSmallerRoster = useRosterStore((s) => s.acceptSmallerRoster)
-  const loading = useRosterStore((s) => s.loading)
-  return (
-    <button
-      onClick={() => { void acceptSmallerRoster() }}
-      disabled={loading}
-      title="Only if clients really were removed. Their saved teams, trip picks and visit counts are dropped."
-      className="rounded-lg border border-accent-red/40 px-4 py-2 text-sm font-medium text-accent-red hover:bg-accent-red/10 disabled:opacity-50"
-    >
-      Load the smaller roster anyway
-    </button>
   )
 }

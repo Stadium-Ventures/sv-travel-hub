@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { useVenueStore } from '../../store/venueStore'
-import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../../lib/tripEngine'
+import { generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, campOrgsFromAssignments } from '../../lib/tripEngine'
 import type { GameEvent } from '../../types/schedule'
 import type { Coordinates } from '../../types/roster'
 import ScheduleCalendar from './ScheduleCalendar'
@@ -14,6 +14,9 @@ export default function CalendarView() {
   const hsGamesReal = useScheduleStore((s) => s.hsGames)
   const customMlbAliases = useScheduleStore((s) => s.customMlbAliases)
   const customNcaaAliases = useScheduleStore((s) => s.customNcaaAliases)
+  const assignments = useScheduleStore((s) => s.playerTeamAssignments)
+  const affiliates = useScheduleStore((s) => s.affiliates)
+  const rosterReleases = useScheduleStore((s) => s.rosterReleases)
   const venueState = useVenueStore((s) => s.venues)
 
   const [sourceFilters, setSourceFilters] = useState<Record<string, boolean>>({
@@ -30,7 +33,7 @@ export default function CalendarView() {
     if (sourceFilters.st) {
       all.push(...proGames.filter((g) => g.awayTeam === 'Spring Training'))
       const y = new Date().getFullYear()
-      const stEvents = generateSpringTrainingEvents(players, `${y}-02-15`, `${y}-09-30`, customMlbAliases)
+      const stEvents = generateSpringTrainingEvents(players, `${y}-02-15`, `${y}-09-30`, customMlbAliases, undefined, campOrgsFromAssignments(assignments, affiliates, rosterReleases))
       const existingIds = new Set(all.map((g) => g.id))
       for (const e of stEvents) {
         if (!existingIds.has(e.id)) all.push(e)
@@ -66,7 +69,7 @@ export default function CalendarView() {
 
     all.sort((a, b) => a.date.localeCompare(b.date))
     return all
-  }, [proGames, ncaaGames, hsGamesReal, players, venueState, sourceFilters, customMlbAliases, customNcaaAliases])
+  }, [proGames, ncaaGames, hsGamesReal, players, venueState, sourceFilters, customMlbAliases, customNcaaAliases, assignments, affiliates, rosterReleases])
 
   const hasAnyGames = proGames.length > 0 || ncaaGames.length > 0 || players.some((p) => p.level === 'NCAA' || p.level === 'HS')
 
